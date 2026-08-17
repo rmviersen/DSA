@@ -303,6 +303,32 @@ create table draft_prospect_ratings_snapshots ( like player_ratings_snapshots in
 
 ---
 
+## Rating weights — versioned, not hardcoded (added 2026-08-17)
+
+Every coefficient the rating engine uses (Contact/Power/Eye/etc.) lives in a **database table, not application code** — so weights can be changed without touching a single line of the engine, and every computed row records which weight set produced it.
+
+```sql
+create table rating_weights (
+  id              bigint generated always as identity primary key,
+  label           text not null,
+  is_active       boolean not null default false,   -- exactly one row is "live" at a time (enforced by a partial unique index)
+  contact numeric not null, power numeric not null, eye numeric not null, gap numeric not null,
+  avoid_ks numeric not null, speed numeric not null, fielding numeric not null,
+  stuff numeric not null, movement numeric not null, control numeric not null,
+  stamina numeric not null, pbabip numeric not null, qp_multiplier numeric not null,
+  notes           text,
+  created_at      timestamptz not null default now()
+);
+```
+
+Seeded with one row — `"Power BI parity (baseline)"` — the exact coefficients pulled from `TBL.pbix` (Contact .375, Power .325, Eye .15, Gap .05, AvoidKs .05, Speed .1, Fielding .25, Stuff .35, Movement .4, Control .30, Stamina .10, PBABIP .1, QP×1.15), flagged `is_active = true`, and explicitly noted as a *starting point*, not an assumed-correct methodology.
+
+`player_computed`, `team_computed`, and `draft_computed` each got a new `weights_id` column referencing this table. This is what makes methodology testing possible:
+
+- **Change the live weights any time** — add a new `rating_weights` row, flip `is_active`, re-run the computation step. No code deploy needed.
+- **Historical computed rows stay interpretable** — a `player_computed` row from three weeks ago still points at whichever weight set was active then, even after you've since changed the live weights.
+- **A/B testing without new data pulls** — because raw `player_ratings_snapshots` are stored separately from computed output, you can re-run the computation against any past raw snapshot under *any* weight set (including ones that weren't active at the time) to compare "what would rankings have looked like under a batter-heavy weighting" without touching StatsPlus at all.
+
 ## Computed — rating engine output
 
 *(Unchanged from Rev. 1 — this table's shape is dictated by our own formulas, not the StatsPlus source, so it isn't affected by the field-completeness pass.)*
