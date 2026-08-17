@@ -6,7 +6,8 @@
   "scripts": {
     "refresh": "tsx scripts/refresh.ts",
     "refresh:public-only": "tsx scripts/refresh.ts --skip-ratings",
-    "compute-ratings": "tsx scripts/compute-ratings.ts"
+    "compute-ratings": "tsx scripts/compute-ratings.ts",
+    "compute-team-ratings": "tsx scripts/compute-team-ratings.ts"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.45.4",
