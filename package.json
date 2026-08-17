@@ -5,7 +5,8 @@
   "type": "module",
   "scripts": {
     "refresh": "tsx scripts/refresh.ts",
-    "refresh:public-only": "tsx scripts/refresh.ts --skip-ratings"
+    "refresh:public-only": "tsx scripts/refresh.ts --skip-ratings",
+    "compute-ratings": "tsx scripts/compute-ratings.ts"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.45.4",

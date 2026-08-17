@@ -249,7 +249,7 @@ export function mapTeamPitching(r: RawRow, refreshRunId: number, year: number, c
 
 export function mapPlayerRatings(r: RawRow, refreshRunId: number, capturedAt: string) {
   return {
-    refresh_run_id: refreshRunId, player_id: int(r["ID"]),
+    refresh_run_id: refreshRunId, player_id: int(r["ID"]), pos: str(r["Pos"]),
     league: int(r["League"]), team: int(r["Team"]), org: int(r["Org"]), lg_lvl: int(r["LgLvl"]),
     cntct: int(r["Cntct"]), gap: int(r["Gap"]), pow: int(r["Pow"]), eye: int(r["Eye"]), ks: int(r["Ks"]), babip: int(r["BABIP"]),
     cntct_r: int(r["Cntct_R"]), gap_r: int(r["Gap_R"]), pow_r: int(r["Pow_R"]), eye_r: int(r["Eye_R"]), ks_r: int(r["Ks_R"]), babip_r: int(r["BABIP_R"]),
