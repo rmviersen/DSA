@@ -1,6 +1,8 @@
 # Database Schema Design — Proposal (Rev. 2)
 
-**Status:** Draft for review. Nothing has been applied to any database yet.
+**Status:** Applied to Supabase project `DSA` (`onclzyjhfkgonemcpcmo`) on 2026-08-17, as 5 migrations (`0001_meta_and_reference` through `0005_future_game_logs_placeholder`). 19 tables live, 0 rows (no ingestion script yet).
+
+**⚠️ Security note (flagged by Supabase's own advisor, not yet resolved):** Row Level Security is disabled on all 19 tables — currently wide open to the project's anon/authenticated API keys. Fine for now since nothing external queries this yet, but real RLS policies (read-only public access to computed/reporting tables, no client write access) need to be designed and applied before this is ever wired up to a public site or app.
 
 **What changed from Rev. 1:** every raw-data table below is now built directly from a real, complete sample pulled from the actual StatsPlus endpoint — column names and types match what StatsPlus actually returns, not our old Power BI naming. Every field the endpoint returns is included, not just the ones we knew we'd need — the idea being any of these could turn into a report later without a schema change. Two endpoints (`playerpitchstatsv2`, `playerfieldstatsv2`) and the full width of `contract`/`contractextension` were sampled for the first time this pass.
 
@@ -392,5 +394,6 @@ create table player_game_pitching_lines ( id bigint generated always as identity
 
 ## Open items to resolve before implementing
 
-1. **Supabase project "DSA"** — you're creating this now; need the project ref before any migration can run.
+1. ~~**Supabase project "DSA"**~~ — created (`onclzyjhfkgonemcpcmo`), applying schema now.
 2. **Draft prospect ratings source** — still depends on formalizing the "Draft Avail" workflow (deferred phase).
+3. **Team payroll is not simply `SUM(contracts.salary0)` — flagged 2026-08-17, not solved yet.** Retained salary on trades means the `team_id` on a contract row doesn't necessarily reflect who's actually paying. A correct team-financials view needs to account for salary retention separately (StatsPlus's contract data doesn't appear to expose a "retained by" field in what we've sampled — needs investigation before building any real team-financials report). Deliberately deferred; noting here so it isn't silently forgotten when that report gets built.
