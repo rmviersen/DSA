@@ -116,7 +116,7 @@ async function main() {
     pitching: c.pitching, pitching_p: c.pitching_p, qp: c.qp, qpp: c.qpp,
     c_rating: c.c_rating, inf_rating: c.inf_rating, of_rating: c.of_rating,
     overall: c.overall, potential: c.potential, prospect_potential: c.prospect_potential,
-    ph: c.ph,
+    ph: c.ph, role: c.role, sp_rp: c.sp_rp, tbl_pos: c.tbl_pos, platoon: c.platoon,
     rank: rankByPlayer.get(c.player_id) ?? null,
     potential_rank: potentialRankByPlayer.get(c.player_id) ?? null,
     prospect_rank: prospectRankByPlayer.get(c.player_id) ?? null,
