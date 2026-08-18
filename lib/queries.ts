@@ -178,12 +178,29 @@ export interface SeasonStint {
   ip: number | null; er: number | null; w: number | null; l: number | null; pk: number | null; pbb: number | null;
 }
 
+// Season totals across every level a player played at, for the headline
+// advanced-stat columns. NOTE: OPS+ and FIP- are NOT included here — both
+// need league-average-by-level-and-year normalization that hasn't been
+// built yet (same gap noted in HANDOFF.md for team power rankings). What's
+// here (WAR, K%, HR/ERA) is everything currently derivable directly from
+// the raw StatsPlus counting stats.
+export interface SeasonTotals {
+  war: number | null;
+  hr: number | null;      // batters
+  k_pct: number | null;   // k / pa (batters) or k / bf (pitchers)
+  era: number | null;     // pitchers only
+}
+
 export interface ProspectRow extends PlayerRow {
   level: number | null;
   eta: number | null;
   seasonYear: number | null;
   seasonStints: SeasonStint[];
+  seasonTotals: SeasonTotals;
   ph: "H" | "P" | null;
+  orgName: string | null;
+  orgNickname: string | null;
+  teamAbbr: string | null;
 }
 
 export async function getTopProspectsDetailed(orgId?: number): Promise<ProspectRow[]> {
@@ -192,10 +209,28 @@ export async function getTopProspectsDetailed(orgId?: number): Promise<ProspectR
   const ids = base.map((r) => r.player_id);
   const refreshRunId = await latestRefreshRunId();
 
-  const playersExtra = await fetchAll<{ id: number; level: number | null }>((from, to) =>
-    supabase.from("players").select("id,level").in("id", ids).range(from, to) as never
+  const playersExtra = await fetchAll<{ id: number; level: number | null; team_id: number | null; organization_id: number | null }>((from, to) =>
+    supabase.from("players").select("id,level,team_id,organization_id").in("id", ids).range(from, to) as never
   );
   const levelById = new Map(playersExtra.map((p) => [p.id, p.level]));
+  const teamIdById = new Map(playersExtra.map((p) => [p.id, p.team_id]));
+  const orgIdById = new Map(playersExtra.map((p) => [p.id, p.organization_id]));
+
+  const orgTeamIds = [...new Set(playersExtra.map((p) => p.organization_id).filter((x): x is number => x !== null))];
+  const orgTeams = orgTeamIds.length
+    ? await fetchAll<{ id: number; name: string; nickname: string }>((from, to) =>
+        supabase.from("teams").select("id,name,nickname").in("id", orgTeamIds).range(from, to) as never
+      )
+    : [];
+  const orgTeamById = new Map(orgTeams.map((t) => [t.id, t]));
+
+  // team_id -> abbreviation. teams itself has no abbr column; team_batting_stats_snapshots
+  // does (StatsPlus's own "OKC"/"NY"-style codes), so borrow it from there.
+  const abbrRows = await fetchAll<{ team_id: number; abbr: string }>((from, to) =>
+    supabase.from("team_batting_stats_snapshots").select("team_id,abbr").eq("refresh_run_id", refreshRunId).range(from, to) as never
+  );
+  const abbrByTeamId = new Map<number, string>();
+  abbrRows.forEach((r) => { if (!abbrByTeamId.has(r.team_id)) abbrByTeamId.set(r.team_id, r.abbr); });
 
   const computedExtra = await fetchAll<{ player_id: number; eta: number | null; ph: "H" | "P" }>((from, to) =>
     supabase.from("player_computed").select("player_id,eta,ph").eq("refresh_run_id", refreshRunId).in("player_id", ids).range(from, to) as never
@@ -211,21 +246,21 @@ export async function getTopProspectsDetailed(orgId?: number): Promise<ProspectR
   // A player can have one row PER LEVEL they played at this season (promotions/
   // demotions mid-year each get their own stint row) — collect all of them,
   // not just one, per player_id, split_id=1 (overall, not vL/vR).
-  const battingByPlayer = new Map<number, { level_id: number; ab: number; h: number; hr: number; rbi: number; bb: number; k: number }[]>();
-  const pitchingByPlayer = new Map<number, { level_id: number; ip: number; er: number; w: number; l: number; k: number; bb: number }[]>();
+  const battingByPlayer = new Map<number, { level_id: number; ab: number; h: number; hr: number; rbi: number; bb: number; k: number; pa: number; war: number | null }[]>();
+  const pitchingByPlayer = new Map<number, { level_id: number; ip: number; er: number; w: number; l: number; k: number; bb: number; bf: number; war: number | null }[]>();
   if (seasonYear !== null) {
     for (let i = 0; i < ids.length; i += 500) {
       const chunk = ids.slice(i, i + 500);
       const { data: bat } = await supabase.from("player_batting_stats_snapshots")
-        .select("player_id,level_id,ab,h,hr,rbi,bb,k")
+        .select("player_id,level_id,ab,h,hr,rbi,bb,k,pa,war")
         .eq("refresh_run_id", refreshRunId).eq("year", seasonYear).eq("split_id", 1).in("player_id", chunk);
-      (bat as never as ({ player_id: number } & { level_id: number; ab: number; h: number; hr: number; rbi: number; bb: number; k: number })[] | null)
+      (bat as never as ({ player_id: number } & { level_id: number; ab: number; h: number; hr: number; rbi: number; bb: number; k: number; pa: number; war: number | null })[] | null)
         ?.forEach((r) => { const arr = battingByPlayer.get(r.player_id) ?? []; arr.push(r); battingByPlayer.set(r.player_id, arr); });
 
       const { data: pit } = await supabase.from("player_pitching_stats_snapshots")
-        .select("player_id,level_id,ip,er,w,l,k,bb")
+        .select("player_id,level_id,ip,er,w,l,k,bb,bf,war")
         .eq("refresh_run_id", refreshRunId).eq("year", seasonYear).eq("split_id", 1).in("player_id", chunk);
-      (pit as never as ({ player_id: number } & { level_id: number; ip: number; er: number; w: number; l: number; k: number; bb: number })[] | null)
+      (pit as never as ({ player_id: number } & { level_id: number; ip: number; er: number; w: number; l: number; k: number; bb: number; bf: number; war: number | null })[] | null)
         ?.forEach((r) => { const arr = pitchingByPlayer.get(r.player_id) ?? []; arr.push(r); pitchingByPlayer.set(r.player_id, arr); });
     }
   }
@@ -247,6 +282,33 @@ export async function getTopProspectsDetailed(orgId?: number): Promise<ProspectR
         ip: p?.ip ?? null, er: p?.er ?? null, w: p?.w ?? null, l: p?.l ?? null, pk: p?.k ?? null, pbb: p?.bb ?? null,
       };
     });
+
+    // Season totals, summed across every level.
+    const sum = (arr: number[]) => arr.reduce((a, b) => a + b, 0);
+    let seasonTotals: SeasonTotals = { war: null, hr: null, k_pct: null, era: null };
+    if (ph === "H" && bat.length > 0) {
+      const totalPa = sum(bat.map((b) => b.pa));
+      seasonTotals = {
+        war: sum(bat.map((b) => b.war ?? 0)),
+        hr: sum(bat.map((b) => b.hr)),
+        k_pct: totalPa > 0 ? (sum(bat.map((b) => b.k)) / totalPa) * 100 : null,
+        era: null,
+      };
+    } else if (ph === "P" && pit.length > 0) {
+      const totalBf = sum(pit.map((p) => p.bf));
+      const totalIp = sum(pit.map((p) => p.ip));
+      seasonTotals = {
+        war: sum(pit.map((p) => p.war ?? 0)),
+        hr: null,
+        k_pct: totalBf > 0 ? (sum(pit.map((p) => p.k)) / totalBf) * 100 : null,
+        era: totalIp > 0 ? (sum(pit.map((p) => p.er)) * 9) / totalIp : null,
+      };
+    }
+
+    const orgId2 = orgIdById.get(r.player_id) ?? null;
+    const orgTeam = orgId2 !== null ? orgTeamById.get(orgId2) : undefined;
+    const teamId = teamIdById.get(r.player_id) ?? null;
+
     return {
       ...r,
       level: levelById.get(r.player_id) ?? null,
@@ -254,6 +316,10 @@ export async function getTopProspectsDetailed(orgId?: number): Promise<ProspectR
       seasonYear,
       ph,
       seasonStints,
+      seasonTotals,
+      orgName: orgTeam?.name ?? null,
+      orgNickname: orgTeam?.nickname ?? null,
+      teamAbbr: teamId !== null ? (abbrByTeamId.get(teamId) ?? null) : null,
     };
   });
 }

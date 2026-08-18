@@ -12,7 +12,7 @@ export default async function ProspectsPage({ searchParams }: { searchParams: { 
     <div>
       <h1>Top Prospects {orgId ? "" : "(league-wide, top 100 by Prospect Potential)"}</h1>
       <TeamFilter teams={teams} selectedOrgId={orgId} action="/prospects" />
-      <ProspectTable rows={rows} showTeam={!orgId} />
+      <ProspectTable rows={rows} />
     </div>
   );
 }
