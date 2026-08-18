@@ -138,6 +138,19 @@ export function getTopProspects(orgId?: number) {
   return fetchComputedPlayers({ orgId, prospectsOnly: true, limit: 100 });
 }
 
+// Public-facing display rule (2026-08-18): never show Overall/Potential/
+// Prospect Potential at full precision anywhere a reader outside this org
+// could see it (Slack reports, eventually the public site) — that precision
+// is effectively the scout ratings underneath, which we don't want other
+// GMs reverse-engineering. The underlying grades (Cntct/Pow/Stf/etc.) stay
+// visible for now but are planned for removal later; this only covers the
+// three composite grades. Internal/db values stay full-precision — this is
+// a display-time rounding, not a change to what's computed or stored, so
+// ranking still uses the precise numbers underneath.
+export function roundGrade(n: number | null): number | null {
+  return n === null || n === undefined ? null : Math.round(n / 5) * 5;
+}
+
 // Confirmed 2026-08-18 by cross-referencing team pages' displayed level labels
 // (e.g. "BELLEVILLE BULLS (AAA)", "COBOURG COUGARS (U28, AA)") against the
 // players.level codes on their rosters.

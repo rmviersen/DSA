@@ -1,6 +1,11 @@
 import type { PlayerRow } from "../../lib/queries";
+import { roundGrade } from "../../lib/queries";
 
-const fmt = (n: number | null) => (n === null || n === undefined ? "—" : Number(n).toFixed(1));
+// Overall/Potential/Prospect Potential are rounded to the nearest 5 for
+// display (see roundGrade in lib/queries.ts) — anything shown here can end
+// up in a Slack report other GMs see, and full precision is effectively the
+// scout ratings underneath.
+const fmt = (n: number | null) => (n === null || n === undefined ? "—" : roundGrade(n));
 const fmtInt = (n: number | null) => (n === null || n === undefined ? "—" : Math.round(n));
 
 export function PlayerTable({ rows, showTeam, showProspectCols }: { rows: PlayerRow[]; showTeam: boolean; showProspectCols: boolean }) {

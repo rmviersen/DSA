@@ -1,5 +1,5 @@
 import type { ProspectRow } from "../../lib/queries";
-import { levelLabel, teamLogoUrl } from "../../lib/queries";
+import { levelLabel, teamLogoUrl, roundGrade } from "../../lib/queries";
 
 function seasonStintText(r: ProspectRow) {
   if (r.seasonStints.length === 0) return "No stats this season";
@@ -14,7 +14,10 @@ function seasonStintText(r: ProspectRow) {
   });
 }
 
-const fmt = (n: number | null) => (n === null || n === undefined ? "—" : Number(n).toFixed(1));
+// Overall/Potential/Prospect Potential rounded to nearest 5 for display —
+// see roundGrade in lib/queries.ts. This page in particular is the one
+// headed for Slack reports other GMs will see.
+const fmt = (n: number | null) => (n === null || n === undefined ? "—" : roundGrade(n));
 const fmtInt = (n: number | null) => (n === null || n === undefined ? "—" : Math.round(n));
 const avg = (h: number | null, ab: number | null) => (h === null || ab === null || ab === 0 ? "—" : (h / ab).toFixed(3).replace(/^0/, ""));
 const era = (er: number | null, ip: number | null) => (er === null || ip === null || ip === 0 ? "—" : ((er * 9) / ip).toFixed(2));
