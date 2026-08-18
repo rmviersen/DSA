@@ -32,9 +32,11 @@ To avoid two things editing the same code out from under each other:
 
 Project: `DSA`, ref `onclzyjhfkgonemcpcmo`, URL `https://onclzyjhfkgonemcpcmo.supabase.co`.
 
-**⚠️ Critical, unresolved security gap: Row Level Security is disabled on every table.** This was flagged when the schema was first applied and has not been fixed. It means the anon/public API key currently has full read **and write** access to everything. This is fine for local development, but:
-- **Do not deploy this publicly (Vercel or otherwise) until RLS policies exist.** At minimum, every table needs a read-only policy for anon before any client-side Supabase calls are safe to ship.
-- The existing front-end pages sidestep this entirely by using the **service-role key server-side only** (Next.js Server Components, never shipped to the browser — see `lib/supabase-client.ts` and `lib/queries.ts`). If you keep that pattern, RLS being off doesn't matter for what's already built. If you switch to client-side Supabase calls (e.g. for interactivity, live updates), designing real RLS policies becomes a blocker first.
+**✅ RLS is now ON, default-deny, as of 2026-08-19.** Every table has Row Level Security enabled with **zero policies** — meaning only the `service_role` key can read or write anything; the anon/public key gets nothing. This is intentional and expected to stay this way, not a temporary state to "finish" with policies later:
+
+- All existing code (ingestion scripts, front-end server components) uses `service_role` server-side only and is completely unaffected — verified working after enabling.
+- **Why default-deny is the permanent design, not just the current one:** Overall/Potential rounding (hiding exact scout ratings from other GMs) happens in the React display layer, not the database. If anon ever got read access to the raw tables, someone could skip the UI and query Supabase's REST API directly for full-precision values. Routing every read through the Next.js server keeps that rounding meaningful.
+- **Practical implication for you:** if you ever add client-side (browser) Supabase calls, they will get zero rows back — not an error, just empty results — until/unless a real anon policy is deliberately added for that specific case. If you hit unexplained empty data and you're using the anon key from the browser, this is almost certainly why. Default to querying through Next.js Server Components (the existing pattern) instead.
 
 You'll need a `.env` file (copy `.env.example`) with `SUPABASE_URL` and `SUPABASE_SERVICE_ROLE_KEY` — get the key from whoever has the Supabase dashboard, or ask the backend session to fetch it isn't retrievable via MCP tools for security reasons, so this has to come from a human with dashboard access.
 
