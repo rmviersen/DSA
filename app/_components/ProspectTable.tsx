@@ -1,6 +1,19 @@
 import type { ProspectRow } from "../../lib/queries";
 import { levelLabel, teamLogoUrl } from "../../lib/queries";
 
+function seasonStintText(r: ProspectRow) {
+  if (r.seasonStints.length === 0) return "No stats this season";
+  return r.seasonStints.map((s, i) => {
+    const label = levelLabel(s.level);
+    if (r.ph === "P") {
+      if (s.ip === null) return null;
+      return <span key={i}>{i > 0 && "; "}<strong>{label}:</strong> IP {s.ip} · {s.w}-{s.l} · ERA {era(s.er, s.ip)} · K {s.pk} · BB {s.pbb}</span>;
+    }
+    if (s.ab === null) return null;
+    return <span key={i}>{i > 0 && "; "}<strong>{label}:</strong> AB {s.ab} · H {s.h} · HR {s.hr} · RBI {s.rbi} · AVG {avg(s.h, s.ab)}</span>;
+  });
+}
+
 const fmt = (n: number | null) => (n === null || n === undefined ? "—" : Number(n).toFixed(1));
 const fmtInt = (n: number | null) => (n === null || n === undefined ? "—" : Math.round(n));
 const avg = (h: number | null, ab: number | null) => (h === null || ab === null || ab === 0 ? "—" : (h / ab).toFixed(3).replace(/^0/, ""));
@@ -63,15 +76,7 @@ export function ProspectTable({ rows, showTeam }: { rows: ProspectRow[]; showTea
               <td>{fmt(r.potential)}</td>
               <td>{fmt(r.prospect_potential)}</td>
               <td>{r.prospect_rank ?? "—"}</td>
-              <td>
-                {r.ph === "H" && r.ab !== null && (
-                  <>AB {r.ab} · H {r.h} · HR {r.hr} · RBI {r.rbi} · AVG {avg(r.h, r.ab)}</>
-                )}
-                {r.ph === "P" && r.ip !== null && (
-                  <>IP {r.ip} · {r.w}-{r.l} · ERA {era(r.er, r.ip)} · K {r.pk} · BB {r.pbb}</>
-                )}
-                {((r.ph === "H" && r.ab === null) || (r.ph === "P" && r.ip === null)) && "No stats this season"}
-              </td>
+              <td style={{ textAlign: "left" }}>{seasonStintText(r)}</td>
             </tr>
           );
         })}

@@ -40,6 +40,13 @@ async function insertBatched(supabase: ReturnType<typeof makeSupabaseClient>, ta
   }
 }
 
+// Fixed, league-wide set of level league_ids — confirmed empirically 2026-08-18
+// by cross-referencing players.league_id against players.level for every org:
+// 200=MLB, 201=AAA, 202=AA, 203/204=A+ (two parallel A+ leagues), 205=A-,
+// 206=Rookie. Omitting lid entirely silently scopes stats calls to MLB only —
+// there is no "all levels" shortcut, so every level has to be pulled separately.
+const LEAGUE_IDS = [200, 201, 202, 203, 204, 205, 206];
+
 async function main() {
   const skipRatings = process.argv.includes("--skip-ratings");
   // Narrow default on purpose — a full 2001-present backfill is a lot of sequential
@@ -82,11 +89,18 @@ async function main() {
     await upsertBatched(supabase, "draft_picks", (await sp.draft()).map(map.mapDraftPick), "player_id");
 
     for (const year of years) {
-      console.log(`Pulling player batting/pitching/fielding stats for ${year}...`);
-      await insertBatched(supabase, "player_batting_stats_snapshots", (await sp.playerBatting(year)).map((r) => map.mapPlayerBatting(r, refreshRunId, capturedAt)));
-      await insertBatched(supabase, "player_pitching_stats_snapshots", (await sp.playerPitching(year)).map((r) => map.mapPlayerPitching(r, refreshRunId, capturedAt)));
-      await insertBatched(supabase, "player_fielding_stats_snapshots", (await sp.playerFielding(year)).map((r) => map.mapPlayerFielding(r, refreshRunId, capturedAt)));
+      for (const lid of LEAGUE_IDS) {
+        console.log(`Pulling player batting/pitching/fielding stats for ${year}, league ${lid}...`);
+        await insertBatched(supabase, "player_batting_stats_snapshots", (await sp.playerBatting(year, lid)).map((r) => map.mapPlayerBatting(r, refreshRunId, capturedAt)));
+        await insertBatched(supabase, "player_pitching_stats_snapshots", (await sp.playerPitching(year, lid)).map((r) => map.mapPlayerPitching(r, refreshRunId, capturedAt)));
+        await insertBatched(supabase, "player_fielding_stats_snapshots", (await sp.playerFielding(year, lid)).map((r) => map.mapPlayerFielding(r, refreshRunId, capturedAt)));
+      }
 
+      // Unlike the player endpoints, teambatstats/teampitchstats ignore `lid`
+      // entirely (confirmed 2026-08-18 — identical response with or without
+      // it) and only ever return MLB-level teams. One call per year covers it;
+      // looping over LEAGUE_IDS here just re-inserts the same rows and
+      // violates the unique constraint on the second pass.
       console.log(`Pulling team batting/pitching stats for ${year}...`);
       await insertBatched(supabase, "team_batting_stats_snapshots", (await sp.teamBatting(year)).map((r) => map.mapTeamBatting(r, refreshRunId, year, capturedAt)));
       await insertBatched(supabase, "team_pitching_stats_snapshots", (await sp.teamPitching(year)).map((r) => map.mapTeamPitching(r, refreshRunId, year, capturedAt)));

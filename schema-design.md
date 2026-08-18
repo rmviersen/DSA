@@ -1,3 +1,5 @@
+> **2026-08-18: this doc explains the reasoning behind the schema, but has drifted from exact current state** — several migrations landed after the last edit here (rating_weights' tunable thresholds, the ratings feed's `pos` field, `draft_class_imports`/`draft_class_pool_members`, `player_computed.eta`). For the **exact current schema**, use [`lib/database.types.ts`](lib/database.types.ts) (generated from the live database — see [HANDOFF.md](HANDOFF.md)) rather than trusting every table definition below to be current.
+
 # Database Schema Design — Proposal (Rev. 2)
 
 **Status:** Applied to Supabase project `DSA` (`onclzyjhfkgonemcpcmo`) on 2026-08-17, as 5 migrations (`0001_meta_and_reference` through `0005_future_game_logs_placeholder`). 19 tables live, 0 rows (no ingestion script yet).

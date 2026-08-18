@@ -48,9 +48,14 @@ async function fetchText(url: string, headers: Record<string, string> = {}): Pro
 
 function parseCsv(text: string): RawRow[] {
   const trimmed = text.trim();
-  if (!trimmed || trimmed === "Unknown API") {
-    throw new Error(`StatsPlus returned no data (endpoint may not exist or auth failed): ${trimmed.slice(0, 200)}`);
+  // "Unknown API" means the endpoint/params are wrong — a real error. A truly
+  // blank response, on the other hand, is a legitimate zero-rows result (e.g.
+  // a level/year combination where that league didn't exist yet, or had no
+  // games logged) — confirmed 2026-08-18 via playerbatstatsv2?year=2029&lid=201.
+  if (trimmed === "Unknown API") {
+    throw new Error(`StatsPlus reports this endpoint/params as unknown: ${trimmed.slice(0, 200)}`);
   }
+  if (!trimmed) return [];
   return parse(trimmed, { columns: true, skip_empty_lines: true, relax_column_count: true });
 }
 
@@ -92,7 +97,7 @@ async function fetchRatingsCsv(cfg: StatsPlusConfig, opts: { pollIntervalMs?: nu
   const pollUrl = match[0].replace(/^https:\/\/[^/]+/, new URL(cfg.baseUrl).origin);
 
   const pollIntervalMs = opts.pollIntervalMs ?? 15_000;
-  const timeoutMs = opts.timeoutMs ?? 5 * 60_000;
+  const timeoutMs = opts.timeoutMs ?? 10 * 60_000;
   const deadline = Date.now() + timeoutMs;
 
   while (Date.now() < deadline) {
@@ -112,11 +117,14 @@ export function makeStatsPlusClient(cfg: StatsPlusConfig) {
     contracts: () => fetchPublicCsv(cfg, "contract"),
     contractExtensions: () => fetchPublicCsv(cfg, "contractextension"),
     draft: (lid?: string) => fetchPublicCsv(cfg, "draftv2", lid ? { lid } : {}),
-    playerBatting: (year?: number) => fetchPublicCsv(cfg, "playerbatstatsv2", year ? { year } : {}),
-    playerPitching: (year?: number) => fetchPublicCsv(cfg, "playerpitchstatsv2", year ? { year } : {}),
-    playerFielding: (year?: number) => fetchPublicCsv(cfg, "playerfieldstatsv2", year ? { year } : {}),
-    teamBatting: (year?: number) => fetchPublicCsv(cfg, "teambatstats", year ? { year } : {}),
-    teamPitching: (year?: number) => fetchPublicCsv(cfg, "teampitchstats", year ? { year } : {}),
+    // lid matters a lot here: omitting it silently scopes results to the MLB
+    // league only (lid=200) — there is no "give me every level" shortcut, so
+    // callers must loop over LEAGUE_IDS themselves to get minor-league data.
+    playerBatting: (year?: number, lid?: number) => fetchPublicCsv(cfg, "playerbatstatsv2", { ...(year ? { year } : {}), ...(lid ? { lid } : {}) }),
+    playerPitching: (year?: number, lid?: number) => fetchPublicCsv(cfg, "playerpitchstatsv2", { ...(year ? { year } : {}), ...(lid ? { lid } : {}) }),
+    playerFielding: (year?: number, lid?: number) => fetchPublicCsv(cfg, "playerfieldstatsv2", { ...(year ? { year } : {}), ...(lid ? { lid } : {}) }),
+    teamBatting: (year?: number, lid?: number) => fetchPublicCsv(cfg, "teambatstats", { ...(year ? { year } : {}), ...(lid ? { lid } : {}) }),
+    teamPitching: (year?: number, lid?: number) => fetchPublicCsv(cfg, "teampitchstats", { ...(year ? { year } : {}), ...(lid ? { lid } : {}) }),
     gameHistory: () => fetchAuthedCsv(cfg, "gamehistory"),
     ratings: (opts?: { pollIntervalMs?: number; timeoutMs?: number }) => fetchRatingsCsv(cfg, opts),
     hasSession: () => Boolean(cfg.sessionId && cfg.csrfToken),

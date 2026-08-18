@@ -159,14 +159,17 @@ export function teamLogoUrl(name: string | null, nickname: string | null): strin
   return `https://atl-02.statsplus.net/thebigleague/reports/news/html/images/team_logos/${slug}.png`;
 }
 
+export interface SeasonStint {
+  level: number | null;
+  ab: number | null; h: number | null; hr: number | null; rbi: number | null; bb: number | null; k: number | null;
+  ip: number | null; er: number | null; w: number | null; l: number | null; pk: number | null; pbb: number | null;
+}
+
 export interface ProspectRow extends PlayerRow {
   level: number | null;
   eta: number | null;
   seasonYear: number | null;
-  // batting (present when ph === 'H')
-  ab: number | null; h: number | null; hr: number | null; rbi: number | null; bb: number | null; k: number | null;
-  // pitching (present when ph === 'P')
-  ip: number | null; er: number | null; w: number | null; l: number | null; pk: number | null; pbb: number | null;
+  seasonStints: SeasonStint[];
   ph: "H" | "P" | null;
 }
 
@@ -187,40 +190,57 @@ export async function getTopProspectsDetailed(orgId?: number): Promise<ProspectR
   const etaById = new Map(computedExtra.map((c) => [c.player_id, c.eta]));
   const phById = new Map(computedExtra.map((c) => [c.player_id, c.ph]));
 
-  // Most recent season's batting/pitching line (split_id=1 = overall, not vL/vR).
+  // Most recent season we have any stats for.
   const { data: yearRow } = await supabase
     .from("player_batting_stats_snapshots").select("year").eq("refresh_run_id", refreshRunId).order("year", { ascending: false }).limit(1).maybeSingle();
   const seasonYear = (yearRow as { year: number } | null)?.year ?? null;
 
-  const battingById = new Map<number, { ab: number; h: number; hr: number; rbi: number; bb: number; k: number }>();
-  const pitchingById = new Map<number, { ip: number; er: number; w: number; l: number; k: number; bb: number }>();
+  // A player can have one row PER LEVEL they played at this season (promotions/
+  // demotions mid-year each get their own stint row) — collect all of them,
+  // not just one, per player_id, split_id=1 (overall, not vL/vR).
+  const battingByPlayer = new Map<number, { level_id: number; ab: number; h: number; hr: number; rbi: number; bb: number; k: number }[]>();
+  const pitchingByPlayer = new Map<number, { level_id: number; ip: number; er: number; w: number; l: number; k: number; bb: number }[]>();
   if (seasonYear !== null) {
     for (let i = 0; i < ids.length; i += 500) {
       const chunk = ids.slice(i, i + 500);
       const { data: bat } = await supabase.from("player_batting_stats_snapshots")
-        .select("player_id,ab,h,hr,rbi,bb,k")
+        .select("player_id,level_id,ab,h,hr,rbi,bb,k")
         .eq("refresh_run_id", refreshRunId).eq("year", seasonYear).eq("split_id", 1).in("player_id", chunk);
-      (bat as never as { player_id: number; ab: number; h: number; hr: number; rbi: number; bb: number; k: number }[] | null)?.forEach((r) => battingById.set(r.player_id, r));
+      (bat as never as ({ player_id: number } & { level_id: number; ab: number; h: number; hr: number; rbi: number; bb: number; k: number })[] | null)
+        ?.forEach((r) => { const arr = battingByPlayer.get(r.player_id) ?? []; arr.push(r); battingByPlayer.set(r.player_id, arr); });
 
       const { data: pit } = await supabase.from("player_pitching_stats_snapshots")
-        .select("player_id,ip,er,w,l,k,bb")
+        .select("player_id,level_id,ip,er,w,l,k,bb")
         .eq("refresh_run_id", refreshRunId).eq("year", seasonYear).eq("split_id", 1).in("player_id", chunk);
-      (pit as never as { player_id: number; ip: number; er: number; w: number; l: number; k: number; bb: number }[] | null)?.forEach((r) => pitchingById.set(r.player_id, r));
+      (pit as never as ({ player_id: number } & { level_id: number; ip: number; er: number; w: number; l: number; k: number; bb: number })[] | null)
+        ?.forEach((r) => { const arr = pitchingByPlayer.get(r.player_id) ?? []; arr.push(r); pitchingByPlayer.set(r.player_id, arr); });
     }
   }
 
   return base.map((r) => {
     const ph = phById.get(r.player_id) ?? null;
-    const bat = battingById.get(r.player_id);
-    const pit = pitchingById.get(r.player_id);
+    const bat = battingByPlayer.get(r.player_id) ?? [];
+    const pit = pitchingByPlayer.get(r.player_id) ?? [];
+    // Merge batting and pitching stints by level_id (a hitter's batting rows,
+    // or a pitcher's pitching rows — a player is one or the other per PH, so
+    // in practice only one side will have entries).
+    const levels = new Set([...bat.map((b) => b.level_id), ...pit.map((p) => p.level_id)]);
+    const seasonStints: SeasonStint[] = [...levels].sort((a, b) => a - b).map((lvl) => {
+      const b = bat.find((x) => x.level_id === lvl);
+      const p = pit.find((x) => x.level_id === lvl);
+      return {
+        level: lvl,
+        ab: b?.ab ?? null, h: b?.h ?? null, hr: b?.hr ?? null, rbi: b?.rbi ?? null, bb: b?.bb ?? null, k: b?.k ?? null,
+        ip: p?.ip ?? null, er: p?.er ?? null, w: p?.w ?? null, l: p?.l ?? null, pk: p?.k ?? null, pbb: p?.bb ?? null,
+      };
+    });
     return {
       ...r,
       level: levelById.get(r.player_id) ?? null,
       eta: etaById.get(r.player_id) ?? null,
       seasonYear,
       ph,
-      ab: bat?.ab ?? null, h: bat?.h ?? null, hr: bat?.hr ?? null, rbi: bat?.rbi ?? null, bb: bat?.bb ?? null, k: bat?.k ?? null,
-      ip: pit?.ip ?? null, er: pit?.er ?? null, w: pit?.w ?? null, l: pit?.l ?? null, pk: pit?.k ?? null, pbb: pit?.bb ?? null,
+      seasonStints,
     };
   });
 }
