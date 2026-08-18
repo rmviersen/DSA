@@ -38,7 +38,7 @@ Project: `DSA`, ref `onclzyjhfkgonemcpcmo`, URL `https://onclzyjhfkgonemcpcmo.su
 - **Why default-deny is the permanent design, not just the current one:** Overall/Potential rounding (hiding exact scout ratings from other GMs) happens in the React display layer, not the database. If anon ever got read access to the raw tables, someone could skip the UI and query Supabase's REST API directly for full-precision values. Routing every read through the Next.js server keeps that rounding meaningful.
 - **Practical implication for you:** if you ever add client-side (browser) Supabase calls, they will get zero rows back — not an error, just empty results — until/unless a real anon policy is deliberately added for that specific case. If you hit unexplained empty data and you're using the anon key from the browser, this is almost certainly why. Default to querying through Next.js Server Components (the existing pattern) instead.
 
-You'll need a `.env` file (copy `.env.example`) with `SUPABASE_URL` and `SUPABASE_SERVICE_ROLE_KEY` — get the key from whoever has the Supabase dashboard, or ask the backend session to fetch it isn't retrievable via MCP tools for security reasons, so this has to come from a human with dashboard access.
+You'll need a `.env` file (copy `.env.example`) with `SUPABASE_URL` and `SUPABASE_SERVICE_ROLE_KEY`. The service-role key isn't retrievable via MCP tools for security reasons — it has to come from a human with Supabase dashboard access (Rees), not from asking the backend session to fetch it.
 
 ## 4. Data model — what actually exists
 
@@ -67,10 +67,12 @@ Three layers, all in `lib/database.types.ts`:
 Minimal Next.js 14 App Router, explicitly built with "no polish, just functional tables" as the brief — expect to replace most of the visual layer.
 
 - `/players` — top 100 by Overall, org filter
-- `/prospects` — top 100 by Prospect Potential, org filter, includes level/ETA/season-stats-by-level/team logo
+- `/prospects` — the most developed page: top 100 by Prospect Potential, org organization + logo shown per row (not current team — that's demoted to an abbreviation next to Level), level/ETA, season stats (WAR/K%/HR-or-ERA, summed across every level played this year, with a per-level breakdown as secondary detail)
 - `/draft` — top 100 draft-pool prospects by Prospect Potential, scoped to the latest `draft_class_imports` row
 
-`lib/queries.ts` has the working query patterns (`getTopPlayers`, `getTopProspects`, `getTopProspectsDetailed`, `getTopDraftees`, `getOrgTeams`) plus two small but load-bearing helpers: `levelLabel()` (numeric level code → "AAA"/"AA"/etc.) and `teamLogoUrl()` (constructs StatsPlus's logo image URL from team name — verified working for a few teams, not exhaustively).
+`lib/queries.ts` has the working query patterns (`getTopPlayers`, `getTopProspects`, `getTopProspectsDetailed`, `getTopDraftees`, `getOrgTeams`) plus small but load-bearing helpers: `levelLabel()` (numeric level code → "AAA"/"AA"/etc.), `teamLogoUrl()` (constructs StatsPlus's logo image URL from team name — verified working for a few teams, not exhaustively), and `roundGrade()` (see gotcha 9 below).
+
+**As of 2026-08-19, Cursor has started actively iterating on the front end** (new nav component, styling, page structure) — if you're a backend session reading this, expect `app/**` to look different from the description above; that's expected, not a sign something broke. Don't "fix" front-end files back to match this doc.
 
 ## 6. Gotchas already discovered (save yourself the rediscovery time)
 
@@ -81,6 +83,9 @@ Minimal Next.js 14 App Router, explicitly built with "no polish, just functional
 5. **League level codes need decoding, and it's not obvious from the number alone.** Confirmed empirically: `0`=unassigned, `1`=MLB, `2`=AAA, `3`=AA, `4`=A+, `5`=A-, `6`=Rookie. Use `levelLabel()` rather than showing the raw integer.
 6. **A "prospect" is not simply "anyone with `prospect_rank` set who has no org."** Free agents only belong in prospect rankings if they have a real `last_team_id` (previously rostered — a "true" free agent). Free agents with no `last_team_id` are almost always amateur draft-pool players who've never been rostered, and the *vast majority* of those are years away from being relevant (future draft classes). This filter already lives in `compute-ratings.ts` (backend), so `player_computed.prospect_rank` is already correct — just don't re-derive "is this a prospect" from raw `players` fields yourself; trust `prospect_rank is not null`.
 7. **Stats endpoints are split by league/level — a season can have multiple rows per player.** See §4. `getTopProspectsDetailed`'s `seasonStints` array is the pattern to follow if you need per-level season stats anywhere else.
+8. **StatsPlus's `lid` parameter is a trap, in two opposite directions.** On `playerbatstatsv2`/`playerpitchstatsv2`/`playerfieldstatsv2`, *omitting* `lid` silently scopes results to MLB only (`lid=200`) — there's no "all levels" shortcut, so the refresh script loops over every level's `lid` (200/201/202/203/204/205/206 = MLB/AAA/AA/A+/A+/A-/Rookie) per year. This bit us once already — a version of the refresh script that never passed `lid` looked completely successful (200 OK, real rows, no errors) while quietly capturing zero minor-league stats. On `teambatstats`/`teampitchstats`, it's the opposite: `lid` is silently *ignored*, and those endpoints only ever return MLB teams no matter what you pass — looping `lid` there just re-fetches identical rows (and will violate a DB uniqueness constraint on the second pass). See `platform/statsplus-api-inventory.md` for the full writeup.
+9. **Overall/Potential/Prospect Potential are rounded to the nearest 5 for display, everywhere a reader outside this org could see it.** This is deliberate (Rees doesn't want other league GMs reverse-engineering exact scout ratings from a Slack report or public page) — use `roundGrade()` from `lib/queries.ts` for these three fields specifically in any new report or page. The underlying tool grades (Cntct/Pow/Stf/etc.) are shown at full precision for now but are planned for removal later too — don't build anything that assumes they'll always be visible. Internal/database values stay full-precision regardless (ranking still needs the real numbers) — this is display-only rounding, never applied before storing or ranking.
+10. **A genuinely empty response body from a StatsPlus endpoint is a valid zero-rows result, not an error.** Only the literal string `"Unknown API"` means something's actually wrong (bad endpoint name/params). A blank response can legitimately mean "this level/year combination had no games logged yet."
 
 ## 7. Running it locally
 
