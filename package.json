@@ -8,15 +8,22 @@
     "refresh:public-only": "tsx scripts/refresh.ts --skip-ratings",
     "compute-ratings": "tsx scripts/compute-ratings.ts",
     "compute-team-ratings": "tsx scripts/compute-team-ratings.ts",
-    "import-draft-pool": "tsx scripts/import-draft-pool.ts"
+    "import-draft-pool": "tsx scripts/import-draft-pool.ts",
+    "dev": "next dev",
+    "build": "next build",
+    "start": "next start"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.45.4",
     "csv-parse": "^5.5.6",
-    "dotenv": "^16.4.5"
+    "dotenv": "^16.4.5",
+    "next": "^14.2.13",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1"
   },
   "devDependencies": {
     "@types/node": "^22.7.4",
+    "@types/react": "^18.3.9",
     "tsx": "^4.19.1",
     "typescript": "^5.6.2"
   }
