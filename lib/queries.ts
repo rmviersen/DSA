@@ -138,6 +138,93 @@ export function getTopProspects(orgId?: number) {
   return fetchComputedPlayers({ orgId, prospectsOnly: true, limit: 100 });
 }
 
+// Confirmed 2026-08-18 by cross-referencing team pages' displayed level labels
+// (e.g. "BELLEVILLE BULLS (AAA)", "COBOURG COUGARS (U28, AA)") against the
+// players.level codes on their rosters.
+const LEVEL_LABELS: Record<number, string> = {
+  0: "—", 1: "MLB", 2: "AAA", 3: "AA", 4: "A+", 5: "A-", 6: "Rookie",
+};
+export function levelLabel(level: number | null): string {
+  return level === null ? "—" : (LEVEL_LABELS[level] ?? `Lvl ${level}`);
+}
+
+// StatsPlus serves team logos at a predictable slug of "{name}_{nickname}",
+// lowercased with non-alphanumerics collapsed to underscores. Not verified
+// for every team (only spot-checked a handful) — a mismatched slug just
+// means a broken image, not a crash, so left as a best-effort helper rather
+// than something scraped for all ~240 teams up front.
+export function teamLogoUrl(name: string | null, nickname: string | null): string | null {
+  if (!name || !nickname) return null;
+  const slug = `${name}_${nickname}`.toLowerCase().replace(/[^a-z0-9]+/g, "_").replace(/^_+|_+$/g, "");
+  return `https://atl-02.statsplus.net/thebigleague/reports/news/html/images/team_logos/${slug}.png`;
+}
+
+export interface ProspectRow extends PlayerRow {
+  level: number | null;
+  eta: number | null;
+  seasonYear: number | null;
+  // batting (present when ph === 'H')
+  ab: number | null; h: number | null; hr: number | null; rbi: number | null; bb: number | null; k: number | null;
+  // pitching (present when ph === 'P')
+  ip: number | null; er: number | null; w: number | null; l: number | null; pk: number | null; pbb: number | null;
+  ph: "H" | "P" | null;
+}
+
+export async function getTopProspectsDetailed(orgId?: number): Promise<ProspectRow[]> {
+  const base = await fetchComputedPlayers({ orgId, prospectsOnly: true, limit: 100 });
+  if (base.length === 0) return [];
+  const ids = base.map((r) => r.player_id);
+  const refreshRunId = await latestRefreshRunId();
+
+  const playersExtra = await fetchAll<{ id: number; level: number | null }>((from, to) =>
+    supabase.from("players").select("id,level").in("id", ids).range(from, to) as never
+  );
+  const levelById = new Map(playersExtra.map((p) => [p.id, p.level]));
+
+  const computedExtra = await fetchAll<{ player_id: number; eta: number | null; ph: "H" | "P" }>((from, to) =>
+    supabase.from("player_computed").select("player_id,eta,ph").eq("refresh_run_id", refreshRunId).in("player_id", ids).range(from, to) as never
+  );
+  const etaById = new Map(computedExtra.map((c) => [c.player_id, c.eta]));
+  const phById = new Map(computedExtra.map((c) => [c.player_id, c.ph]));
+
+  // Most recent season's batting/pitching line (split_id=1 = overall, not vL/vR).
+  const { data: yearRow } = await supabase
+    .from("player_batting_stats_snapshots").select("year").eq("refresh_run_id", refreshRunId).order("year", { ascending: false }).limit(1).maybeSingle();
+  const seasonYear = (yearRow as { year: number } | null)?.year ?? null;
+
+  const battingById = new Map<number, { ab: number; h: number; hr: number; rbi: number; bb: number; k: number }>();
+  const pitchingById = new Map<number, { ip: number; er: number; w: number; l: number; k: number; bb: number }>();
+  if (seasonYear !== null) {
+    for (let i = 0; i < ids.length; i += 500) {
+      const chunk = ids.slice(i, i + 500);
+      const { data: bat } = await supabase.from("player_batting_stats_snapshots")
+        .select("player_id,ab,h,hr,rbi,bb,k")
+        .eq("refresh_run_id", refreshRunId).eq("year", seasonYear).eq("split_id", 1).in("player_id", chunk);
+      (bat as never as { player_id: number; ab: number; h: number; hr: number; rbi: number; bb: number; k: number }[] | null)?.forEach((r) => battingById.set(r.player_id, r));
+
+      const { data: pit } = await supabase.from("player_pitching_stats_snapshots")
+        .select("player_id,ip,er,w,l,k,bb")
+        .eq("refresh_run_id", refreshRunId).eq("year", seasonYear).eq("split_id", 1).in("player_id", chunk);
+      (pit as never as { player_id: number; ip: number; er: number; w: number; l: number; k: number; bb: number }[] | null)?.forEach((r) => pitchingById.set(r.player_id, r));
+    }
+  }
+
+  return base.map((r) => {
+    const ph = phById.get(r.player_id) ?? null;
+    const bat = battingById.get(r.player_id);
+    const pit = pitchingById.get(r.player_id);
+    return {
+      ...r,
+      level: levelById.get(r.player_id) ?? null,
+      eta: etaById.get(r.player_id) ?? null,
+      seasonYear,
+      ph,
+      ab: bat?.ab ?? null, h: bat?.h ?? null, hr: bat?.hr ?? null, rbi: bat?.rbi ?? null, bb: bat?.bb ?? null, k: bat?.k ?? null,
+      ip: pit?.ip ?? null, er: pit?.er ?? null, w: pit?.w ?? null, l: pit?.l ?? null, pk: pit?.k ?? null, pbb: pit?.bb ?? null,
+    };
+  });
+}
+
 export async function getTopDraftees(): Promise<{ draftYear: number | null; rows: PlayerRow[] }> {
   const latest = await latestDraftClassImportId();
   if (!latest) return { draftYear: null, rows: [] };

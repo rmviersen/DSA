@@ -60,6 +60,32 @@ async function main() {
     return { player_id: r.player_id, ...c };
   });
 
+  // "Current year" for ETA math — no field gives us this directly, so we use
+  // the most recent season we actually have stats for in this refresh. Falls
+  // back to the captured_at year if no stats snapshot exists (e.g. first run
+  // with --skip-ratings-only stats never pulled).
+  const { data: yearRow } = await supabase
+    .from("player_batting_stats_snapshots").select("year")
+    .eq("refresh_run_id", refreshRunId).order("year", { ascending: false }).limit(1).maybeSingle();
+  const currentYear = (yearRow as { year: number } | null)?.year ?? new Date().getFullYear();
+  console.log(`Using current_year=${currentYear} for ETA calculations`);
+
+  // RLB ETA: how many years out a prospect projects to debut, as a step
+  // function of how far their computed Overall sits below a 65 bar (RLB's
+  // original threshold, kept as-is — not something the "future" question
+  // this formula answers has a natural per-weight-set tuning knob for).
+  function estimateEta(overall: number): number {
+    const gap = overall - 65;
+    if (gap > 0) return currentYear;
+    if (gap > -3) return currentYear + 1;
+    if (gap > -6) return currentYear + 2;
+    if (gap > -9) return currentYear + 3;
+    if (gap > -12) return currentYear + 3;
+    if (gap > -15) return currentYear + 4;
+    if (gap > -20) return currentYear + 5;
+    return currentYear + 5;
+  }
+
   // --- ranks ---------------------------------------------------------
   // League-wide, by our computed Overall / Potential.
   const byOverallDesc = [...computed].sort((a, b) => b.overall - a.overall);
@@ -128,6 +154,7 @@ async function main() {
     prospect_rank: prospectRankByPlayer.get(c.player_id) ?? null,
     org_rank: orgRankByPlayer.get(c.player_id) ?? null,
     prospect_org_rank: prospectOrgRankByPlayer.get(c.player_id) ?? null,
+    eta: prospectRankByPlayer.has(c.player_id) ? estimateEta(c.overall) : null,
     captured_at: capturedAt,
   }));
 
