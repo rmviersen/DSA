@@ -47,8 +47,8 @@ async function main() {
   console.log(`  ${ratings.length} ratings rows`);
 
   console.log("Loading players (for org/rookie-eligibility context)...");
-  const players = await fetchAll<{ id: number; organization_id: number | null; mlb_service_days: number | null }>((from, to) =>
-    supabase.from("players").select("id, organization_id, mlb_service_days").range(from, to) as never
+  const players = await fetchAll<{ id: number; organization_id: number | null; mlb_service_days: number | null; last_team_id: number | null }>((from, to) =>
+    supabase.from("players").select("id, organization_id, mlb_service_days, last_team_id").range(from, to) as never
   );
   const playerById = new Map(players.map((p) => [p.id, p]));
   console.log(`  ${players.length} players`);
@@ -68,14 +68,20 @@ async function main() {
   const byPotentialDesc = [...computed].sort((a, b) => b.potential - a.potential);
   const potentialRankByPlayer = new Map(byPotentialDesc.map((c, i) => [c.player_id, i + 1]));
 
-  // Prospect pool: still rookie-eligible. RLB's original gate was "MLD < 45"
-  // (OOTP's own rookie-eligibility day count) — mapped here to StatsPlus's
-  // mlb_service_days as the closest available equivalent. Not 100% confirmed
-  // to be the exact same field; flagged for validation once we can compare
-  // against a known rookie-eligibility edge case.
+  // Prospect pool: still rookie-eligible (RLB's "MLD < 45", mapped to
+  // mlb_service_days — see note above) AND either currently in an org, or a
+  // genuine free agent with real pro history (last_team_id set). This second
+  // condition is the 2026-08-18 fix: without it, "free agent" alone also
+  // swept in ~3,700 amateur draft-pool players who've never been rostered —
+  // confirmed empirically that free agents with NO last_team_id are almost
+  // entirely future-class amateurs (2,697 of 3,735 weren't even in the most
+  // recent actual draft class), while free agents WITH a last_team_id are
+  // legitimately rare (1,236 total) and never overlap the draft pool at all.
+  // Those amateur/future-class players belong on the Draft page, not here.
   const prospectPool = computed.filter((c) => {
     const p = playerById.get(c.player_id);
-    return p && (p.mlb_service_days ?? 0) < 45;
+    if (!p || (p.mlb_service_days ?? 0) >= 45) return false;
+    return p.organization_id !== null || (p.last_team_id !== null && p.last_team_id !== 0);
   });
   const byProspectPotentialDesc = [...prospectPool].sort((a, b) => b.prospect_potential - a.prospect_potential);
   const prospectRankByPlayer = new Map(byProspectPotentialDesc.map((c, i) => [c.player_id, i + 1]));
