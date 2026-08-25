@@ -10,6 +10,7 @@ const fmtInt = (n: number | null) => (n === null || n === undefined ? "—" : Ma
 
 export function PlayerTable({ rows, showTeam, showProspectCols }: { rows: PlayerRow[]; showTeam: boolean; showProspectCols: boolean }) {
   return (
+    <div className="table-wrap">
     <table>
       <thead>
         <tr>
@@ -62,10 +63,11 @@ export function PlayerTable({ rows, showTeam, showProspectCols }: { rows: Player
         ))}
         {rows.length === 0 && (
           <tr>
-            <td colSpan={20} style={{ textAlign: "center", padding: "1rem" }}>No players match this filter.</td>
+            <td colSpan={20} className="empty-state">No players match this filter.</td>
           </tr>
         )}
       </tbody>
     </table>
+    </div>
   );
 }

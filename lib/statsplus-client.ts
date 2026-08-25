@@ -110,6 +110,21 @@ async function fetchRatingsCsv(cfg: StatsPlusConfig, opts: { pollIntervalMs?: nu
   throw new Error(`Ratings export did not finish within ${timeoutMs}ms`);
 }
 
+/**
+ * /exports/ is JSON, not CSV — {"current_date": "2031-06-23", "<date>": [team ids...], ...}.
+ * We only want current_date: the league's in-game calendar date as of right now, no auth
+ * required (unlike gamehistory, which is the only other place a real date lives and needs
+ * a session). The dated keys are some other export (looks like a standings/ranking history)
+ * — not decoded, not needed here.
+ */
+async function fetchCurrentGameDate(cfg: StatsPlusConfig): Promise<string | null> {
+  await throttle();
+  const res = await fetch(`${cfg.baseUrl}/exports/`);
+  if (!res.ok) throw new Error(`StatsPlus /exports/ request failed: ${res.status} ${res.statusText}`);
+  const body = (await res.json()) as { current_date?: string };
+  return body.current_date ?? null;
+}
+
 export function makeStatsPlusClient(cfg: StatsPlusConfig) {
   return {
     teams: () => fetchPublicCsv(cfg, "teams"),
@@ -127,6 +142,7 @@ export function makeStatsPlusClient(cfg: StatsPlusConfig) {
     teamPitching: (year?: number, lid?: number) => fetchPublicCsv(cfg, "teampitchstats", { ...(year ? { year } : {}), ...(lid ? { lid } : {}) }),
     gameHistory: () => fetchAuthedCsv(cfg, "gamehistory"),
     ratings: (opts?: { pollIntervalMs?: number; timeoutMs?: number }) => fetchRatingsCsv(cfg, opts),
+    currentGameDate: () => fetchCurrentGameDate(cfg),
     hasSession: () => Boolean(cfg.sessionId && cfg.csrfToken),
   };
 }

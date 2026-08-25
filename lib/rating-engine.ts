@@ -43,11 +43,16 @@ export interface RatingsInput {
   pot_splt: number | null; pot_cutt: number | null; pot_frk: number | null; pot_circhg: number | null; pot_scr: number | null;
   pot_kncrv: number | null; pot_knbl: number | null;
   prone: string | null;
-  // handedness splits, needed for Platoon
+  // handedness splits -- used for Platoon (unblended, side-specific) AND,
+  // as of 2026-08-24, to weight Batting/Pitching itself by real league
+  // exposure (see HandednessSplits below). pbabip_l/pbabip_r added the same
+  // day specifically for that -- they existed in player_ratings_snapshots
+  // already but were never read into this interface before now.
   cntct_l: number | null; cntct_r: number | null; gap_l: number | null; gap_r: number | null;
   pow_l: number | null; pow_r: number | null; eye_l: number | null; eye_r: number | null;
+  ks_l: number | null; ks_r: number | null;
   stf_l: number | null; stf_r: number | null; mov_l: number | null; mov_r: number | null;
-  ctrl_l: number | null; ctrl_r: number | null;
+  ctrl_l: number | null; ctrl_r: number | null; pbabip_l: number | null; pbabip_r: number | null;
   // potential position grades, needed for TBL Pos
   pot_c: number | null; pot_1b: number | null; pot_2b: number | null; pot_3b: number | null;
   pot_ss: number | null; pot_lf: number | null; pot_cf: number | null; pot_rf: number | null;
@@ -59,6 +64,25 @@ export interface WeightSet {
   fielding: number; stuff: number; movement: number; control: number; stamina: number; pbabip: number;
   qp_multiplier: number; qp_threshold: number; qpp_threshold: number;
   sp_rp_stamina_threshold: number; sp_rp_min_pitches: number;
+  catcher_batting_multiplier: number; ss_batting_multiplier: number; cf_batting_multiplier: number;
+  catcher_fielding_bonus: number; infield_fielding_bonus: number; outfield_fielding_bonus: number;
+}
+
+// Real league-wide handedness exposure, computed fresh every refresh from
+// actual MLB stats over the last 3 seasons (Rees 2026-08-24) -- NOT a
+// per-player split (a player's own career AB/IP mix isn't used here, only
+// how often the league as a whole faces same-handed vs. opposite-handed
+// opponents). Batting uses AB against LHP/RHP; Pitching uses IP against
+// LHB/RHB. Each pair should sum to 1 (a player's Batting/Pitching value
+// shouldn't change in aggregate just because these shift, only how it's
+// distributed between the vs-L and vs-R grades) -- computed in
+// scripts/compute-ratings.ts, not here, since it needs a live Supabase
+// query this module deliberately has no access to.
+export interface HandednessSplits {
+  battingPctVsL: number;
+  battingPctVsR: number;
+  pitchingPctVsL: number;
+  pitchingPctVsR: number;
 }
 
 export interface ComputedRatings {
@@ -76,25 +100,130 @@ export interface ComputedRatings {
 // rather than added to rating_weights. Can be promoted to config later if
 // there's ever a reason to tune them.
 const TBL_POS_THRESHOLDS = { c: 50, other: 55 };
-// Role formula's infielder/utility cutoffs — same reasoning.
-const ROLE_THRESHOLDS = { infRatingForInf: 60, infRatingForUtil: 55, ofRatingForUtil: 50 };
+
+// Position-player ROLE buckets (redesigned 2026-08-20, Rees's spec) --
+// evaluated in priority order below, first match wins, so each player gets
+// exactly one role. Deliberately mixes POTENTIAL position-fit grades
+// (pot_c/pot_ss/pot_cf/pot_lf/pot_rf/pot_1b) with CURRENT range grades
+// (ifr/ofr -- there's no potential-range field in this data, range is
+// current-only). This replaced the old formula, which used only the
+// composite CURRENT-ability ratings (cRating/infRating/ofRating) with no
+// potential or position-specific input at all. Distinct from `tbl_pos`
+// below, which lists every position a player's potential clears a bar for,
+// not a single bucket.
+const ROLE_BUCKET_THRESHOLDS = {
+  c_pot: 50,
+  // Marginal-potential catcher path (Rees 2026-08-24): a player whose
+  // long-term pot_c falls just short of the full c_pot bar can still
+  // qualify as Role="C" if his CURRENT blocking and framing are already
+  // solid (>= c_marginal_block_frame each) -- catching readiness isn't
+  // purely a ceiling question, a 45-potential backstop who already blocks
+  // and frames like a 50 is a real catching prospect, not just a bat that
+  // happens to be rostered there. Below c_pot_marginal, no path qualifies
+  // regardless of current skill. Surfaced by a real case: Alex Nuno
+  // (pot_c=45, cblk=50, cfrm=50) was falling through to COF/DH under the
+  // single-threshold rule despite being a real rostered catcher.
+  c_pot_marginal: 45, c_marginal_block_frame: 50,
+  ss_pot: 55, ss_range: 65,
+  cf_pot: 55, cf_range: 65,
+  inf_range: 50,
+  cof_pot: 50, cof_range: 50,
+  first_base_pot: 55,
+};
 
 const zero = (v: number | null) => v ?? 0;
 const countAtLeast = (threshold: number, ...grades: (number | null)[]) =>
-  grades.reduce((n, g) => n + (g !== null && g >= threshold ? 1 : 0), 0);
+  // Explicit <number> on reduce (2026-08-24): without it, TS infers the
+  // accumulator's type ambiguously enough to widen it to `number | null`,
+  // which cascades into every downstream user of qp/qpp reading as possibly
+  // null even though this function can only ever return a real count. Not
+  // just a cosmetic type-check nit -- `next build`'s type-check step (which
+  // `tsc --noEmit` alone doesn't exactly mirror) treats this as a hard
+  // compile error and blocks the production build entirely.
+  grades.reduce<number>((n, g) => n + (g !== null && g >= threshold ? 1 : 0), 0);
 
-export function computeRatings(r: RatingsInput, w: WeightSet): ComputedRatings {
-  const batting =
-    zero(r.cntct) * w.contact + zero(r.ks) * w.avoid_ks + zero(r.pow) * w.power +
-    zero(r.gap) * w.gap + zero(r.eye) * w.eye + zero(r.speed) * w.speed;
+export function computeRatings(r: RatingsInput, w: WeightSet, splits: HandednessSplits): ComputedRatings {
+  // Computed early (before Batting) so the catcher batting multiplier below
+  // can gate on it -- deliberately mirrors the Role priority-1 "C" branch
+  // further down (same threshold, `ROLE_BUCKET_THRESHOLDS.c_pot`), reused
+  // there instead of duplicated, so the two checks can't drift apart. Real
+  // pitchers are excluded up front since a pitcher can never end up in the
+  // position-player Role ladder regardless of `pot_c`. Two qualifying paths
+  // (2026-08-24, Rees's spec): the original full-potential bar on its own,
+  // OR a lower "marginal" potential bar backed by already-solid current
+  // blocking AND framing -- catching readiness isn't purely a ceiling
+  // question, so a 45-potential backstop who already blocks/frames like a
+  // 50 should count, not just fall through to DH/COF.
+  const isCatcherRole = r.pos !== "SP" && r.pos !== "RP" && r.pos !== "CL" && (
+    zero(r.pot_c) >= ROLE_BUCKET_THRESHOLDS.c_pot ||
+    (zero(r.pot_c) >= ROLE_BUCKET_THRESHOLDS.c_pot_marginal &&
+      zero(r.cblk) >= ROLE_BUCKET_THRESHOLDS.c_marginal_block_frame &&
+      zero(r.cfrm) >= ROLE_BUCKET_THRESHOLDS.c_marginal_block_frame)
+  );
+  // Same idea, same reuse pattern, added 2026-08-24 alongside the SS/CF
+  // batting multipliers below -- mirrors the Role priority-2 "SS" and
+  // priority-3 "CF" branches exactly (each only reachable if the higher-
+  // priority buckets above it didn't already match), so a player can never
+  // qualify for more than one of catcher/SS/CF here, same as Role itself.
+  const isSSRole = !isCatcherRole && r.pos !== "SP" && r.pos !== "RP" && r.pos !== "CL" &&
+    zero(r.pot_ss) >= ROLE_BUCKET_THRESHOLDS.ss_pot && zero(r.ifr) >= ROLE_BUCKET_THRESHOLDS.ss_range;
+  const isCFRole = !isCatcherRole && !isSSRole && r.pos !== "SP" && r.pos !== "RP" && r.pos !== "CL" &&
+    zero(r.pot_cf) >= ROLE_BUCKET_THRESHOLDS.cf_pot && zero(r.ofr) >= ROLE_BUCKET_THRESHOLDS.cf_range;
 
-  const battingP =
+  // Batting components blended by real league AB exposure vs LHP/RHP
+  // (2026-08-24, Rees's spec). Ks (avoid-Ks) blended in too as of the same
+  // day's follow-up fix -- ks_l/ks_r are real, fully-populated columns
+  // (confirmed 13,986/13,986 non-null) that were wrongly grouped in with
+  // Speed's genuine no-split-data case in an earlier pass here; Speed alone
+  // has no _l/_r fields in this data and stays unsplit. Potential is
+  // deliberately UNCHANGED below (still the flat pot_* fields) -- there's no
+  // pot_*_l/pot_*_r data to blend, per Rees's explicit call to hold off
+  // there.
+  const cntctBlend = zero(r.cntct_l) * splits.battingPctVsL + zero(r.cntct_r) * splits.battingPctVsR;
+  const gapBlend = zero(r.gap_l) * splits.battingPctVsL + zero(r.gap_r) * splits.battingPctVsR;
+  const powBlend = zero(r.pow_l) * splits.battingPctVsL + zero(r.pow_r) * splits.battingPctVsR;
+  const eyeBlend = zero(r.eye_l) * splits.battingPctVsL + zero(r.eye_r) * splits.battingPctVsR;
+  const ksBlend = zero(r.ks_l) * splits.battingPctVsL + zero(r.ks_r) * splits.battingPctVsR;
+
+  // Premium-position batting multipliers (Rees 2026-08-24): a genuinely
+  // MLB-caliber defender at a premium spot who can also hit is rare enough
+  // that Fielding's own flat bonuses (catcher/infield -- diluted 4x by
+  // fielding_weight before they reach Overall, and infield's has since been
+  // removed entirely, see catcher_fielding_bonus/infield_fielding_bonus)
+  // don't fully reflect it. SS and CF added the same day catcher's was
+  // recalibrated (1.03 -> 1.05) specifically because they share their
+  // Fielding composite with a non-premium role (SS with INF, CF with COF)
+  // and so get no positional credit there at all beyond real grade
+  // differences in the population. Each gated on its own computed Role
+  // bucket (isCatcherRole/isSSRole/isCFRole above), NOT the raw StatsPlus
+  // `pos` field, so only players who actually clear that position's "capable
+  // of playing it at the MLB level" bar get the multiplier -- mutually
+  // exclusive by construction, same as Role itself. Applied to both Batting
+  // and Batting Potential, matching how every other weight here already
+  // applies symmetrically to current and potential.
+  const battingMultiplier = isCatcherRole ? w.catcher_batting_multiplier
+    : isSSRole ? w.ss_batting_multiplier
+    : isCFRole ? w.cf_batting_multiplier
+    : 1;
+
+  const battingRaw =
+    cntctBlend * w.contact + ksBlend * w.avoid_ks + powBlend * w.power +
+    gapBlend * w.gap + eyeBlend * w.eye + zero(r.speed) * w.speed;
+  const batting = battingRaw * battingMultiplier;
+
+  const battingPRaw =
     zero(r.pot_cntct) * w.contact + zero(r.pot_ks) * w.avoid_ks + zero(r.pot_pow) * w.power +
     zero(r.pot_gap) * w.gap + zero(r.pot_eye) * w.eye + zero(r.speed) * w.speed;
+  const battingP = battingPRaw * battingMultiplier;
 
-  const cRating = (zero(r.cblk) + zero(r.cfrm) + zero(r.carm)) / 3 + 15;
-  const infRating = (zero(r.ifr) * 2 + zero(r.ife) + zero(r.ifa) + zero(r.tdp)) / 5 + 5;
-  const ofRating = (zero(r.ofr) * 2 + zero(r.ofe) + zero(r.ofa)) / 4;
+  // Flat per-position bonuses -- previously hardcoded (+15/+5/+0), now
+  // tunable via rating_weights (Rees 2026-08-24, testing what happens to
+  // Overall if these are pulled out and premium positions get rewarded via
+  // a Batting multiplier -- like the catcher one above -- instead). Default
+  // values (15/5/0) reproduce the original formula exactly.
+  const cRating = (zero(r.cblk) + zero(r.cfrm) + zero(r.carm)) / 3 + w.catcher_fielding_bonus;
+  const infRating = (zero(r.ifr) * 2 + zero(r.ife) + zero(r.ifa) + zero(r.tdp)) / 5 + w.infield_fielding_bonus;
+  const ofRating = (zero(r.ofr) * 2 + zero(r.ofe) + zero(r.ofa)) / 4 + w.outfield_fielding_bonus;
   const fielding = Math.max(cRating, infRating, ofRating);
 
   const qp = countAtLeast(w.qp_threshold, r.fst, r.chg, r.crv, r.sld, r.snk, r.splt, r.cutt, r.frk, r.circhg, r.scr, r.kncrv, r.knbl);
@@ -102,9 +231,18 @@ export function computeRatings(r: RatingsInput, w: WeightSet): ComputedRatings {
 
   const isSP = r.pos === "SP";
 
+  // Same idea for pitchers: Stuff/Movement/PBABIP/Control blended by real
+  // league IP exposure vs LHB/RHB. Stamina has no handedness-split field at
+  // all (only a single `stm`), so it stays unsplit -- confirmed with Rees
+  // 2026-08-24 rather than assumed.
+  const stfBlend = zero(r.stf_l) * splits.pitchingPctVsL + zero(r.stf_r) * splits.pitchingPctVsR;
+  const movBlend = zero(r.mov_l) * splits.pitchingPctVsL + zero(r.mov_r) * splits.pitchingPctVsR;
+  const pbabipBlend = zero(r.pbabip_l) * splits.pitchingPctVsL + zero(r.pbabip_r) * splits.pitchingPctVsR;
+  const ctrlBlend = zero(r.ctrl_l) * splits.pitchingPctVsL + zero(r.ctrl_r) * splits.pitchingPctVsR;
+
   const pitching =
-    (isSP ? zero(r.stf) + 5 : zero(r.stf)) * w.stuff +
-    zero(r.mov) * w.movement + zero(r.pbabip) * w.pbabip + zero(r.ctrl) * w.control +
+    (isSP ? stfBlend + 5 : stfBlend) * w.stuff +
+    movBlend * w.movement + pbabipBlend * w.pbabip + ctrlBlend * w.control +
     zero(r.stm) * w.stamina + qp * w.qp_multiplier;
 
   const pitchingPRaw =
@@ -129,25 +267,26 @@ export function computeRatings(r: RatingsInput, w: WeightSet): ComputedRatings {
     battingP > pitchingP ? "" :
     (zero(r.stm) <= w.sp_rp_stamina_threshold || qpp < w.sp_rp_min_pitches) ? "RP" : "SP";
 
-  // --- Role: position-player role grouping. Fixed a bug present in the
-  // original RLB formula here — one branch compared INF Rating against the
-  // raw "C" position grade instead of the computed C Rating, inconsistent
-  // with the parallel branch. Uses C Rating consistently throughout.
+  // --- Role: position-player role grouping. See ROLE_BUCKET_THRESHOLDS
+  // above for the full rationale. Priority order (first match wins) is the
+  // real defensive spectrum: C -> SS -> CF -> INF (2B/3B) -> COF -> 1B -> DH.
   let role: string;
   if (r.pos === "SP" || r.pos === "RP" || r.pos === "CL") {
     role = sp_rp;
-  } else if (infRating >= ROLE_THRESHOLDS.infRatingForInf) {
-    role = "INF";
-  } else if (infRating > ROLE_THRESHOLDS.infRatingForUtil && ofRating > ROLE_THRESHOLDS.ofRatingForUtil) {
-    role = "UTIL";
-  } else if (cRating >= infRating && cRating >= ofRating) {
+  } else if (isCatcherRole) {
     role = "C";
-  } else if (infRating >= ofRating && infRating >= cRating) {
+  } else if (isSSRole) {
+    role = "SS";
+  } else if (isCFRole) {
+    role = "CF";
+  } else if (zero(r.ifr) >= ROLE_BUCKET_THRESHOLDS.inf_range) {
     role = "INF";
-  } else if (ofRating >= infRating && ofRating >= cRating) {
-    role = "OF";
+  } else if (Math.max(zero(r.pot_lf), zero(r.pot_rf)) >= ROLE_BUCKET_THRESHOLDS.cof_pot && zero(r.ofr) >= ROLE_BUCKET_THRESHOLDS.cof_range) {
+    role = "COF";
+  } else if (zero(r.pot_1b) >= ROLE_BUCKET_THRESHOLDS.first_base_pot) {
+    role = "1B";
   } else {
-    role = "";
+    role = "DH";
   }
 
   // --- TBL Pos: which defensive positions this player projects to handle.

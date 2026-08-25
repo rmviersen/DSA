@@ -9,10 +9,13 @@ export default async function PlayersPage({ searchParams }: { searchParams: { te
   const [teams, rows] = await Promise.all([getOrgTeams(), getTopPlayers(orgId)]);
 
   return (
-    <div>
-      <h1>Top Players {orgId ? "" : "(league-wide, top 100 by Overall)"}</h1>
+    <>
+      <header className="page-header">
+        <h1>Top Players</h1>
+        <p>{orgId ? "Organization rankings by Overall" : "League-wide top 100 by Overall"}</p>
+      </header>
       <TeamFilter teams={teams} selectedOrgId={orgId} action="/players" />
       <PlayerTable rows={rows} showTeam={!orgId} showProspectCols={false} />
-    </div>
+    </>
   );
 }

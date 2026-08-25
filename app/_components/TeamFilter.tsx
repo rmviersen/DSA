@@ -10,8 +10,14 @@ export function TeamFilter({
   action: string;
 }) {
   return (
-    <form method="get" action={action}>
-      <select name="team" defaultValue={selectedOrgId ?? ""} onChange={(e) => e.currentTarget.form?.requestSubmit()}>
+    <form method="get" action={action} className="filter-bar">
+      <label htmlFor="team-filter">Organization</label>
+      <select
+        id="team-filter"
+        name="team"
+        defaultValue={selectedOrgId ?? ""}
+        onChange={(e) => e.currentTarget.form?.requestSubmit()}
+      >
         <option value="">All teams</option>
         {teams.map((t) => (
           <option key={t.id} value={t.id}>

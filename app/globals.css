@@ -1,10 +1,332 @@
-body { font-family: system-ui, sans-serif; margin: 0; padding: 0 1.5rem 2rem; }
-nav { display: flex; gap: 1.5rem; align-items: center; padding: 1rem 0; border-bottom: 1px solid #ccc; margin-bottom: 1rem; }
-nav a { text-decoration: none; color: #06c; }
-table { border-collapse: collapse; width: 100%; font-size: 14px; }
-th, td { border: 1px solid #ddd; padding: 4px 8px; text-align: right; }
-th:nth-child(1), th:nth-child(2), td:nth-child(1), td:nth-child(2) { text-align: left; }
-th { background: #f2f2f2; position: sticky; top: 0; }
-tr:nth-child(even) { background: #fafafa; }
-form { margin-bottom: 1rem; }
-select { font-size: 14px; padding: 4px; }
+/* DSA design tokens — colors sampled from the brand logo */
+:root {
+  --color-navy: #002030;
+  --color-navy-dark: #001018;
+  --color-navy-mid: #0a3548;
+  --color-tan: #c09050;
+  --color-tan-light: #d4b080;
+  --color-brown: #705020;
+  --color-green: #406020;
+  --color-green-bright: #4d7a32;
+
+  --color-bg: #f7f2ea;
+  --color-surface: #fffdf9;
+  --color-border: #ddd5c8;
+  --color-border-strong: #c09050;
+
+  --color-text: #002030;
+  --color-text-muted: #4a5f6b;
+  --color-text-on-navy: #f7f2ea;
+  --color-text-on-navy-muted: #c8b89a;
+
+  --color-link: #406020;
+  --color-link-hover: #002030;
+
+  --color-table-header: #e8e0d4;
+  --color-table-stripe: #faf7f2;
+  --color-table-hover: #f0e8dc;
+
+  --content-max-width: 1400px;
+  --radius-sm: 4px;
+  --radius-md: 8px;
+  --shadow-sm: 0 1px 3px rgba(0, 32, 48, 0.08);
+  --shadow-md: 0 4px 12px rgba(0, 32, 48, 0.1);
+}
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+body {
+  font-family: var(--font-body), system-ui, -apple-system, sans-serif;
+  margin: 0;
+  min-height: 100vh;
+  color: var(--color-text);
+  background: var(--color-bg);
+  line-height: 1.5;
+}
+
+/* ── Site header / nav ── */
+
+.site-header {
+  background: var(--color-navy);
+  border-bottom: 3px solid var(--color-tan);
+  box-shadow: var(--shadow-md);
+}
+
+.site-nav {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1.5rem;
+  max-width: var(--content-max-width);
+  margin: 0 auto;
+  padding: 0.75rem 1.5rem;
+}
+
+.site-brand {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  text-decoration: none;
+  color: var(--color-text-on-navy);
+  flex-shrink: 0;
+}
+
+.site-brand:hover {
+  color: var(--color-tan-light);
+}
+
+.site-logo {
+  display: block;
+  height: 96px;
+  width: auto;
+  mix-blend-mode: lighten;
+}
+
+.site-brand-text {
+  display: flex;
+  flex-direction: column;
+  line-height: 1.15;
+}
+
+.site-brand-acronym {
+  font-family: var(--font-display), system-ui, sans-serif;
+  font-size: 1.75rem;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+}
+
+.site-brand-tagline {
+  font-size: 0.6875rem;
+  font-weight: 500;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--color-text-on-navy-muted);
+}
+
+.site-nav-links {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.25rem;
+}
+
+.site-nav-links a {
+  font-family: var(--font-display), system-ui, sans-serif;
+  font-size: 0.9375rem;
+  font-weight: 600;
+  text-decoration: none;
+  color: var(--color-text-on-navy-muted);
+  padding: 0.5rem 0.875rem;
+  border-radius: var(--radius-sm);
+  transition: color 0.15s, background 0.15s;
+}
+
+.site-nav-links a:hover {
+  color: var(--color-text-on-navy);
+  background: rgba(255, 255, 255, 0.08);
+}
+
+.site-game-date {
+  font-size: 0.75rem;
+  color: var(--color-text-on-navy-muted);
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+
+/* ── Main content ── */
+
+.site-main {
+  max-width: var(--content-max-width);
+  margin: 0 auto;
+  padding: 1.75rem 1.5rem 3rem;
+}
+
+.page-header {
+  margin-bottom: 1.25rem;
+}
+
+.page-header h1 {
+  font-family: var(--font-display), system-ui, sans-serif;
+  font-size: 1.625rem;
+  font-weight: 700;
+  margin: 0 0 0.25rem;
+  color: var(--color-navy);
+}
+
+.page-header p {
+  margin: 0;
+  color: var(--color-text-muted);
+  font-size: 0.9375rem;
+}
+
+.page-header code {
+  font-size: 0.8125rem;
+  background: var(--color-table-header);
+  padding: 0.125rem 0.375rem;
+  border-radius: var(--radius-sm);
+}
+
+/* ── Filters ── */
+
+.filter-bar {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  margin-bottom: 1.25rem;
+  padding: 0.75rem 1rem;
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-sm);
+}
+
+.filter-bar label {
+  font-size: 0.875rem;
+  font-weight: 600;
+  color: var(--color-text-muted);
+  white-space: nowrap;
+}
+
+.filter-bar select {
+  font-family: inherit;
+  font-size: 0.9375rem;
+  padding: 0.375rem 2rem 0.375rem 0.625rem;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  background: white;
+  color: var(--color-text);
+  cursor: pointer;
+  min-width: 12rem;
+}
+
+.filter-bar select:focus {
+  outline: 2px solid var(--color-tan);
+  outline-offset: 1px;
+}
+
+/* ── Data tables ── */
+
+/* Team-name link in TeamRankingsTable (2026-08-20). A plain CSS :hover
+   instead of onMouseOver/onMouseOut JS handlers -- TeamRankingsTable is a
+   Server Component, and Next.js errors ("Event handlers cannot be passed to
+   Client Component props") if a Server Component tries to hand inline
+   function props to <Link>. */
+.team-name-link:hover {
+  text-decoration: underline;
+}
+
+.table-wrap {
+  overflow-x: auto;
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-sm);
+}
+
+table {
+  border-collapse: collapse;
+  width: 100%;
+  font-size: 0.875rem;
+  font-variant-numeric: tabular-nums;
+}
+
+th,
+td {
+  border-bottom: 1px solid var(--color-border);
+  padding: 0.4375rem 0.625rem;
+  text-align: right;
+}
+
+th:nth-child(1),
+th:nth-child(2),
+td:nth-child(1),
+td:nth-child(2) {
+  text-align: left;
+}
+
+th {
+  font-family: var(--font-display), system-ui, sans-serif;
+  font-size: 0.75rem;
+  font-weight: 700;
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+  color: var(--color-navy);
+  background: var(--color-table-header);
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  white-space: nowrap;
+}
+
+tbody tr:nth-child(even) {
+  background: var(--color-table-stripe);
+}
+
+tbody tr:hover {
+  background: var(--color-table-hover);
+}
+
+/* Condensed columns for the Top Prospects report (2026-08-19) -- tighter
+   than the site-wide default so more columns fit without wrapping. Scoped
+   to this table only, not a global change. The base `table` rule sets
+   width:100%, which stretches every column to fill the container even
+   when its content is much narrower (e.g. "Rank" getting a wide share of
+   100% just to make the total add up) -- override to width:auto so the
+   table (and each column) is only as wide as its content actually needs,
+   leaving blank space on the right for future columns instead of padding
+   existing ones out. */
+.prospect-table {
+  width: auto;
+  font-size: 0.75rem; /* narrower than the 0.875rem site default (2026-08-20) -- makes room for the team-rankings table alongside it */
+}
+.prospect-table th,
+.prospect-table td {
+  padding: 0.125rem 0.4rem;
+  text-align: left;
+}
+
+tbody tr:last-child td {
+  border-bottom: none;
+}
+
+.empty-state {
+  text-align: center;
+  padding: 2rem 1rem !important;
+  color: var(--color-text-muted);
+}
+
+/* ── Responsive ── */
+
+@media (max-width: 640px) {
+  .site-nav {
+    flex-direction: column;
+    align-items: flex-start;
+    padding: 0.75rem 1rem;
+  }
+
+  .site-logo {
+    height: 72px;
+  }
+
+  .site-brand-tagline {
+    display: none;
+  }
+
+  .site-game-date {
+    display: none;
+  }
+
+  .site-nav-links {
+    width: 100%;
+  }
+
+  .site-nav-links a {
+    flex: 1;
+    text-align: center;
+    padding: 0.5rem 0.5rem;
+    font-size: 0.8125rem;
+  }
+}

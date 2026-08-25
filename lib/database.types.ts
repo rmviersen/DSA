@@ -2442,9 +2442,48 @@ export type Database = {
           },
         ]
       }
+      prospect_bios: {
+        Row: {
+          bio_text: string
+          generated_at: string
+          player_id: number
+          refresh_run_id: number
+        }
+        Insert: {
+          bio_text: string
+          generated_at?: string
+          player_id: number
+          refresh_run_id: number
+        }
+        Update: {
+          bio_text?: string
+          generated_at?: string
+          player_id?: number
+          refresh_run_id?: number
+        }
+        Relationships: [
+          {
+            foreignKeyName: "prospect_bios_player_id_fkey"
+            columns: ["player_id"]
+            isOneToOne: true
+            referencedRelation: "players"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "prospect_bios_refresh_run_id_fkey"
+            columns: ["refresh_run_id"]
+            isOneToOne: false
+            referencedRelation: "refresh_runs"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       rating_weights: {
         Row: {
           avoid_ks: number
+          catcher_batting_multiplier: number
+          catcher_fielding_bonus: number
+          cf_batting_multiplier: number
           contact: number
           control: number
           created_at: string
@@ -2452,10 +2491,12 @@ export type Database = {
           fielding: number
           gap: number
           id: number
+          infield_fielding_bonus: number
           is_active: boolean
           label: string
           movement: number
           notes: string | null
+          outfield_fielding_bonus: number
           pbabip: number
           power: number
           qp_multiplier: number
@@ -2464,11 +2505,15 @@ export type Database = {
           sp_rp_min_pitches: number
           sp_rp_stamina_threshold: number
           speed: number
+          ss_batting_multiplier: number
           stamina: number
           stuff: number
         }
         Insert: {
           avoid_ks: number
+          catcher_batting_multiplier?: number
+          catcher_fielding_bonus?: number
+          cf_batting_multiplier?: number
           contact: number
           control: number
           created_at?: string
@@ -2476,10 +2521,12 @@ export type Database = {
           fielding: number
           gap: number
           id?: never
+          infield_fielding_bonus?: number
           is_active?: boolean
           label: string
           movement: number
           notes?: string | null
+          outfield_fielding_bonus?: number
           pbabip: number
           power: number
           qp_multiplier: number
@@ -2488,11 +2535,15 @@ export type Database = {
           sp_rp_min_pitches?: number
           sp_rp_stamina_threshold?: number
           speed: number
+          ss_batting_multiplier?: number
           stamina: number
           stuff: number
         }
         Update: {
           avoid_ks?: number
+          catcher_batting_multiplier?: number
+          catcher_fielding_bonus?: number
+          cf_batting_multiplier?: number
           contact?: number
           control?: number
           created_at?: string
@@ -2500,10 +2551,12 @@ export type Database = {
           fielding?: number
           gap?: number
           id?: never
+          infield_fielding_bonus?: number
           is_active?: boolean
           label?: string
           movement?: number
           notes?: string | null
+          outfield_fielding_bonus?: number
           pbabip?: number
           power?: number
           qp_multiplier?: number
@@ -2512,6 +2565,7 @@ export type Database = {
           sp_rp_min_pitches?: number
           sp_rp_stamina_threshold?: number
           speed?: number
+          ss_batting_multiplier?: number
           stamina?: number
           stuff?: number
         }
@@ -2520,6 +2574,7 @@ export type Database = {
       refresh_runs: {
         Row: {
           completed_at: string | null
+          game_date: string | null
           id: number
           notes: string | null
           ratings_included: boolean
@@ -2528,6 +2583,7 @@ export type Database = {
         }
         Insert: {
           completed_at?: string | null
+          game_date?: string | null
           id?: never
           notes?: string | null
           ratings_included?: boolean
@@ -2536,6 +2592,7 @@ export type Database = {
         }
         Update: {
           completed_at?: string | null
+          game_date?: string | null
           id?: never
           notes?: string | null
           ratings_included?: boolean
