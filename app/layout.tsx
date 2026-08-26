@@ -74,7 +74,7 @@ export default async function RootLayout({ children }: { children: React.ReactNo
   const [latestGameDate, ownerState] = await Promise.all([getLatestGameDate(), checkOwnerState()]);
 
   return (
-    <html lang="en" className={cn(displayFont.variable, bodyFont.variable)}>
+    <html lang="en" className={cn(displayFont.variable, bodyFont.variable)} suppressHydrationWarning>
       <head>
         <script dangerouslySetInnerHTML={{ __html: THEME_INIT_SCRIPT }} />
       </head>
