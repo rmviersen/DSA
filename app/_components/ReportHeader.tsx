@@ -2,6 +2,7 @@ import Image from "next/image";
 import Link from "next/link";
 import { buttonVariants } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
+import { ThemeToggle } from "./ThemeToggle";
 
 const PUBLIC_NAV_ITEMS = [
   { href: "/TBL/prospects", label: "Top Prospects" },
@@ -51,22 +52,28 @@ export function ReportHeader({ isRealOwner, isPreviewingGuest }: { isRealOwner: 
             </Link>
           ))}
         </div>
-        {isRealOwner && isPreviewingGuest ? (
-          // Plain <a>, not <Link> -- this is a state-changing GET, and
-          // <Link> prefetches links in view by default, which would risk
-          // silently flipping the toggle before anyone clicked it.
-          <a href="/api/preview-guest?action=exit" className={loginButtonClass}>
-            Exit Guest Preview
-          </a>
-        ) : isRealOwner ? (
-          <Link href="/players" className={loginButtonClass}>
-            Full Site →
-          </Link>
-        ) : (
-          <Link href="/login" className={loginButtonClass}>
-            Owner Login
-          </Link>
-        )}
+        {/* Right-side action cluster -- login/preview link plus the
+            dark-mode toggle, grouped into one flex child for the same
+            reason SiteNav.tsx groups its equivalent items. */}
+        <div className="site-nav-actions">
+          {isRealOwner && isPreviewingGuest ? (
+            // Plain <a>, not <Link> -- this is a state-changing GET, and
+            // <Link> prefetches links in view by default, which would risk
+            // silently flipping the toggle before anyone clicked it.
+            <a href="/api/preview-guest?action=exit" className={loginButtonClass}>
+              Exit Guest Preview
+            </a>
+          ) : isRealOwner ? (
+            <Link href="/players" className={loginButtonClass}>
+              Full Site →
+            </Link>
+          ) : (
+            <Link href="/login" className={loginButtonClass}>
+              Owner Login
+            </Link>
+          )}
+          <ThemeToggle className={loginButtonClass} />
+        </div>
       </nav>
     </header>
   );

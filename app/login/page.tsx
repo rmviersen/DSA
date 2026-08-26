@@ -28,6 +28,8 @@ export default function LoginPage({ searchParams }: { searchParams: { error?: st
             border: "1px solid var(--color-border, #ddd5c8)",
             borderRadius: "var(--radius-sm, 4px)",
             fontSize: "0.9375rem",
+            background: "var(--color-surface)",
+            color: "var(--color-text)",
           }}
         />
         <button

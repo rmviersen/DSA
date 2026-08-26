@@ -2,6 +2,7 @@ import Image from "next/image";
 import Link from "next/link";
 import { buttonVariants } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
+import { ThemeToggle } from "./ThemeToggle";
 
 const NAV_ITEMS = [
   { href: "/players", label: "Top Players" },
@@ -38,26 +39,30 @@ export function SiteNav({ latestGameDate, isRealOwner }: { latestGameDate: strin
             <a>, not <Link>: this is a state-changing GET, and <Link>
             prefetches links in view by default, which would risk silently
             flipping the toggle before anyone clicked it. */}
-        {isRealOwner && (
-          <a
-            href="/api/preview-guest?action=enter"
-            className={cn(buttonVariants({ variant: "outline", size: "sm" }), "no-underline")}
-          >
-            Preview as Guest
-          </a>
-        )}
-        {/* Last-refreshed indicator (2026-08-24) -- the league's in-game date
-            as of the most recent successful data refresh, not real-world
-            capture time. A third flex child here (site-nav uses
-            justify-content: space-between) lands at the far right on its
-            own, no layout changes needed elsewhere. Omitted entirely if no
-            successful refresh has ever recorded a game date, rather than
-            showing a misleading placeholder. */}
-        {latestGameDate && (
-          <span className="site-game-date" title="League's in-game date as of the most recent data refresh">
-            Data as of {latestGameDate}
-          </span>
-        )}
+        {/* Right-side action cluster, grouped into one flex child so
+            .site-nav's space-between row doesn't reflow depending on which
+            of these conditionally-rendered items are present. */}
+        <div className="site-nav-actions">
+          {isRealOwner && (
+            <a
+              href="/api/preview-guest?action=enter"
+              className={cn(buttonVariants({ variant: "outline", size: "sm" }), "no-underline")}
+            >
+              Preview as Guest
+            </a>
+          )}
+          <ThemeToggle />
+          {/* Last-refreshed indicator (2026-08-24) -- the league's in-game
+              date as of the most recent successful data refresh, not
+              real-world capture time. Omitted entirely if no successful
+              refresh has ever recorded a game date, rather than showing a
+              misleading placeholder. */}
+          {latestGameDate && (
+            <span className="site-game-date" title="League's in-game date as of the most recent data refresh">
+              Data as of {latestGameDate}
+            </span>
+          )}
+        </div>
       </nav>
     </header>
   );

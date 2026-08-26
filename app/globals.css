@@ -166,6 +166,19 @@ body {
   gap: 0.25rem;
 }
 
+/* Groups the right-side header items (Preview as Guest / login link, the
+   dark-mode toggle, the game-date badge) into one flex child instead of
+   each being its own top-level child of .site-nav's space-between row --
+   with `justify-content: space-between` and 4-5 possible direct children
+   (some conditional), ungrouped items would space out unevenly depending
+   on which ones are present. Added alongside Step 7's dark-mode toggle
+   (2026-08-25). */
+.site-nav-actions {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+}
+
 .site-nav-links a {
   font-family: var(--font-display), system-ui, sans-serif;
   font-size: 0.9375rem;
@@ -283,7 +296,7 @@ body {
   padding: 0.375rem 2rem 0.375rem 0.625rem;
   border: 1px solid var(--color-border);
   border-radius: var(--radius-sm);
-  background: white;
+  background: var(--color-surface);
   color: var(--color-text);
   cursor: pointer;
   min-width: 12rem;
@@ -519,11 +532,52 @@ tbody tr:last-child td {
   --radius-4xl: calc(var(--radius) * 2.6);
 }
 
-/* Real DSA palette (dark). Applies only when a `.dark` class is present on
-   an ancestor element -- nothing in the app adds that class yet (dark mode
-   is Phase 5, a stretch goal, in the approved plan), so this block is
-   inert today, same as the light one above. Primary/accent are lightened
-   versions of navy/brass so they still read clearly on a dark ground. */
+/* Real DSA palette (dark) -- Step 7 of the visual refresh (2026-08-25).
+   Applies whenever a `.dark` class is present on <html>, toggled by
+   ThemeToggle.tsx (client-side, persisted per-browser via localStorage,
+   applied pre-paint by the inline script in layout.tsx's <head> so there's
+   no light->dark flash on load/navigation). Rees wants to test this live
+   and compare before deciding whether it becomes the site's one permanent
+   look (no toggle) or stays optional -- so for now it's purely additive,
+   defaults to light, nothing changes for a visitor who never touches the
+   toggle.
+
+   This first --color-* block is the one that actually matters -- same 128
+   call sites Step 4 repointed to the light palette. The --background/
+   --primary/etc. block below it is the separate, still-unused-by-any-
+   component shadcn token system from Step 2; kept as-is since these hex
+   values were the actual starting point for the palette below (lightened
+   navy/brass so they still read on a dark ground) -- reused rather than
+   re-derived, so both token systems agree if shadcn components ever get
+   adopted.
+
+   Deliberately NOT touched: --color-navy/-tan/-brown/-green and their
+   variants. Those are the brand accent colors (header band, table header,
+   hover stripe) and read fine as-is against a near-black background in
+   both themes -- only the page's own bg/surface/border/text/table-tint
+   tokens actually need a dark equivalent. */
+.dark {
+  --color-bg: #0a1620;
+  --color-surface: #101f2b;
+  --color-border: #24384a;
+  --color-border-strong: #d9a75c;
+
+  --color-text: #ece6d9;
+  --color-text-muted: #93a6b1;
+  /* --color-text-on-navy / -on-navy-muted unchanged -- the navy header
+     band itself doesn't change between themes, so neither does its text. */
+
+  --color-link: #7fbf6a;
+  --color-link-hover: var(--color-text);
+
+  --color-table-header: #17293a;
+  --color-table-stripe: #142735;
+  --color-table-hover: #1c2f40;
+
+  --shadow-sm: 0 1px 3px rgba(0, 0, 0, 0.5);
+  --shadow-md: 0 4px 12px rgba(0, 0, 0, 0.6);
+}
+
 .dark {
   --background: #0a1620;
   --foreground: #ece6d9;

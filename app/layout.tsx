@@ -49,6 +49,16 @@ export const metadata = {
   description: "Player ratings, prospect rankings, and draft boards for TheBigLeague",
 };
 
+// Step 7 of the visual refresh (2026-08-25): applies the saved dark-mode
+// preference (see ThemeToggle.tsx) to <html> before the page paints.
+// Runs as a plain inline <script>, not next/script -- this one specifically
+// needs to execute synchronously during initial HTML parsing, before any
+// paint, or every dark-mode visitor would see a flash of the light theme
+// on load. Wrapped in try/catch since localStorage can throw (private
+// browsing, storage blocked) -- worst case it silently falls back to
+// light, never a broken page.
+const THEME_INIT_SCRIPT = `(function(){try{if(localStorage.getItem("dsa-theme")==="dark"){document.documentElement.classList.add("dark");}}catch(e){}})();`;
+
 // Matches every page under app/** -- without this the game-date badge below
 // could get cached from an earlier render and go stale across refreshes.
 export const dynamic = "force-dynamic";
@@ -65,6 +75,9 @@ export default async function RootLayout({ children }: { children: React.ReactNo
 
   return (
     <html lang="en" className={cn(displayFont.variable, bodyFont.variable)}>
+      <head>
+        <script dangerouslySetInnerHTML={{ __html: THEME_INIT_SCRIPT }} />
+      </head>
       <body>
         <ConditionalNav
           latestGameDate={latestGameDate}
