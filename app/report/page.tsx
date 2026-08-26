@@ -1,14 +1,12 @@
-import { FarmSystemReportBody } from "../_components/FarmSystemReportBody";
+import { redirect } from "next/navigation";
 
-export const dynamic = "force-dynamic";
-
-// The standalone, external-facing version of /prospects (2026-08-20) -- same
-// content, but no site nav (see ConditionalNav.tsx, which specifically hides
-// SiteNav for any /report route) and a title that reflects it covers both
-// prospect rankings and system rankings, not just prospects. This is the
-// page whose URL is meant to actually go out to the league.
-export default async function ReportPage({ searchParams }: { searchParams: { team?: string; since?: string } }) {
-  const orgId = searchParams.team ? Number(searchParams.team) : undefined;
-  const baselineRefreshRunId = searchParams.since ? Number(searchParams.since) : undefined;
-  return <FarmSystemReportBody title="Farm System Report" basePath="/report" orgId={orgId} baselineRefreshRunId={baselineRefreshRunId} />;
+// /report moved to /TBL/prospects (2026-08-25, Rees's URL scheme). This
+// page stays only as a permanent redirect so any link already shared or
+// bookmarked at the old URL keeps working, for guests and the owner alike
+// (middleware.ts's own guest-redirect logic would already send an
+// unauthenticated visitor to /TBL/prospects if this page didn't exist, but
+// that path doesn't apply to an already-logged-in owner hitting a stale
+// bookmark -- this covers both cases the same way).
+export default function ReportRedirect() {
+  redirect("/TBL/prospects");
 }

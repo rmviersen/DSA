@@ -3,11 +3,14 @@ import { OWNER_COOKIE_NAME, expectedOwnerCookieValue } from "./lib/owner-cookie"
 
 // Pages a GUEST (no valid owner cookie) can reach without being redirected.
 // Everything else -- including "/", which app/page.tsx immediately redirects
-// to /players -- bounces to /report instead. Expand this array as more pages
-// get approved for public release; no other code changes needed (2026-08-24,
-// Rees's spec). "/login" itself must stay reachable or nobody could ever log
-// in.
-const GUEST_ALLOWED_PATHS = ["/report", "/login"];
+// to /players -- bounces to /TBL/prospects instead. Expand this array as
+// more pages get approved for public release; no other code changes needed
+// (2026-08-24, Rees's spec). "/login" itself must stay reachable or nobody
+// could ever log in. As of 2026-08-25, /TBL/prospects (not /report, which
+// now just redirects here -- see app/report/page.tsx) is the base guest
+// page; the prefix match below (`startsWith(p + "/")`) already covers
+// /TBL/prospects/farms (System Rankings) with no separate entry needed.
+const GUEST_ALLOWED_PATHS = ["/TBL/prospects", "/login"];
 
 export async function middleware(req: NextRequest) {
   const { pathname } = req.nextUrl;
@@ -36,7 +39,7 @@ export async function middleware(req: NextRequest) {
   if (isAllowed) {
     return NextResponse.next();
   }
-  return NextResponse.redirect(new URL("/report", req.url));
+  return NextResponse.redirect(new URL("/TBL/prospects", req.url));
 }
 
 // Excludes Next's own static/image asset routes, the favicon, and -- as of
