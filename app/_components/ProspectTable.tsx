@@ -274,13 +274,23 @@ export function ProspectTable({ rows }: { rows: ProspectRow[] }) {
                   <span className="num">{rankLabel(r.prospect_rank)}</span>
                   {r.delta?.isNew ? <NewBadge /> : <Delta value={r.delta?.prospectRank} lowerIsBetter />}
                 </div>
-                <div className="prospect-logo">
-                  {logo ? (
-                    // eslint-disable-next-line @next/next/no-img-element
-                    <img src={logo} alt="" />
-                  ) : (
-                    r.orgAbbr?.slice(0, 3) ?? ""
-                  )}
+                {/* Logo + org abbreviation grouped as one "team" unit
+                    (2026-08-26, Rees's spec -- org used to sit at the far
+                    right of the name row, disconnected from the logo it
+                    identifies). Team-color-matched text is a follow-up --
+                    no team color data exists anywhere in the schema yet
+                    (`teams` is just id/name/nickname/parent_team_id), so
+                    this is plain muted text for now pending that. */}
+                <div className="prospect-team">
+                  <div className="prospect-logo">
+                    {logo ? (
+                      // eslint-disable-next-line @next/next/no-img-element
+                      <img src={logo} alt="" />
+                    ) : (
+                      r.orgAbbr?.slice(0, 3) ?? ""
+                    )}
+                  </div>
+                  <span className="prospect-org">{r.orgAbbr ?? "—"}</span>
                 </div>
                 <div className="prospect-card-body">
                   <div className="prospect-headline">
@@ -293,19 +303,23 @@ export function ProspectTable({ rows }: { rows: ProspectRow[] }) {
                     >
                       {r.first_name} {r.last_name}
                     </a>
-                    <span className="prospect-org">{r.orgAbbr ?? "—"}</span>
-                  </div>
-                  <div className="prospect-meta">
-                    Age <b>{r.age ?? "—"}</b> · {levelLabel(r.level)}{r.teamAbbr ? ` (${r.teamAbbr})` : ""} · ETA <b>{r.eta ?? "—"}</b> · Org Rank{" "}
-                    <b>{rankLabel(r.prospect_org_rank)}</b>
-                    {r.delta?.isNew ? <NewBadge /> : <Delta value={r.delta?.prospectOrgRank} lowerIsBetter />} ·{" "}
-                    {undrafted ? (
-                      <span style={{ fontStyle: "italic" }}>INT</span>
-                    ) : (
-                      <span style={r.isRecentDraftPick ? { color: "#38bdf8", fontWeight: 700 } : undefined}>
-                        {r.draft_year ?? "—"} R{r.draft_round ?? "—"} Pk{r.draft_overall_pick ?? "—"}
-                      </span>
-                    )}
+                    {/* Age/Level/ETA/Org Rank/Draft now sit to the right of
+                        the name on the same line (2026-08-26, Rees's spec --
+                        was its own line below the name), which is what
+                        actually shortens each card's height; the stat line
+                        stays on its own row below. */}
+                    <span className="prospect-meta">
+                      Age <b>{r.age ?? "—"}</b> · {levelLabel(r.level)}{r.teamAbbr ? ` (${r.teamAbbr})` : ""} · ETA <b>{r.eta ?? "—"}</b> · Org Rank{" "}
+                      <b>{rankLabel(r.prospect_org_rank)}</b>
+                      {r.delta?.isNew ? <NewBadge /> : <Delta value={r.delta?.prospectOrgRank} lowerIsBetter />} ·{" "}
+                      {undrafted ? (
+                        <span style={{ fontStyle: "italic" }}>INT</span>
+                      ) : (
+                        <span style={r.isRecentDraftPick ? { color: "#38bdf8", fontWeight: 700 } : undefined}>
+                          {r.draft_year ?? "—"} R{r.draft_round ?? "—"} Pk{r.draft_overall_pick ?? "—"}
+                        </span>
+                      )}
+                    </span>
                   </div>
                   <div className="prospect-stats">
                     <b>{statLine(r)}</b>
