@@ -1,5 +1,5 @@
 import { NextResponse, type NextRequest } from "next/server";
-import { OWNER_COOKIE_NAME, expectedOwnerCookieValue } from "./lib/owner-cookie";
+import { OWNER_COOKIE_NAME, PREVIEW_GUEST_COOKIE_NAME, expectedOwnerCookieValue } from "./lib/owner-cookie";
 
 // Pages a GUEST (no valid owner cookie) can reach without being redirected.
 // Everything else -- including "/", which app/page.tsx immediately redirects
@@ -15,26 +15,30 @@ const GUEST_ALLOWED_PATHS = ["/TBL/prospects", "/login"];
 export async function middleware(req: NextRequest) {
   const { pathname } = req.nextUrl;
 
-  // /api/login is the login form's own POST target -- has to be reachable
-  // pre-auth for the same reason /login itself does.
-  if (pathname.startsWith("/api/login")) {
+  // /api/login and /api/preview-guest are their own toggles' POST/GET
+  // targets -- both have to be reachable regardless of current auth state
+  // (a real guest can safely hit /api/preview-guest too; it's a no-op for
+  // anyone without a valid owner cookie -- see that route's own comment).
+  if (pathname.startsWith("/api/login") || pathname.startsWith("/api/preview-guest")) {
     return NextResponse.next();
   }
 
   const secret = process.env.OWNER_COOKIE_SECRET;
   const cookieVal = req.cookies.get(OWNER_COOKIE_NAME)?.value;
+  const previewingGuest = req.cookies.get(PREVIEW_GUEST_COOKIE_NAME)?.value === "1";
   if (secret && cookieVal) {
     const expected = await expectedOwnerCookieValue(secret);
     // Plain string comparison, not constant-time -- accepted tradeoff for
     // tonight (2026-08-24). This gate protects page *visibility* timing,
     // not real data (RLS already locks that down independently), so a
     // timing side-channel here is low-stakes; revisit if that ever changes.
-    if (cookieVal === expected) {
+    if (cookieVal === expected && !previewingGuest) {
       return NextResponse.next(); // owner: full access, every route
     }
   }
 
-  // Guest path.
+  // Guest path -- reached by a real guest, or by the owner while
+  // previewing as a guest (2026-08-25's "Preview as Guest" toggle).
   const isAllowed = GUEST_ALLOWED_PATHS.some((p) => pathname === p || pathname.startsWith(p + "/"));
   if (isAllowed) {
     return NextResponse.next();

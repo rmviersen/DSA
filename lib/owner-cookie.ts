@@ -24,6 +24,17 @@
 export const OWNER_COOKIE_NAME = "dsa_owner";
 const SIGNED_PAYLOAD = "dsa-owner-v1";
 
+// "Preview as Guest" toggle (2026-08-25) -- lets an already-logged-in owner
+// see exactly what a guest sees without logging out. Deliberately a plain,
+// unsigned flag cookie, not HMAC-signed like OWNER_COOKIE_NAME: it can only
+// ever narrow access, never grant it. It's read only inside the branch
+// where OWNER_COOKIE_NAME has already been verified valid (see
+// middleware.ts) -- someone forging this cookie on their own browser with
+// no valid owner cookie has nothing to gain, since the check that matters
+// (the real owner cookie) never passes for them in the first place, and
+// this cookie has no effect until it does.
+export const PREVIEW_GUEST_COOKIE_NAME = "dsa_preview_guest";
+
 function bufToHex(buf: ArrayBuffer): string {
   return Array.from(new Uint8Array(buf))
     .map((b) => b.toString(16).padStart(2, "0"))

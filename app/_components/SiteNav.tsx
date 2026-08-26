@@ -1,5 +1,7 @@
 import Image from "next/image";
 import Link from "next/link";
+import { buttonVariants } from "@/components/ui/button";
+import { cn } from "@/lib/utils";
 
 const NAV_ITEMS = [
   { href: "/players", label: "Top Players" },
@@ -9,7 +11,7 @@ const NAV_ITEMS = [
   { href: "/glossary", label: "Glossary" },
 ] as const;
 
-export function SiteNav({ latestGameDate }: { latestGameDate: string | null }) {
+export function SiteNav({ latestGameDate, isRealOwner }: { latestGameDate: string | null; isRealOwner: boolean }) {
   return (
     <header className="site-header">
       <nav className="site-nav" aria-label="Main">
@@ -27,6 +29,23 @@ export function SiteNav({ latestGameDate }: { latestGameDate: string | null }) {
             </Link>
           ))}
         </div>
+        {/* "Preview as Guest" toggle (2026-08-25) -- SiteNav only ever
+            renders for a real, non-previewing owner in practice (a real
+            guest or a previewing owner would already have been redirected
+            by middleware.ts before reaching a non-/TBL/prospects page), so
+            this is effectively always true here -- but it's still gated
+            explicitly for clarity and in case that ever changes. Plain
+            <a>, not <Link>: this is a state-changing GET, and <Link>
+            prefetches links in view by default, which would risk silently
+            flipping the toggle before anyone clicked it. */}
+        {isRealOwner && (
+          <a
+            href="/api/preview-guest?action=enter"
+            className={cn(buttonVariants({ variant: "outline", size: "sm" }), "no-underline")}
+          >
+            Preview as Guest
+          </a>
+        )}
         {/* Last-refreshed indicator (2026-08-24) -- the league's in-game date
             as of the most recent successful data refresh, not real-world
             capture time. A third flex child here (site-nav uses

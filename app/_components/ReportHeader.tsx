@@ -8,6 +8,11 @@ const PUBLIC_NAV_ITEMS = [
   { href: "/TBL/prospects/farms", label: "System Rankings" },
 ] as const;
 
+const loginButtonClass = cn(
+  buttonVariants({ variant: "ghost", size: "sm" }),
+  "border border-primary-foreground/25 text-primary-foreground no-underline hover:bg-primary-foreground/10 hover:text-primary-foreground"
+);
+
 // The slim public-facing header for the /TBL/prospects pages -- Step 3 of
 // the visual refresh (2026-08-25), the first change guests actually see.
 // Deliberately NOT the full SiteNav: no links to Top Players/Top
@@ -21,7 +26,14 @@ const PUBLIC_NAV_ITEMS = [
 // branding -- the genuinely new part is the login button on the right,
 // this project's first real use of a shadcn/ui component (Button, via
 // buttonVariants).
-export function ReportHeader({ isOwner }: { isOwner: boolean }) {
+//
+// Three states on the right, not two, as of the same day's "Preview as
+// Guest" toggle: a real guest gets "Owner Login"; the owner browsing
+// normally gets "Full Site →"; the owner currently previewing gets "Exit
+// Guest Preview" instead of either -- they don't need to log in again,
+// just to clear the preview cookie, and they shouldn't see "Full Site"
+// while the whole point is that they're seeing the restricted view.
+export function ReportHeader({ isRealOwner, isPreviewingGuest }: { isRealOwner: boolean; isPreviewingGuest: boolean }) {
   return (
     <header className="site-header">
       <nav className="site-nav" aria-label="Site">
@@ -39,15 +51,22 @@ export function ReportHeader({ isOwner }: { isOwner: boolean }) {
             </Link>
           ))}
         </div>
-        <Link
-          href={isOwner ? "/players" : "/login"}
-          className={cn(
-            buttonVariants({ variant: "ghost", size: "sm" }),
-            "border border-primary-foreground/25 text-primary-foreground no-underline hover:bg-primary-foreground/10 hover:text-primary-foreground"
-          )}
-        >
-          {isOwner ? "Full Site →" : "Owner Login"}
-        </Link>
+        {isRealOwner && isPreviewingGuest ? (
+          // Plain <a>, not <Link> -- this is a state-changing GET, and
+          // <Link> prefetches links in view by default, which would risk
+          // silently flipping the toggle before anyone clicked it.
+          <a href="/api/preview-guest?action=exit" className={loginButtonClass}>
+            Exit Guest Preview
+          </a>
+        ) : isRealOwner ? (
+          <Link href="/players" className={loginButtonClass}>
+            Full Site →
+          </Link>
+        ) : (
+          <Link href="/login" className={loginButtonClass}>
+            Owner Login
+          </Link>
+        )}
       </nav>
     </header>
   );
