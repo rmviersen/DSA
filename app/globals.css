@@ -187,6 +187,40 @@ body {
   color: var(--color-text-on-navy-muted);
   white-space: nowrap;
   flex-shrink: 0;
+  /* Step 6 of the visual refresh (2026-08-25) -- a small pulsing dot ahead
+     of the text, not the text itself, so the badge reads as "this is live
+     data" without the actual date becoming distracting to read. */
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4em;
+}
+
+.site-game-date::before {
+  content: "";
+  display: inline-block;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--color-green-bright);
+  flex-shrink: 0;
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .site-game-date::before {
+    animation: dsa-pulse 2s ease-in-out infinite;
+  }
+}
+
+@keyframes dsa-pulse {
+  0%,
+  100% {
+    opacity: 1;
+    transform: scale(1);
+  }
+  50% {
+    opacity: 0.45;
+    transform: scale(1.35);
+  }
 }
 
 /* ── Main content ── */
@@ -279,6 +313,33 @@ body {
   box-shadow: var(--shadow-sm);
 }
 
+/* Step 6 of the visual refresh (2026-08-25): a fade-in that plays whenever
+   a NEW .table-wrap element is created -- e.g. ProspectTable.tsx remounts
+   it via a React `key` change when the H/P/Role filters change, so the
+   table fades in on the new row set instead of hard-snapping. Pure CSS,
+   not the Motion library that was tried first -- see the full writeup at
+   ProspectTable.tsx's filterKey comment. Short version: this session's
+   Browser pane isn't advancing its animation/compositor clock at all
+   (document.timeline.currentTime reads a frozen 0 no matter how long the
+   page sits idle), so neither Motion nor this plain CSS animation could
+   actually be observed working here -- this isn't a verified-correct
+   choice, just the simpler one with no extra JS dependency. Confirm live
+   that it actually looks right. */
+@media (prefers-reduced-motion: no-preference) {
+  .table-wrap {
+    animation: dsa-fade-in 0.15s ease;
+  }
+}
+
+@keyframes dsa-fade-in {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
 table {
   border-collapse: collapse;
   width: 100%;
@@ -291,6 +352,20 @@ td {
   border-bottom: 1px solid var(--color-border);
   padding: 0.4375rem 0.625rem;
   text-align: right;
+}
+
+/* Step 6 of the visual refresh (2026-08-25): a brass accent stripe on the
+   hovered row's first cell -- reserved at zero-opacity here (not just
+   absent) so it never shifts layout when it appears on hover, and applied
+   via border rather than a transform/box-shadow on <tr> itself, which can
+   render unreliably on table rows under border-collapse: collapse. */
+td:first-child {
+  border-left: 3px solid transparent;
+  transition: border-left-color 0.12s ease;
+}
+
+tbody tr:hover td:first-child {
+  border-left-color: var(--color-tan);
 }
 
 th:nth-child(1),

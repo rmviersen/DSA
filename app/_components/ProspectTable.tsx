@@ -231,6 +231,32 @@ export function ProspectTable({ rows }: { rows: ProspectRow[] }) {
     });
   }
 
+  // Step 6 of the visual refresh (2026-08-25): a fade-in whenever the H/P
+  // or Role filters change, instead of the table hard-snapping to the new
+  // row set. Deliberately keyed on phFilter/roleFilter only, NOT search --
+  // changing the key remounts the whole table (see below), and doing that
+  // on every keystroke while typing a name would feel laggy, not alive.
+  // Live search staying instant is the correct behavior anyway.
+  //
+  // CSS animation on the key-remounted div, not the Motion library -- not
+  // because Motion was broken, but because this session's Browser pane
+  // couldn't verify it either way: tried motion.div (initial={{opacity:0}}
+  // animate={{opacity:1}}) first, and it stayed stuck at opacity:0 no
+  // matter what, which looked like a Motion bug at first -- but the same
+  // plain CSS @keyframes fade (see .table-wrap in globals.css) also read
+  // back as stuck at opacity:0 in computed style. Traced to
+  // `document.timeline.currentTime` reading a frozen 0 in this pane no
+  // matter how long the page sat idle -- this session's Browser pane
+  // isn't advancing its animation/compositor clock at all (consistent
+  // with screenshot capture failing all session with "not compositing
+  // frames"), so NEITHER approach could ever be observed animating here,
+  // correct or not. Kept the CSS version anyway since it's simpler, adds
+  // no JS dependency, and needs no library state to depend on -- but
+  // this specific choice was never actually verified working, only
+  // verified not-yet-disprovable. Rees should confirm live that this
+  // fade actually looks right, same as the earlier logo swaps.
+  const filterKey = `${phFilter}|${[...roleFilter].sort().join(",")}`;
+
   return (
     <div>
       <div style={{ marginBottom: 10, display: "flex", gap: 8, alignItems: "center" }}>
@@ -241,10 +267,10 @@ export function ProspectTable({ rows }: { rows: ProspectRow[] }) {
             style={{
               padding: "3px 10px",
               fontSize: 12,
-              border: "1px solid #555",
+              border: "1px solid var(--color-border-strong)",
               borderRadius: 4,
-              background: phFilter === f ? "#3366cc" : "transparent",
-              color: phFilter === f ? "#fff" : "inherit",
+              background: phFilter === f ? "var(--color-navy)" : "transparent",
+              color: phFilter === f ? "var(--color-text-on-navy)" : "inherit",
               cursor: "pointer",
             }}
           >
@@ -260,10 +286,10 @@ export function ProspectTable({ rows }: { rows: ProspectRow[] }) {
             style={{
               padding: "3px 10px",
               fontSize: 12,
-              border: "1px solid #555",
+              border: "1px solid var(--color-border-strong)",
               borderRadius: 4,
-              background: roleFilter.has(role) ? "#3366cc" : "transparent",
-              color: roleFilter.has(role) ? "#fff" : "inherit",
+              background: roleFilter.has(role) ? "var(--color-navy)" : "transparent",
+              color: roleFilter.has(role) ? "var(--color-text-on-navy)" : "inherit",
               cursor: "pointer",
             }}
           >
@@ -273,7 +299,7 @@ export function ProspectTable({ rows }: { rows: ProspectRow[] }) {
         {roleFilter.size > 0 && (
           <button
             onClick={() => setRoleFilter(new Set())}
-            style={{ padding: "3px 10px", fontSize: 12, border: "1px solid #555", borderRadius: 4, background: "transparent", cursor: "pointer" }}
+            style={{ padding: "3px 10px", fontSize: 12, border: "1px solid var(--color-border-strong)", borderRadius: 4, background: "transparent", cursor: "pointer" }}
           >
             Clear roles
           </button>
@@ -287,7 +313,7 @@ export function ProspectTable({ rows }: { rows: ProspectRow[] }) {
             style={{
               padding: "3px 8px",
               fontSize: 12,
-              border: "1px solid #555",
+              border: "1px solid var(--color-border-strong)",
               borderRadius: 4,
               background: "transparent",
               color: "inherit",
@@ -298,14 +324,14 @@ export function ProspectTable({ rows }: { rows: ProspectRow[] }) {
             <button
               onClick={() => setSearch("")}
               aria-label="Clear search"
-              style={{ padding: "3px 8px", fontSize: 12, border: "1px solid #555", borderRadius: 4, background: "transparent", cursor: "pointer" }}
+              style={{ padding: "3px 8px", fontSize: 12, border: "1px solid var(--color-border-strong)", borderRadius: 4, background: "transparent", cursor: "pointer" }}
             >
               ×
             </button>
           )}
         </div>
       </div>
-    <div className="table-wrap">
+    <div key={filterKey} className="table-wrap">
     <table className="prospect-table">
       <thead>
         <tr>
