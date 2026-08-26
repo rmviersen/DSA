@@ -16,7 +16,7 @@ const sectionTitleStyle = {
   fontSize: "1.1875rem",
   fontWeight: 700,
   margin: "0 0 0.5rem",
-  color: "var(--color-navy)",
+  color: "var(--color-heading)",
 } as const;
 
 const subTitleStyle = {
@@ -24,7 +24,7 @@ const subTitleStyle = {
   fontSize: "1rem",
   fontWeight: 700,
   margin: "1.25rem 0 0.375rem",
-  color: "var(--color-navy)",
+  color: "var(--color-heading)",
 } as const;
 
 const bodyTextStyle = {
@@ -126,7 +126,7 @@ function RoleLevelBenchmarkTable({ rows }: { rows: RoleLevelBenchmarkRow[] }) {
             <tr key={row.role}>
               <td style={{ fontWeight: 700 }}>{row.role}</td>
               {row.byLevel.map((cell) => (
-                <td key={cell.level} style={cell.level === 1 ? { fontWeight: 700, color: "var(--color-navy)" } : undefined}>
+                <td key={cell.level} style={cell.level === 1 ? { fontWeight: 700, color: "var(--color-heading)" } : undefined}>
                   {cell.avgValue === null ? (
                     "—"
                   ) : (

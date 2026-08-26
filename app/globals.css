@@ -33,6 +33,16 @@
   --color-text-on-navy: #f6f3ec;
   --color-text-on-navy-muted: #c9b98f;
 
+  /* Heading text color -- same navy as the brand accent in light mode
+     (where it's rendered on a white/cream page background, plenty of
+     contrast), but a distinct token from --color-navy itself because the
+     dark-mode value has to differ: navy used as a BACKGROUND (header
+     band, table header) still reads fine on a near-black page, but navy
+     used as foreground TEXT on that same near-black page does not --
+     they're close enough in darkness to be nearly unreadable. See the
+     .dark override below. */
+  --color-heading: var(--color-navy);
+
   --color-link: #3f6b32;
   --color-link-hover: #14232c;
 
@@ -253,7 +263,7 @@ body {
   font-size: 1.625rem;
   font-weight: 700;
   margin: 0 0 0.25rem;
-  color: var(--color-navy);
+  color: var(--color-heading);
 }
 
 .page-header p {
@@ -569,6 +579,12 @@ tbody tr:last-child td {
 
   --color-link: #7fbf6a;
   --color-link-hover: var(--color-text);
+
+  /* Lightened blue, not navy -- see the --color-heading definition in the
+     light block above for why. Reuses the same hex the shadcn dark
+     --primary token already used (Step 2), so it's not a new color
+     invention. */
+  --color-heading: #7fabc9;
 
   --color-table-header: #17293a;
   --color-table-stripe: #142735;

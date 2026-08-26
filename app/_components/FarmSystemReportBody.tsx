@@ -8,7 +8,7 @@ const sectionTitleStyle = {
   fontSize: "1.0625rem",
   fontWeight: 700,
   margin: "0 0 0.5rem",
-  color: "var(--color-navy)",
+  color: "var(--color-heading)",
 } as const;
 
 // Shared by /prospects (internal working page, full site nav, always shows

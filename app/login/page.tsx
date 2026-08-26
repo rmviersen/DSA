@@ -11,7 +11,7 @@ export default function LoginPage({ searchParams }: { searchParams: { error?: st
           fontFamily: "var(--font-display), system-ui, sans-serif",
           fontSize: "1.25rem",
           fontWeight: 700,
-          color: "var(--color-navy)",
+          color: "var(--color-heading)",
           marginBottom: "1rem",
         }}
       >
