@@ -2,6 +2,7 @@ import { Libre_Franklin } from "next/font/google";
 import { ConditionalNav } from "./_components/ConditionalNav";
 import { getLatestGameDate } from "../lib/queries";
 import "./globals.css";
+import { cn } from "@/lib/utils";
 
 const libreFranklin = Libre_Franklin({
   subsets: ["latin"],
@@ -35,7 +36,7 @@ export default async function RootLayout({ children }: { children: React.ReactNo
   const latestGameDate = await getLatestGameDate();
 
   return (
-    <html lang="en" className={`${libreFranklin.variable} ${bodyFont.variable}`}>
+    <html lang="en" className={cn(libreFranklin.variable, bodyFont.variable)}>
       <body>
         <ConditionalNav latestGameDate={latestGameDate} />
         <main className="site-main">{children}</main>
