@@ -37,38 +37,45 @@
   --radius-md: 8px;
   --shadow-sm: 0 1px 3px rgba(0, 32, 48, 0.08);
   --shadow-md: 0 4px 12px rgba(0, 32, 48, 0.1);
-  --background: oklch(1 0 0);
-  --foreground: oklch(0.145 0 0);
-  --card: oklch(1 0 0);
-  --card-foreground: oklch(0.145 0 0);
-  --popover: oklch(1 0 0);
-  --popover-foreground: oklch(0.145 0 0);
-  --primary: oklch(0.205 0 0);
-  --primary-foreground: oklch(0.985 0 0);
-  --secondary: oklch(0.97 0 0);
-  --secondary-foreground: oklch(0.205 0 0);
-  --muted: oklch(0.97 0 0);
-  --muted-foreground: oklch(0.556 0 0);
-  --accent: oklch(0.97 0 0);
-  --accent-foreground: oklch(0.205 0 0);
-  --destructive: oklch(0.577 0.245 27.325);
-  --border: oklch(0.922 0 0);
-  --input: oklch(0.922 0 0);
-  --ring: oklch(0.708 0 0);
-  --chart-1: oklch(0.87 0 0);
-  --chart-2: oklch(0.556 0 0);
-  --chart-3: oklch(0.439 0 0);
-  --chart-4: oklch(0.371 0 0);
-  --chart-5: oklch(0.269 0 0);
+  /* Real DSA palette (light), from the approved "DSA Visual Refresh" plan.
+     Populated here so shadcn components render correctly the moment they're
+     used -- but nothing in the app reads these yet. The site's actual
+     current appearance still comes entirely from the --color-* tokens
+     above (unlayered CSS beats @layer base, see the note at the bottom of
+     this file), so this block is inert today and only starts mattering as
+     shadcn components get adopted, phase by phase. */
+  --background: #f6f3ec;
+  --foreground: #14232c;
+  --card: #ffffff;
+  --card-foreground: #14232c;
+  --popover: #ffffff;
+  --popover-foreground: #14232c;
+  --primary: #0b3049;
+  --primary-foreground: #f6f3ec;
+  --secondary: #efe9db;
+  --secondary-foreground: #14232c;
+  --muted: #efe9db;
+  --muted-foreground: #5b6b72;
+  --accent: #a8763a;
+  --accent-foreground: #f6f3ec;
+  --destructive: #a83a26;
+  --border: #ded4c0;
+  --input: #ded4c0;
+  --ring: #a8763a;
+  --chart-1: #0b3049;
+  --chart-2: #a8763a;
+  --chart-3: #3f6b32;
+  --chart-4: #5b6b72;
+  --chart-5: #a83a26;
   --radius: 0.625rem;
-  --sidebar: oklch(0.985 0 0);
-  --sidebar-foreground: oklch(0.145 0 0);
-  --sidebar-primary: oklch(0.205 0 0);
-  --sidebar-primary-foreground: oklch(0.985 0 0);
-  --sidebar-accent: oklch(0.97 0 0);
-  --sidebar-accent-foreground: oklch(0.205 0 0);
-  --sidebar-border: oklch(0.922 0 0);
-  --sidebar-ring: oklch(0.708 0 0);
+  --sidebar: #ffffff;
+  --sidebar-foreground: #14232c;
+  --sidebar-primary: #0b3049;
+  --sidebar-primary-foreground: #f6f3ec;
+  --sidebar-accent: #efe9db;
+  --sidebar-accent-foreground: #14232c;
+  --sidebar-border: #ded4c0;
+  --sidebar-ring: #a8763a;
 }
 
 *,
@@ -412,38 +419,43 @@ tbody tr:last-child td {
   --radius-4xl: calc(var(--radius) * 2.6);
 }
 
+/* Real DSA palette (dark). Applies only when a `.dark` class is present on
+   an ancestor element -- nothing in the app adds that class yet (dark mode
+   is Phase 5, a stretch goal, in the approved plan), so this block is
+   inert today, same as the light one above. Primary/accent are lightened
+   versions of navy/brass so they still read clearly on a dark ground. */
 .dark {
-  --background: oklch(0.145 0 0);
-  --foreground: oklch(0.985 0 0);
-  --card: oklch(0.205 0 0);
-  --card-foreground: oklch(0.985 0 0);
-  --popover: oklch(0.205 0 0);
-  --popover-foreground: oklch(0.985 0 0);
-  --primary: oklch(0.922 0 0);
-  --primary-foreground: oklch(0.205 0 0);
-  --secondary: oklch(0.269 0 0);
-  --secondary-foreground: oklch(0.985 0 0);
-  --muted: oklch(0.269 0 0);
-  --muted-foreground: oklch(0.708 0 0);
-  --accent: oklch(0.269 0 0);
-  --accent-foreground: oklch(0.985 0 0);
-  --destructive: oklch(0.704 0.191 22.216);
-  --border: oklch(1 0 0 / 10%);
-  --input: oklch(1 0 0 / 15%);
-  --ring: oklch(0.556 0 0);
-  --chart-1: oklch(0.87 0 0);
-  --chart-2: oklch(0.556 0 0);
-  --chart-3: oklch(0.439 0 0);
-  --chart-4: oklch(0.371 0 0);
-  --chart-5: oklch(0.269 0 0);
-  --sidebar: oklch(0.205 0 0);
-  --sidebar-foreground: oklch(0.985 0 0);
-  --sidebar-primary: oklch(0.488 0.243 264.376);
-  --sidebar-primary-foreground: oklch(0.985 0 0);
-  --sidebar-accent: oklch(0.269 0 0);
-  --sidebar-accent-foreground: oklch(0.985 0 0);
-  --sidebar-border: oklch(1 0 0 / 10%);
-  --sidebar-ring: oklch(0.556 0 0);
+  --background: #0a1620;
+  --foreground: #ece6d9;
+  --card: #101f2b;
+  --card-foreground: #ece6d9;
+  --popover: #101f2b;
+  --popover-foreground: #ece6d9;
+  --primary: #7fabc9;
+  --primary-foreground: #0a1620;
+  --secondary: #142735;
+  --secondary-foreground: #ece6d9;
+  --muted: #142735;
+  --muted-foreground: #93a6b1;
+  --accent: #d9a75c;
+  --accent-foreground: #0a1620;
+  --destructive: #e2725b;
+  --border: #24384a;
+  --input: #24384a;
+  --ring: #d9a75c;
+  --chart-1: #7fabc9;
+  --chart-2: #d9a75c;
+  --chart-3: #7fbf6a;
+  --chart-4: #93a6b1;
+  --chart-5: #e2725b;
+  --sidebar: #101f2b;
+  --sidebar-foreground: #ece6d9;
+  --sidebar-primary: #7fabc9;
+  --sidebar-primary-foreground: #0a1620;
+  --sidebar-accent: #142735;
+  --sidebar-accent-foreground: #ece6d9;
+  --sidebar-border: #24384a;
+  --sidebar-ring: #d9a75c;
 }
 
 @layer base {
