@@ -306,12 +306,29 @@ th {
   font-weight: 700;
   letter-spacing: 0.03em;
   text-transform: uppercase;
-  color: var(--color-navy);
-  background: var(--color-table-header);
+  /* Step 5 of the visual refresh (2026-08-25): dark navy header band with
+     a brass underline, replacing the original flat-tan header -- this was
+     the one real gap between the site's actual tables and the "proposed"
+     before/after mockup in the approved plan (everything else there --
+     shadow via .table-wrap, row hover, tabular-nums -- was already in
+     place from earlier work). Applies to every <th> sitewide (Top
+     Prospects, System Rankings, Top Players, Top Draftees) with this one
+     change, since they all share this same base rule. */
+  color: var(--color-text-on-navy);
+  background: var(--color-navy);
+  border-bottom: 2px solid var(--color-tan);
   position: sticky;
   top: 0;
   z-index: 1;
   white-space: nowrap;
+}
+
+tbody tr {
+  /* Smooths the hover highlight below into a fade instead of a hard cut --
+     small, but this is the "nothing feels alive" complaint's easiest fix:
+     free, no motion library needed, still just CSS (Step 6 is where real
+     JS-driven interaction/motion happens). */
+  transition: background-color 0.12s ease;
 }
 
 tbody tr:nth-child(even) {

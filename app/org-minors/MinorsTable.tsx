@@ -105,14 +105,14 @@ export default function MinorsTable({ rows, teamCounts }: { rows: MinorsPlayerRo
   const th = (label: string, key: SortKey) => (
     <th
       onClick={() => toggleSort(key)}
-      style={{ cursor: "pointer", userSelect: "none", padding: "4px 8px", textAlign: "left", borderBottom: "2px solid var(--color-border-strong, #444)", whiteSpace: "nowrap", position: "sticky", top: 0, background: "var(--color-table-header, #e8e0d4)", color: "var(--color-text, inherit)" }}
+      style={{ cursor: "pointer", userSelect: "none", padding: "4px 8px", textAlign: "left", borderBottom: "2px solid var(--color-tan)", whiteSpace: "nowrap", position: "sticky", top: 0, background: "var(--color-navy)", color: "var(--color-text-on-navy)" }}
     >
       {label}{sortKey === key ? (sortDir === "desc" ? " ▼" : " ▲") : ""}
     </th>
   );
 
   return (
-    <div style={{ fontFamily: "system-ui, sans-serif", padding: "16px 40px", fontSize: 13 }}>
+    <div style={{ fontFamily: "var(--font-body), system-ui, sans-serif", padding: "16px 40px", fontSize: 13 }}>
       <h1 style={{ marginBottom: 4, fontSize: 22 }}>Minor League System</h1>
       <p style={{ color: "var(--color-text-muted, #888)", marginTop: 0, marginBottom: 12, fontSize: 12 }}>
         {rows.length} minor-league players. Overall/Potential shown at full precision (this is your own org, not public).
@@ -123,11 +123,11 @@ export default function MinorsTable({ rows, teamCounts }: { rows: MinorsPlayerRo
         <table style={{ borderCollapse: "collapse", fontSize: 12, minWidth: 600 }}>
           <thead>
             <tr>
-              <th style={{ padding: "3px 8px", textAlign: "left", borderBottom: "2px solid #444" }}>Team (Level)</th>
+              <th style={{ padding: "3px 8px", textAlign: "left", borderBottom: "2px solid var(--color-tan)", background: "var(--color-navy)", color: "var(--color-text-on-navy)" }}>Team (Level)</th>
               {allPositions.map((p) => (
-                <th key={p} style={{ padding: "3px 8px", textAlign: "right", borderBottom: "2px solid #444" }}>{p}</th>
+                <th key={p} style={{ padding: "3px 8px", textAlign: "right", borderBottom: "2px solid var(--color-tan)", background: "var(--color-navy)", color: "var(--color-text-on-navy)" }}>{p}</th>
               ))}
-              <th style={{ padding: "3px 8px", textAlign: "right", borderBottom: "2px solid #444" }}>Total</th>
+              <th style={{ padding: "3px 8px", textAlign: "right", borderBottom: "2px solid var(--color-tan)", background: "var(--color-navy)", color: "var(--color-text-on-navy)" }}>Total</th>
             </tr>
           </thead>
           <tbody>
@@ -135,11 +135,11 @@ export default function MinorsTable({ rows, teamCounts }: { rows: MinorsPlayerRo
               const total = Object.values(t.counts).reduce((a, b) => a + b, 0);
               return (
                 <tr key={t.team_id}>
-                  <td style={{ padding: "3px 8px", borderBottom: "1px solid #333" }}>{t.team_nickname} ({t.levelLabel})</td>
+                  <td style={{ padding: "3px 8px", borderBottom: "1px solid var(--color-border)" }}>{t.team_nickname} ({t.levelLabel})</td>
                   {allPositions.map((p) => (
-                    <td key={p} style={{ padding: "3px 8px", textAlign: "right", borderBottom: "1px solid #333" }}>{t.counts[p] ?? ""}</td>
+                    <td key={p} style={{ padding: "3px 8px", textAlign: "right", borderBottom: "1px solid var(--color-border)" }}>{t.counts[p] ?? ""}</td>
                   ))}
-                  <td style={{ padding: "3px 8px", textAlign: "right", borderBottom: "1px solid #333", fontWeight: 600 }}>{total}</td>
+                  <td style={{ padding: "3px 8px", textAlign: "right", borderBottom: "1px solid var(--color-border)", fontWeight: 600 }}>{total}</td>
                 </tr>
               );
             })}
@@ -155,10 +155,10 @@ export default function MinorsTable({ rows, teamCounts }: { rows: MinorsPlayerRo
             style={{
               padding: "3px 10px",
               fontSize: 12,
-              border: "1px solid #555",
+              border: "1px solid var(--color-border-strong)",
               borderRadius: 4,
-              background: filter === f ? "#3366cc" : "transparent",
-              color: filter === f ? "#fff" : "inherit",
+              background: filter === f ? "var(--color-navy)" : "transparent",
+              color: filter === f ? "var(--color-text-on-navy)" : "inherit",
               cursor: "pointer",
             }}
           >
@@ -181,8 +181,9 @@ export default function MinorsTable({ rows, teamCounts }: { rows: MinorsPlayerRo
           <div
             key={team.team_id}
             style={{
-              border: "1px solid var(--color-border, #ccc)",
-              borderRadius: 6,
+              border: "1px solid var(--color-border)",
+              borderRadius: "var(--radius-md)",
+              boxShadow: "var(--shadow-sm)",
               overflow: "hidden",
               display: "flex",
               flexDirection: "column",
