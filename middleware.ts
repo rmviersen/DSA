@@ -39,10 +39,19 @@ export async function middleware(req: NextRequest) {
   return NextResponse.redirect(new URL("/report", req.url));
 }
 
-// Excludes Next's own static/image asset routes and the favicon -- these
-// aren't "pages," and blocking them would break the app for owner and guest
-// alike. Everything else (including API routes other than /api/login,
-// handled above) goes through the gate.
+// Excludes Next's own static/image asset routes, the favicon, and -- as of
+// 2026-08-25 -- any request for a file with an extension (logo.png, future
+// fonts/CSS/robots.txt/etc. under public/). That last piece was missing
+// originally and caused a real, previously-invisible bug: a GUEST
+// requesting /logo.png directly (e.g. via next/image's optimizer) got
+// silently redirected to /report's HTML instead of the actual image, since
+// /logo.png isn't a page in GUEST_ALLOWED_PATHS. Never noticed before
+// because no guest-visible page rendered the logo until Step 3 of the
+// visual refresh added one -- caught via a live 400 from next/image's
+// optimizer ("not a valid image") during that work, traced to this
+// matcher, not anything wrong with the image itself. `.*\..*` matches any
+// path containing a dot -- i.e. "has a file extension" -- which is more
+// robust than enumerating extensions one by one.
 export const config = {
-  matcher: ["/((?!_next/static|_next/image|favicon.ico).*)"],
+  matcher: ["/((?!_next/static|_next/image|favicon.ico|.*\\..*).*)"],
 };
