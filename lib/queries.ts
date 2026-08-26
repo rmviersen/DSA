@@ -18,21 +18,36 @@ async function fetchAll<T>(build: (from: number, to: number) => PromiseLike<{ da
   return all;
 }
 
+// PERFORMANCE FIX (2026-08-25): used to fetch the ENTIRE players table's
+// organization_id column (up to ~45,757 rows across ~46 sequential pages,
+// unfiltered) just to build a Set of which org ids actually have players --
+// this ran on every load of /players, /prospects, /TBL/prospects (via
+// getTeamRankings too), and was a second, separate contributor to the
+// multi-second load times Rees flagged 2026-08-25 (see the note on
+// fetchComputedPlayers below for the bigger one). Fixed by getting the
+// small candidate team list FIRST (there are only ~30-40 parent-null
+// "teams" rows total), then checking each candidate for at least one
+// matching player IN PARALLEL (Promise.all) rather than scanning the
+// whole players table -- wall-clock cost is now roughly one round trip,
+// not 46 sequential ones.
 export async function getOrgTeams() {
-  // "MLB parent org" = has parent_team_id null AND actually has players
-  // attributed to it as an organization — filters out placeholder/conference
-  // rows (e.g. "ODC Fire Conference") that also have a null parent.
-  // .order("id") -- unfiltered ~45k-row scan across ~45 pages; without an
-  // explicit order, pagination has no stability guarantee (see the note in
-  // fetchComputedPlayers below for the concrete bug this caused elsewhere).
-  const orgIdsWithPlayers = await fetchAll<{ organization_id: number }>((from, to) =>
-    supabase.from("players").select("organization_id").not("organization_id", "is", null).order("id").range(from, to) as never
-  );
-  const validIds = new Set(orgIdsWithPlayers.map((p) => p.organization_id));
-
   const { data, error } = await supabase.from("teams").select("id,name,nickname").is("parent_team_id", null).order("name");
   if (error) throw error;
-  return (data as { id: number; name: string; nickname: string }[]).filter((t) => validIds.has(t.id));
+  const candidateTeams = data as { id: number; name: string; nickname: string }[];
+
+  // "MLB parent org" = has parent_team_id null AND actually has players
+  // attributed to it as an organization — filters out placeholder/conference
+  // rows (e.g. "ODC Fire Conference") that also have a null parent but no
+  // real roster.
+  const hasPlayersResults = await Promise.all(
+    candidateTeams.map(async (t) => {
+      const { data: pd, error: pErr } = await supabase.from("players").select("id").eq("organization_id", t.id).limit(1);
+      if (pErr) throw pErr;
+      return { id: t.id, hasPlayers: (pd?.length ?? 0) > 0 };
+    })
+  );
+  const validIds = new Set(hasPlayersResults.filter((r) => r.hasPlayers).map((r) => r.id));
+  return candidateTeams.filter((t) => validIds.has(t.id));
 }
 
 async function latestRefreshRunId(): Promise<number> {
@@ -184,57 +199,77 @@ export interface PlayerRow extends RatingsSlice {
   draft_overall_pick: number | null;
 }
 
+// PERFORMANCE FIX (2026-08-25): this function used to fetch `players` FIRST
+// (unfiltered, up to the full ~45,757-row table when no orgId/playerIds
+// scope applied -- the exact case /TBL/prospects and /prospects use by
+// default), then chunk-fetch player_computed and player_ratings_snapshots
+// for ALL of them in batches of 500, THEN finally sort and slice down to
+// `opts.limit` in JS. For the unfiltered leaguewide case that was ~46
+// pages just for `players`, plus ~92 more each for player_computed and
+// player_ratings_snapshots -- 230+ sequential round trips to build a
+// 500-row list, which is exactly what was making /TBL/prospects take
+// 20+ seconds to load (confirmed in dev server logs all session, Rees
+// flagged it live 2026-08-25). Fixed by querying player_computed FIRST,
+// with the sort and limit applied IN the query (pushed down to Postgres)
+// instead of in JS after the fact -- then only fetching players/ratings
+// for that much smaller resulting set. Queries a small buffer beyond
+// opts.limit (+50) and still re-sorts/re-slices in JS afterward as a
+// safety net, in case a handful of player_computed rows lack a matching
+// players/ratings row (shouldn't happen in healthy data, but the original
+// code silently tolerated it by filtering those out, so this preserves
+// that behavior rather than risking returning fewer than `limit` rows).
 async function fetchComputedPlayers(opts: { orgId?: number; prospectsOnly?: boolean; playerIds?: number[]; limit: number }) {
   const refreshRunId = await latestRefreshRunId();
 
+  // Org-scoped case: get that org's player IDs first. Cheap -- one org's
+  // full roster + minors + international complex is at most a few hundred
+  // players, nothing like the leaguewide ~45,757.
+  let orgPlayerIds: number[] | undefined;
+  if (opts.orgId) {
+    const orgPlayers = await fetchAll<{ id: number }>((from, to) =>
+      supabase.from("players").select("id").eq("organization_id", opts.orgId).order("id").range(from, to) as never
+    );
+    orgPlayerIds = orgPlayers.map((p) => p.id);
+    if (orgPlayerIds.length === 0) return [];
+  }
+  const idFilter = opts.playerIds ?? orgPlayerIds;
+
+  const sortCol = opts.prospectsOnly ? "prospect_potential" : "overall";
+  let cq = supabase
+    .from("player_computed")
+    .select("player_id,overall,potential,prospect_potential,prospect_rank,org_rank,prospect_org_rank,role")
+    .eq("refresh_run_id", refreshRunId)
+    .order(sortCol, { ascending: false })
+    .limit(opts.limit + 50);
+  if (opts.prospectsOnly) cq = cq.not("prospect_rank", "is", null);
+  if (idFilter) cq = cq.in("player_id", idFilter);
+  const { data: computedData, error: computedErr } = await cq;
+  if (computedErr) throw computedErr;
+  const computed = computedData as { player_id: number; overall: number; potential: number; prospect_potential: number; prospect_rank: number | null; org_rank: number | null; prospect_org_rank: number | null; role: string | null }[];
+  const relevantIds = computed.map((c) => c.player_id);
+  if (relevantIds.length === 0) return [];
+
+  // Now scoped to just the (at most opts.limit + 50) winning IDs -- fits in
+  // one page/chunk in every realistic case, no more per-500 looping needed.
   const players = await fetchAll<{ id: number; first_name: string; last_name: string; age: number | null; organization_id: number | null; team_id: number | null; draft_year: number | null; draft_round: number | null; draft_overall_pick: number | null }>(
-    (from, to) => {
-      // .order("id") matters here, not just cosmetically -- without an
-      // explicit order, Postgres/PostgREST gives no stability guarantee
-      // across paginated .range() calls. Discovered 2026-08-19: this was
-      // producing a different "top 100" set on every page load (players
-      // near the cutoff randomly in/out), which silently broke "change
-      // from" comparisons (a player could vanish from the list between
-      // requests for reasons unrelated to any real rating change). For the
-      // ~45k-row unfiltered case (no orgId) this also risked genuine
-      // duplicate/missing rows across the ~45-page fetchAll loop, not just
-      // reordering.
-      let q = supabase.from("players").select("id,first_name,last_name,age,organization_id,team_id,draft_year,draft_round,draft_overall_pick").order("id").range(from, to);
-      if (opts.orgId) q = q.eq("organization_id", opts.orgId);
-      if (opts.playerIds) q = q.in("id", opts.playerIds);
-      return q as never;
-    }
+    (from, to) =>
+      supabase.from("players").select("id,first_name,last_name,age,organization_id,team_id,draft_year,draft_round,draft_overall_pick").in("id", relevantIds).order("id").range(from, to) as never
   );
   const playerById = new Map(players.map((p) => [p.id, p]));
-  const relevantIds = players.map((p) => p.id);
-  if (relevantIds.length === 0) return [];
 
   const teams = await fetchAll<{ id: number; name: string; nickname: string }>((from, to) =>
     supabase.from("teams").select("id,name,nickname").range(from, to) as never
   );
   const teamById = new Map(teams.map((t) => [t.id, t]));
 
-  const computed: { player_id: number; overall: number; potential: number; prospect_potential: number; prospect_rank: number | null; org_rank: number | null; prospect_org_rank: number | null; role: string | null }[] = [];
-  for (let i = 0; i < relevantIds.length; i += 500) {
-    const chunk = relevantIds.slice(i, i + 500);
-    let q = supabase.from("player_computed")
-      .select("player_id,overall,potential,prospect_potential,prospect_rank,org_rank,prospect_org_rank,role")
-      .eq("refresh_run_id", refreshRunId).in("player_id", chunk);
-    if (opts.prospectsOnly) q = q.not("prospect_rank", "is", null);
-    const { data, error } = await q;
-    if (error) throw error;
-    computed.push(...(data as never[]));
-  }
-
   const ratingsById = new Map<number, RatingsSlice>();
-  for (let i = 0; i < relevantIds.length; i += 500) {
-    const chunk = relevantIds.slice(i, i + 500);
-    const { data, error } = await supabase.from("player_ratings_snapshots")
-      .select("player_id,cntct,pow,eye,speed,stf,mov,ctrl,stm,pos")
-      .eq("refresh_run_id", refreshRunId).in("player_id", chunk);
-    if (error) throw error;
-    (data as never as ({ player_id: number } & RatingsSlice)[]).forEach((r) => ratingsById.set(r.player_id, r));
-  }
+  const { data: ratingsData, error: ratingsErr } = await supabase
+    .from("player_ratings_snapshots")
+    .select("player_id,cntct,pow,eye,speed,stf,mov,ctrl,stm,pos")
+    .eq("refresh_run_id", refreshRunId)
+    .in("player_id", relevantIds);
+  if (ratingsErr) throw ratingsErr;
+  (ratingsData as never as ({ player_id: number } & RatingsSlice)[]).forEach((r) => ratingsById.set(r.player_id, r));
 
   const sortKey = opts.prospectsOnly ? "prospect_potential" : "overall";
   const rows: PlayerRow[] = computed
@@ -582,27 +617,48 @@ export interface ProspectSnapshotOption {
   startedAt: string;
 }
 
-// Distinct refresh_run_ids that actually have a player_computed snapshot,
-// for a "change from" picker. Fetches the single refresh_run_id column and
-// dedupes in JS -- Supabase/PostgREST has no cheap server-side DISTINCT
-// without an RPC. Fine at current scale (a few snapshots today, growing a
-// few times a week); worth revisiting if this ever gets slow.
+// PERFORMANCE FIX (2026-08-25): used to fetch refresh_run_id from EVERY row
+// of player_computed (one row per player PER historical refresh run --
+// with ~45,757 players and a growing number of past refreshes, this could
+// be hundreds of thousands of rows) just to dedupe down to a handful of
+// distinct ids. Same shape of bug as getOrgTeams/fetchComputedPlayers
+// above, and confirmed live 2026-08-25 to be the dominant remaining cost
+// once those two were fixed (this function runs in parallel with
+// getTopProspectsDetailed in FarmSystemReportBody's Promise.all, so it
+// alone was setting the page's load time once the others got fast).
+// Fixed by querying the small refresh_runs table FIRST (one row per
+// actual refresh EVENT, not per player) with a reasonable recency cap,
+// then confirming each candidate actually has a player_computed snapshot
+// via small parallel existence checks -- same pattern as getOrgTeams.
 export async function getProspectSnapshotOptions(): Promise<ProspectSnapshotOption[]> {
-  const rows = await fetchAll<{ refresh_run_id: number }>((from, to) =>
-    supabase.from("player_computed").select("refresh_run_id").order("player_id").range(from, to) as never
-  );
-  const ids = [...new Set(rows.map((r) => r.refresh_run_id))];
-  if (ids.length === 0) return [];
-  const { data, error } = await supabase
-    .from("refresh_runs").select("id,game_date,started_at").in("id", ids).order("id", { ascending: false });
-  if (error) throw error;
   // Runs from before game-date tracking existed (runs 4/8) have no in-game
   // date -- excluded from the picker entirely (2026-08-20 decision) rather
   // than shown with a "no game date recorded" fallback label, since a
   // "change from" comparison with no real date attached isn't meaningful
-  // for this report.
-  return (data as { id: number; game_date: string | null; started_at: string }[])
-    .filter((r) => r.game_date !== null)
+  // for this report. Capped at the 30 most recent -- nobody realistically
+  // wants to compare against something from dozens of refreshes ago, and
+  // this list is expected to keep growing indefinitely otherwise.
+  const { data: runsData, error: runsErr } = await supabase
+    .from("refresh_runs")
+    .select("id,game_date,started_at")
+    .not("game_date", "is", null)
+    .order("id", { ascending: false })
+    .limit(30);
+  if (runsErr) throw runsErr;
+  const candidates = runsData as { id: number; game_date: string | null; started_at: string }[];
+  if (candidates.length === 0) return [];
+
+  const hasSnapshot = await Promise.all(
+    candidates.map(async (r) => {
+      const { data, error } = await supabase.from("player_computed").select("player_id").eq("refresh_run_id", r.id).limit(1);
+      if (error) throw error;
+      return { id: r.id, has: (data?.length ?? 0) > 0 };
+    })
+  );
+  const validIds = new Set(hasSnapshot.filter((r) => r.has).map((r) => r.id));
+
+  return candidates
+    .filter((r) => validIds.has(r.id))
     .map((r) => ({ refreshRunId: r.id, gameDate: r.game_date, startedAt: r.started_at }));
 }
 
