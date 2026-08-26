@@ -4,39 +4,47 @@
 
 @custom-variant dark (&:is(.dark *));
 
-/* DSA design tokens — colors sampled from the brand logo */
+/* DSA design tokens -- Step 4 of the visual refresh (2026-08-25):
+   deepened/warmed from the original navy-and-tan sampled off the brand
+   logo, per the approved "DSA Visual Refresh" plan Rees signed off on.
+   These are the ONLY color values every existing component actually
+   renders with (128 usages across 7 files, all via var(--color-*)) --
+   the shadcn --background/--primary/etc. tokens set in Step 2 are a
+   separate, still-mostly-inert system for future shadcn components, not
+   consumed here. Updating this one block is what makes the new palette
+   visible sitewide with zero other file changes needed. */
 :root {
-  --color-navy: #002030;
-  --color-navy-dark: #001018;
-  --color-navy-mid: #0a3548;
-  --color-tan: #c09050;
-  --color-tan-light: #d4b080;
-  --color-brown: #705020;
-  --color-green: #406020;
-  --color-green-bright: #4d7a32;
+  --color-navy: #0b3049;
+  --color-navy-dark: #071f30;
+  --color-navy-mid: #123a54;
+  --color-tan: #a8763a;
+  --color-tan-light: #c99a5c;
+  --color-brown: #6b4a24;
+  --color-green: #3f6b32;
+  --color-green-bright: #57904a;
 
-  --color-bg: #f7f2ea;
-  --color-surface: #fffdf9;
-  --color-border: #ddd5c8;
-  --color-border-strong: #c09050;
+  --color-bg: #f6f3ec;
+  --color-surface: #ffffff;
+  --color-border: #ded4c0;
+  --color-border-strong: #a8763a;
 
-  --color-text: #002030;
-  --color-text-muted: #4a5f6b;
-  --color-text-on-navy: #f7f2ea;
-  --color-text-on-navy-muted: #c8b89a;
+  --color-text: #14232c;
+  --color-text-muted: #5b6b72;
+  --color-text-on-navy: #f6f3ec;
+  --color-text-on-navy-muted: #c9b98f;
 
-  --color-link: #406020;
-  --color-link-hover: #002030;
+  --color-link: #3f6b32;
+  --color-link-hover: #14232c;
 
-  --color-table-header: #e8e0d4;
-  --color-table-stripe: #faf7f2;
-  --color-table-hover: #f0e8dc;
+  --color-table-header: #efe9db;
+  --color-table-stripe: #faf7f0;
+  --color-table-hover: #f1e6d3;
 
   --content-max-width: 1400px;
   --radius-sm: 4px;
   --radius-md: 8px;
-  --shadow-sm: 0 1px 3px rgba(0, 32, 48, 0.08);
-  --shadow-md: 0 4px 12px rgba(0, 32, 48, 0.1);
+  --shadow-sm: 0 1px 3px rgba(11, 48, 73, 0.08);
+  --shadow-md: 0 4px 12px rgba(11, 48, 73, 0.1);
   /* Real DSA palette (light), from the approved "DSA Visual Refresh" plan.
      Populated here so shadcn components render correctly the moment they're
      used -- but nothing in the app reads these yet. The site's actual

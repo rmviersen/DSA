@@ -1,4 +1,4 @@
-import { Libre_Franklin } from "next/font/google";
+import { Fraunces, Inter } from "next/font/google";
 import { cookies } from "next/headers";
 import { ConditionalNav } from "./_components/ConditionalNav";
 import { getLatestGameDate } from "../lib/queries";
@@ -25,13 +25,20 @@ async function checkOwnerState(): Promise<{ isRealOwner: boolean; isPreviewingGu
   return { isRealOwner: cookieVal === expected, isPreviewingGuest };
 }
 
-const libreFranklin = Libre_Franklin({
+// Step 4 of the visual refresh (2026-08-25): Fraunces + Inter, the pairing
+// from the approved "DSA Visual Refresh" plan -- a characterful serif for
+// headings/wordmarks (sports-editorial feel, not a neutral default sans),
+// paired with a quiet, highly legible body face for everything data-dense.
+// Replaces Libre Franklin, which served both roles before this. Variable
+// names (--font-display / --font-body) are unchanged, so no component
+// needs to know a font swap happened -- they all already read from these.
+const displayFont = Fraunces({
   subsets: ["latin"],
   variable: "--font-display",
   weight: ["500", "600", "700"],
 });
 
-const bodyFont = Libre_Franklin({
+const bodyFont = Inter({
   subsets: ["latin"],
   variable: "--font-body",
   weight: ["400", "500"],
@@ -57,7 +64,7 @@ export default async function RootLayout({ children }: { children: React.ReactNo
   const [latestGameDate, ownerState] = await Promise.all([getLatestGameDate(), checkOwnerState()]);
 
   return (
-    <html lang="en" className={cn(libreFranklin.variable, bodyFont.variable)}>
+    <html lang="en" className={cn(displayFont.variable, bodyFont.variable)}>
       <body>
         <ConditionalNav
           latestGameDate={latestGameDate}
