@@ -57,7 +57,11 @@
   --color-table-stripe: #faf7f0;
   --color-table-hover: #f1e6d3;
 
-  --content-max-width: 1400px;
+  /* 2026-08-26: narrowed from 1400px (Rees's spec, "reduce the container
+     width... a bit") -- shared by .site-nav and .site-main, so this narrows
+     the header row and every page's content sitewide, not just the
+     prospect cards, keeping both aligned the way they already were. */
+  --content-max-width: 1200px;
   --radius-sm: 4px;
   --radius-md: 8px;
   --shadow-sm: 0 1px 3px rgba(11, 48, 73, 0.08);
@@ -651,11 +655,18 @@ tbody tr:last-child td {
 .prospect-meta {
   font-size: 0.9375rem;
   color: var(--color-text-muted);
-  /* A bit more breathing room between Age/Level/ETA/Org Rank/Draft
+  /* Breathing room between Age/Level/ETA/Org Rank/Draft segments
      (2026-08-26, Rees's spec) -- word-spacing widens the gaps around the
      "·" separators without restructuring the text into separate
-     elements. */
-  word-spacing: 0.15em;
+     elements. Bumped again (0.15em -> 0.2em) the same day per a follow-up
+     "a bit more spacing" ask. */
+  word-spacing: 0.2em;
+  /* Further offset from the name specifically (2026-08-26 follow-up) --
+     on top of .prospect-headline's own flex `gap`, which applies evenly
+     between EVERY headline child (role/name/meta alike); this extra
+     margin only pushes meta further from name, leaving the role-pill-to-
+     name spacing untouched. */
+  margin-left: 1rem;
 }
 
 .prospect-meta b {

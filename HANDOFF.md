@@ -156,6 +156,11 @@ Opens on `localhost:3000`. The `refresh`/`compute-ratings`/`compute-team-ratings
 
 ## 9. Production deployment: owner/guest auth gate (2026-08-24)
 
+**Prospect cards, round 3: spacing + container width follow-up, 2026-08-26.** Same day, right after the gradient/hover/role-color pass shipped. Two small asks:
+
+- **More offset between the name and the meta line specifically**: `.prospect-meta` gained `margin-left: 1rem` on top of `.prospect-headline`'s own flex `gap` (0.875rem) -- deliberately an addition on `.prospect-meta` alone, not a bump to the shared `gap`, so role-pill-to-name spacing stays as it was and only name-to-meta widens (14px -> 30px measured). `word-spacing` on the meta text also bumped again, 0.15em -> 0.2em.
+- **Narrower page container**: `--content-max-width` 1400px -> 1200px. Shared by `.site-nav` and `.site-main`, so this narrows the header row and every page's content sitewide (not just Top Prospects) -- the two were always meant to line up, so narrowing one without the other would have looked broken.
+
 **Broader visual design pass, 2026-08-26.** Rees's ask after the logo fix: "a bit more dynamic aesthetic vibes," a hover "movement effect" on cards, more horizontal breathing room in the card meta line, a de-emphasized stat line, a distinct name color, and 5-family/9-role color-coded role pills. All in `app/globals.css` unless noted.
 
 - **Background**: a new `--bg-gradient` token (two soft radial washes, navy top-left + brass bottom-right, tuned per theme) layered under `--color-bg` on `body`, with `background-attachment: fixed`. That fixed attachment is deliberately what supplies "motion when scrolling" -- the gradient stays pinned in the viewport while content scrolls past it, a real depth/parallax effect achieved with zero JS and no dependency on this session's frozen animation-compositor clock (a CSS `@keyframes`/`transition`-driven effect would have that dependency; native scroll compositing does not). Considered and deliberately skipped: a scroll-triggered per-card reveal animation -- that WOULD hit the frozen-clock problem again, unverifiable this session, so left as a future ask rather than shipped un-verified.
