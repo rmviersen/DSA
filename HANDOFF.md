@@ -147,6 +147,8 @@ npm install
 cp .env.example .env   # fill in SUPABASE_SERVICE_ROLE_KEY
 npm run dev
 ```
+
+**As of 2026-08-27, the real `.env` doesn't live in `platform/` day-to-day** — it was moved to `C:\Users\rmvie\secrets\dsa-platform.env`, outside the `OOTP-Analysis` folder entirely, because that whole folder is being shared with Cowork (an automation agent) and `.env` holds real production secrets (`SUPABASE_SERVICE_ROLE_KEY`, StatsPlus session cookies, the owner-login secrets) — `.gitignore` keeps it out of git, but does nothing against a tool with plain folder/filesystem access. To run anything locally that needs real credentials (`npm run dev`, `refresh`/`compute-ratings`/etc.), copy it back in first: `cp ~/secrets/dsa-platform.env .env` (from `platform/`) — and remove it again afterward if the folder might still be exposed to something reading it directly off disk.
 Opens on `localhost:3000`. The `refresh`/`compute-ratings`/`compute-team-ratings`/`import-draft-pool` npm scripts are backend-only — you shouldn't need to run them, but if data looks stale or missing, that's more likely "ask the backend session to run a refresh" than a front-end bug.
 
 ## 8. Coordination going forward
