@@ -62,6 +62,19 @@
   --radius-md: 8px;
   --shadow-sm: 0 1px 3px rgba(11, 48, 73, 0.08);
   --shadow-md: 0 4px 12px rgba(11, 48, 73, 0.1);
+  /* Two soft radial washes (navy top-left, brass bottom-right) layered
+     under the flat --color-bg (2026-08-26, Rees's ask for "more dynamic
+     aesthetic vibes"). One token per theme rather than duplicating the
+     gradient syntax in both places -- see the body rule below, which
+     also sets background-attachment: fixed. That's what supplies the
+     "motion when scrolling" Rees asked for without any JS/animation:
+     the gradient stays pinned in the viewport while page content
+     scrolls past it, a real depth effect that doesn't depend on this
+     session's frozen animation-compositor clock (documented elsewhere
+     in this file) the way a CSS @keyframes/transition-based effect
+     would. */
+  --bg-gradient: radial-gradient(ellipse 1200px 800px at 15% -10%, rgba(11, 48, 73, 0.05), transparent 60%),
+    radial-gradient(ellipse 1100px 750px at 100% 100%, rgba(168, 118, 58, 0.07), transparent 55%);
   /* Real DSA palette (light), from the approved "DSA Visual Refresh" plan.
      Populated here so shadcn components render correctly the moment they're
      used -- but nothing in the app reads these yet. The site's actual
@@ -114,7 +127,8 @@ body {
   margin: 0;
   min-height: 100vh;
   color: var(--color-text);
-  background: var(--color-bg);
+  background: var(--bg-gradient), var(--color-bg);
+  background-attachment: fixed;
   line-height: 1.5;
 }
 
@@ -508,6 +522,19 @@ tbody tr:last-child td {
   display: flex;
   align-items: flex-start;
   gap: 0.875rem;
+  /* Hover "lift" (2026-08-26, Rees's ask for a movement effect): slightly
+     larger + a stronger shadow. transform, not width/height, so it doesn't
+     reflow neighboring cards -- position+z-index lets the scaled-up card
+     render over its neighbors instead of just clipping against them given
+     .prospect-cards' gap is smaller than the scale amount would need. */
+  transition: transform 0.15s ease, box-shadow 0.15s ease;
+  position: relative;
+}
+
+.prospect-card:hover {
+  transform: scale(1.02);
+  box-shadow: var(--shadow-md);
+  z-index: 1;
 }
 
 .prospect-card-rank {
@@ -570,8 +597,8 @@ tbody tr:last-child td {
 .prospect-headline {
   display: flex;
   align-items: baseline;
-  gap: 0.625rem;
-  row-gap: 0.125rem;
+  gap: 0.875rem;
+  row-gap: 0.25rem;
   flex-wrap: wrap;
 }
 
@@ -592,7 +619,15 @@ tbody tr:last-child td {
   font-family: var(--font-display), system-ui, sans-serif;
   font-weight: 700;
   font-size: 1.1875rem;
-  color: var(--color-text);
+  /* Brass accent, not plain body text (2026-08-26, Rees's ask for names
+     to "stand out, matching our theme colors"). --color-border-strong,
+     not --color-tan directly -- same brass identity, but this token
+     already has the correct per-theme values for use as TEXT (light:
+     #a8763a, same as tan; dark: #d9a75c, lightened) -- see the
+     --color-heading fix earlier this session for why that distinction
+     matters: a color tuned to work as a background isn't automatically
+     safe as foreground text once the page goes dark. */
+  color: var(--color-border-strong);
   text-decoration: none;
   flex-shrink: 0;
 }
@@ -616,6 +651,11 @@ tbody tr:last-child td {
 .prospect-meta {
   font-size: 0.9375rem;
   color: var(--color-text-muted);
+  /* A bit more breathing room between Age/Level/ETA/Org Rank/Draft
+     (2026-08-26, Rees's spec) -- word-spacing widens the gaps around the
+     "·" separators without restructuring the text into separate
+     elements. */
+  word-spacing: 0.15em;
 }
 
 .prospect-meta b {
@@ -623,9 +663,78 @@ tbody tr:last-child td {
   font-weight: 600;
 }
 
+/* Lighter and not bold (2026-08-26, Rees's spec -- was inheriting
+   .prospect-card-body's full-strength text color plus a <b> wrapper) so
+   the stat line reads as secondary detail, not competing with the name
+   for attention. The <b> wrapper was removed in ProspectTable.tsx too,
+   not just overridden here, so there's no leftover bold-by-default
+   markup if this rule ever gets removed. */
 .prospect-stats {
   font-size: 0.9375rem;
+  font-weight: 400;
+  color: var(--color-text-muted);
   margin-top: 0.25rem;
+}
+
+/* ── Role color-coding (2026-08-26) ──
+   Five position-family hues (pitchers/catchers/infield/outfield/DH), each
+   with one CSS custom property per specific role so multiple roles in the
+   same family read as tonal variants of one hue, not unrelated colors --
+   e.g. SP/RP are both blue, just two shades of it. Reuses the site's
+   existing green (SS) and brass (DH) tokens where a role's natural family
+   already matches an existing accent, rather than inventing unrelated
+   hues for those two.
+
+   color-mix() computes the pill's tinted background and border from the
+   single role hue at render time instead of hand-picking a separate tint
+   hex per role (18 more values) -- each role only needs ONE color defined
+   below, in both themes. A plain solid fallback is declared on the SAME
+   property immediately before the color-mix() version, so a browser too
+   old to understand color-mix() keeps a legible (if untinted) pill
+   instead of silently dropping the whole declaration. */
+:root {
+  --role-sp: #2f6690;
+  --role-rp: #5c8fb3;
+  --role-c: #7a4f8a;
+  --role-ss: var(--color-green);
+  --role-inf: #5c8a4a;
+  --role-1b: #7aa568;
+  --role-cf: #2a7a72;
+  --role-cof: #4a9990;
+  --role-dh: var(--color-tan);
+}
+
+.dark {
+  --role-sp: #8fc1e8;
+  --role-rp: #b3d9f0;
+  --role-c: #c9a0d9;
+  --role-ss: var(--color-green-bright);
+  --role-inf: #9ad184;
+  --role-1b: #b3e0a0;
+  --role-cf: #6fc9be;
+  --role-cof: #94d9cf;
+  --role-dh: var(--color-border-strong);
+}
+
+.prospect-role {
+  --role-color: var(--color-text-muted);
+}
+.prospect-role.role-sp { --role-color: var(--role-sp); }
+.prospect-role.role-rp { --role-color: var(--role-rp); }
+.prospect-role.role-c { --role-color: var(--role-c); }
+.prospect-role.role-ss { --role-color: var(--role-ss); }
+.prospect-role.role-inf { --role-color: var(--role-inf); }
+.prospect-role.role-1b { --role-color: var(--role-1b); }
+.prospect-role.role-cf { --role-color: var(--role-cf); }
+.prospect-role.role-cof { --role-color: var(--role-cof); }
+.prospect-role.role-dh { --role-color: var(--role-dh); }
+
+.prospect-role {
+  color: var(--role-color);
+  border-color: var(--color-border);
+  border-color: color-mix(in srgb, var(--role-color) 45%, transparent);
+  background: var(--color-bg);
+  background: color-mix(in srgb, var(--role-color) 16%, var(--color-bg));
 }
 
 /* ── Responsive ── */
@@ -757,6 +866,9 @@ tbody tr:last-child td {
 
   --shadow-sm: 0 1px 3px rgba(0, 0, 0, 0.5);
   --shadow-md: 0 4px 12px rgba(0, 0, 0, 0.6);
+
+  --bg-gradient: radial-gradient(ellipse 1200px 800px at 15% -10%, rgba(127, 171, 201, 0.08), transparent 60%),
+    radial-gradient(ellipse 1100px 750px at 100% 100%, rgba(217, 167, 92, 0.09), transparent 55%);
 }
 
 .dark {

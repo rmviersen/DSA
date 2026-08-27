@@ -101,6 +101,22 @@ const ROLE_ORDER = ["SP", "RP", "C", "1B", "INF", "SS", "COF", "CF", "DH"];
 // convention (2026-08-20) -- not just the bare number.
 const rankLabel = (n: number | null | undefined) => (n === null || n === undefined ? "—" : `#${n}`);
 
+// Role-pill color-coding (2026-08-26, Rees's spec) -- five position-family
+// hues (pitchers/catchers/infield/outfield/DH), each role within a family
+// a tonal variant of that one hue. The actual color values live in
+// globals.css (--role-* custom properties, light + dark); this just maps
+// a role string to the matching CSS class. Falls back to no extra class
+// (globals.css's base .prospect-role already has a neutral default) for
+// any role string outside ROLE_ORDER, rather than guessing a bucket.
+const ROLE_CLASS: Record<string, string> = {
+  SP: "role-sp", RP: "role-rp",
+  C: "role-c",
+  SS: "role-ss", INF: "role-inf", "1B": "role-1b",
+  CF: "role-cf", COF: "role-cof",
+  DH: "role-dh",
+};
+const roleClass = (role: string | null) => (role && ROLE_CLASS[role]) || "";
+
 export function ProspectTable({ rows }: { rows: ProspectRow[] }) {
   const [phFilter, setPhFilter] = useState<"all" | "H" | "P">("all");
   const [roleFilter, setRoleFilter] = useState<Set<string>>(new Set());
@@ -294,7 +310,7 @@ export function ProspectTable({ rows }: { rows: ProspectRow[] }) {
                 </div>
                 <div className="prospect-card-body">
                   <div className="prospect-headline">
-                    <span className="prospect-role">{r.role || "—"}</span>
+                    <span className={`prospect-role ${roleClass(r.role)}`}>{r.role || "—"}</span>
                     <a
                       href={`https://atl-02.statsplus.net/thebigleague/player/${r.player_id}/`}
                       target="_blank"
@@ -322,7 +338,7 @@ export function ProspectTable({ rows }: { rows: ProspectRow[] }) {
                     </span>
                   </div>
                   <div className="prospect-stats">
-                    <b>{statLine(r)}</b>
+                    {statLine(r)}
                     {r.bio && (
                       <>
                         <button
