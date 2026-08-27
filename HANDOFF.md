@@ -2,6 +2,8 @@
 
 **Purpose of this doc:** everything you (or Cursor) need to build out the front end without re-deriving what's already been figured out. Claude Code (this repo's `scripts/`, `lib/*-client.ts`, `lib/rating-engine.ts`, `lib/mappers.ts`, and the database itself) continues to be maintained in a separate ongoing session — this doc is the contract between that work and yours.
 
+**If you're a new backend/Claude Code session picking up data-model work instead of front-end work, start at [`DATA-MODEL-HANDOFF.md`](DATA-MODEL-HANDOFF.md) first** — it's a shorter front door into the parts of this doc that actually matter for that (§4 and §6 below), plus the current list of open data-model work. This doc stays the full, canonical history either way.
+
 ## 1. What this project is
 
 DSA replaces a Power BI dashboard (`TBL.pbix`, in the parent `OOTP-Analysis` folder, kept for reference) that visualized player ratings, prospect rankings, team rankings, and draft boards for an OOTP Baseball online league ("TheBigLeague"). Instead of Power BI reading manually-exported CSVs, this project pulls live from **StatsPlus** (a third-party web platform the league already uses) into a **Supabase Postgres database**, computes the same proprietary rating system Power BI used (now via TypeScript instead of DAX), and will serve it through a **Next.js** front end on **Vercel**.
