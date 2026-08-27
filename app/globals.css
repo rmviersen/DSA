@@ -629,12 +629,12 @@ tbody tr:last-child td {
 .prospect-role {
   font-family: var(--font-body), system-ui, sans-serif;
   font-weight: 700;
-  font-size: 0.8125rem;
+  font-size: 0.9375rem;
   letter-spacing: 0.03em;
   background: var(--color-bg);
   border: 1px solid var(--color-border);
   border-radius: var(--radius-sm);
-  padding: 0.0625rem 0.375rem;
+  padding: 0.125rem 0.4375rem;
   color: var(--color-text-muted);
   flex-shrink: 0;
 }
@@ -642,7 +642,7 @@ tbody tr:last-child td {
 .prospect-name {
   font-family: var(--font-display), system-ui, sans-serif;
   font-weight: 700;
-  font-size: 1.1875rem;
+  font-size: 1.3125rem;
   /* Brass accent, not plain body text (2026-08-26, Rees's ask for names
      to "stand out, matching our theme colors"). --color-border-strong,
      not --color-tan directly -- same brass identity, but this token
