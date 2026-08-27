@@ -6,7 +6,15 @@ import { ThemeToggle } from "./ThemeToggle";
 
 const NAV_ITEMS = [
   { href: "/players", label: "Top Players" },
-  { href: "/prospects", label: "Top Prospects" },
+  // Points at the guest-facing /TBL/prospects (cards, no side-by-side
+  // System Rankings table) instead of the internal /prospects combined
+  // page, 2026-08-27, Rees's spec: "match the guest view for now" -- the
+  // internal /prospects page still exists at its own URL, just not
+  // linked from here. Landing here also swaps the header itself: paths
+  // under /TBL/prospects render ReportHeader, not this SiteNav (see
+  // ConditionalNav.tsx) -- a real owner still gets "Full Site ->" back
+  // to the internal pages, same as the guest-view toggle already does.
+  { href: "/TBL/prospects", label: "Top Prospects" },
   { href: "/draft", label: "Top Draftees" },
   { href: "/org-minors", label: "Minor League System" },
   { href: "/glossary", label: "Glossary" },
