@@ -79,6 +79,18 @@
      would. */
   --bg-gradient: radial-gradient(ellipse 1200px 800px at 15% -10%, rgba(11, 48, 73, 0.05), transparent 60%),
     radial-gradient(ellipse 1100px 750px at 100% 100%, rgba(168, 118, 58, 0.07), transparent 55%);
+  /* Baseball-stitch texture (2026-08-27, Rees's follow-up: "background is
+     still a bit dull") -- a bespoke inline SVG tile, not a sourced photo
+     (no image-search tool available this session, and a random web image
+     used as a permanent site asset would need a licensing check anyway).
+     Three small scattered X-shaped stitch marks per 64px tile -- evokes
+     baseball leather stitching as a texture, not a literal ball graphic,
+     kept deliberately faint (6% opacity) so it reads as texture behind
+     content, never competes with it. Layered as its own token, same
+     pattern as --bg-gradient, so the body rule below can stack it as a
+     THIRD background layer (repeating) on top of the two gradient washes
+     (not repeating) and the solid base color. */
+  --stitch-pattern: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='64' height='64'%3E%3Cg stroke='%230b3049' stroke-width='1' stroke-linecap='round' opacity='0.06'%3E%3Cpath d='M6 8L12 14M12 8L6 14'/%3E%3Cpath d='M40 22L46 28M46 22L40 28'/%3E%3Cpath d='M20 46L26 52M26 46L20 52'/%3E%3C/g%3E%3C/svg%3E");
   /* Real DSA palette (light), from the approved "DSA Visual Refresh" plan.
      Populated here so shadcn components render correctly the moment they're
      used -- but nothing in the app reads these yet. The site's actual
@@ -131,7 +143,14 @@ body {
   margin: 0;
   min-height: 100vh;
   color: var(--color-text);
-  background: var(--bg-gradient), var(--color-bg);
+  /* Three layers, front to back: the stitch texture (tiles, sits above
+     the gradient), the two gradient washes (--bg-gradient, already
+     comma-joined internally), then the solid base color. background-
+     repeat below has one entry per image layer in the same order --
+     the pattern tiles, the two gradients don't (they're each one big
+     radial wash, not meant to repeat). */
+  background: var(--stitch-pattern), var(--bg-gradient), var(--color-bg);
+  background-repeat: repeat, no-repeat, no-repeat;
   background-attachment: fixed;
   line-height: 1.5;
 }
@@ -915,6 +934,11 @@ tbody tr:last-child td {
 
   --bg-gradient: radial-gradient(ellipse 1200px 800px at 15% -10%, rgba(127, 171, 201, 0.08), transparent 60%),
     radial-gradient(ellipse 1100px 750px at 100% 100%, rgba(217, 167, 92, 0.09), transparent 55%);
+  /* Lighter stroke color (brass-lightened, matches --color-border-strong
+     dark) and a touch more opacity than the light-mode version -- same
+     reasoning as the gradient washes above needing a slight opacity bump
+     in dark mode to read at the same perceived strength. */
+  --stitch-pattern: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='64' height='64'%3E%3Cg stroke='%23d9a75c' stroke-width='1' stroke-linecap='round' opacity='0.08'%3E%3Cpath d='M6 8L12 14M12 8L6 14'/%3E%3Cpath d='M40 22L46 28M46 22L40 28'/%3E%3Cpath d='M20 46L26 52M26 46L20 52'/%3E%3C/g%3E%3C/svg%3E");
 }
 
 .dark {
