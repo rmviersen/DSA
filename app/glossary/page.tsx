@@ -7,9 +7,12 @@ export const dynamic = "force-dynamic";
 // players.level values -- see effectiveLevel() in lib/queries.ts.
 const LEVELS = [1, 2, 3, 4, 5, 6, 7];
 
-// How many players deep the Role Representation tables look -- widened from
-// 100 to 200 (Rees 2026-08-24) to get a larger, steadier sample.
-const ROLE_REP_LIMIT = 200;
+// How many players deep the Role Representation tables look. Was 100,
+// widened to 200 on 2026-08-24 for a steadier sample, reverted back to 100
+// on 2026-08-27 (Rees's call: "top 100 players and prospects") -- applies
+// to both tables below, By Overall (players) and By Prospect Potential
+// (prospects), since they share this one constant.
+const ROLE_REP_LIMIT = 100;
 
 const sectionTitleStyle = {
   fontFamily: "var(--font-display), system-ui, sans-serif",
