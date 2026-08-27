@@ -40,12 +40,25 @@ export function levelLabel(level: number | null): string {
 }
 
 // StatsPlus serves team logos at a predictable slug of "{name}_{nickname}",
-// lowercased with non-alphanumerics collapsed to underscores. Not verified
-// for every team (only spot-checked a handful) — a mismatched slug just
-// means a broken image, not a crash, so left as a best-effort helper rather
-// than something scraped for all ~240 teams up front.
+// lowercased with non-alphanumerics collapsed to underscores.
+//
+// The filename also carries a numeric suffix -- confirmed 2026-08-26 by
+// comparing our guessed (unsuffixed) URL against the actual <img src> on
+// every real StatsPlus team page (32/32 teams checked via Rees's logged-in
+// session, fetched again unauthenticated to confirm no login is required).
+// EVERY team currently uses "_110" -- likely a pre-scaled size variant
+// (the loaded image's own naturalWidth is exactly 110px), not a per-team
+// id or a one-off batch number. The unsuffixed original file still exists
+// at the old URL for at least some teams (both returned 200), which is
+// exactly why this went unnoticed as a hard error: it wasn't a broken
+// image, it was a stale-but-valid one, silently showing whatever logo a
+// team had before its last StatsPlus-side logo update. If this starts
+// happening again after a future StatsPlus change, re-run the same check
+// (open a real team page, read the <img src> for the logo, compare its
+// suffix against LOGO_SIZE below) rather than guessing.
+const LOGO_SIZE = "110";
 export function teamLogoUrl(name: string | null, nickname: string | null): string | null {
   if (!name || !nickname) return null;
   const slug = `${name}_${nickname}`.toLowerCase().replace(/[^a-z0-9]+/g, "_").replace(/^_+|_+$/g, "");
-  return `https://atl-02.statsplus.net/thebigleague/reports/news/html/images/team_logos/${slug}.png`;
+  return `https://atl-02.statsplus.net/thebigleague/reports/news/html/images/team_logos/${slug}_${LOGO_SIZE}.png`;
 }
