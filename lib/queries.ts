@@ -682,14 +682,13 @@ export interface ProspectRow extends PlayerRow {
   isRecentDraftPick: boolean; // true if draft_year matches the most recent imported draft class (see latestDraftClassImportId)
 }
 
-// Expanded from 100 to 500 (2026-08-20, Rees's call) -- the rating engine
-// already ranks the entire eligible prospect pool (9,266 players as of
-// refresh_run 10, so ranks 101-500 are real, already-computed data, not an
-// extrapolation), and fetchComputedPlayers already pulls the full player
-// universe before slicing regardless of this number, so raising it doesn't
-// add any query cost. Bio coverage (prospect_bios) is NOT being expanded to
-// match yet -- still just the original top-100 batch, see the note below.
-const TOP_PROSPECTS_LIMIT = 500;
+// Was 500 (expanded from 100 on 2026-08-20), shortened back down to 200
+// on 2026-08-27 (Rees's call). Ranks beyond 200 are still real,
+// already-computed data in the rating engine either way -- this only
+// controls how many cards the page renders/fetches, not what's computed.
+// Bio coverage (prospect_bios) is still just the original top-100 batch,
+// see the note below -- unaffected by this number either way.
+const TOP_PROSPECTS_LIMIT = 200;
 
 export async function getTopProspectsDetailed(orgId?: number, baselineRefreshRunId?: number): Promise<ProspectRow[]> {
   const base = await fetchComputedPlayers({ orgId, prospectsOnly: true, limit: TOP_PROSPECTS_LIMIT });

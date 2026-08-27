@@ -156,6 +156,8 @@ Opens on `localhost:3000`. The `refresh`/`compute-ratings`/`compute-team-ratings
 
 ## 9. Production deployment: owner/guest auth gate (2026-08-24)
 
+**Top Prospects list shortened 500 -> 200, 2026-08-27.** `TOP_PROSPECTS_LIMIT` in `lib/queries.ts`, one constant, shared by `/TBL/prospects` and the internal `/prospects`. Doesn't touch what the rating engine computes -- ranks beyond 200 are still real data, just not rendered/fetched here. Verified card count via `document.querySelectorAll(".prospect-card").length` on both pages, and that the last card's rank number actually reads #200 (not just a row count coincidence).
+
 **Prospect cards: role tag + name sized up, 2026-08-27.** Small follow-up right after the Role Rank/layout-centering pass. `.prospect-role` 0.8125rem -> 0.9375rem (padding bumped slightly to match), `.prospect-name` 1.1875rem -> 1.3125rem. Verified no overflow at either desktop content width or 375px mobile.
 
 **New computed field + prospect-card layout restructure, 2026-08-27.** Rees asked for four things together: Stats to start at the same x as the meta line (not flush under Role/Name), Role+Name and Rank vertically centered, a real fix for "Org Rank" itself showing double-wide spacing, and a brand-new "Role Rank" callout -- leaguewide rank within role bucket (SP/RP/C/1B/INF/SS/COF/CF/DH), by prospect potential.
