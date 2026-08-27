@@ -546,8 +546,11 @@ tbody tr:last-child td {
   flex-direction: column;
   align-items: center;
   min-width: 2.5rem;
-  padding-top: 0.125rem;
   flex-shrink: 0;
+  /* Vertically centered in the card (2026-08-27, Rees's spec) -- .prospect-card
+     itself stays align-items: flex-start (the logo/org group still anchors
+     to the top), this is the one child overridden. */
+  align-self: center;
 }
 
 .prospect-card-rank .num {
@@ -589,21 +592,38 @@ tbody tr:last-child td {
   display: block;
 }
 
+/* Two side-by-side groups now (2026-08-27, Rees's spec): name/role on the
+   left, meta+stats stacked on the right -- see .prospect-namerow and
+   .prospect-details below. align-items: center is what vertically centers
+   the (shorter) name/role group against the (taller, two-line) details
+   group, and what "Role and Name centered vertically" actually means
+   structurally. */
 .prospect-card-body {
   flex: 1;
   min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 1.5rem;
 }
 
-/* Rank/logo/role/name/meta/org all align on the SAME baseline row now
-   (2026-08-26, Rees's spec -- meta used to be its own line below the
-   name). row-gap handles the case where a narrow card wraps this onto two
-   visual lines -- see the mobile override below. */
-.prospect-headline {
+.prospect-namerow {
   display: flex;
   align-items: baseline;
-  gap: 0.875rem;
-  row-gap: 0.25rem;
-  flex-wrap: wrap;
+  gap: 0.625rem;
+  flex-shrink: 0;
+}
+
+/* Meta line and stat line now share this column -- both are direct
+   children, so they start at the exact same left edge regardless of how
+   wide the name/role group next to them is. That's what makes "stats
+   start at the same horizontal position as the bio info" true
+   structurally, not just visually for one particular name length. */
+.prospect-details {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  min-width: 0;
+  flex: 1;
 }
 
 .prospect-role {
@@ -652,21 +672,23 @@ tbody tr:last-child td {
   text-align: center;
 }
 
+/* Restructured 2026-08-27 (Rees's spec) -- was one text blob with
+   word-spacing hacked up to widen the "·" separators, which had the bug
+   of ALSO widening the space inside two-word labels like "Org Rank"
+   (word-spacing applies to every space character, not just the ones
+   between callouts -- there was no way to target only the "between"
+   gaps with that approach). Now each callout (Age, Level, ETA, Org Rank,
+   Role Rank, Draft) is its own flex child (.prospect-meta-item in the
+   JSX), so a real `gap` provides spacing BETWEEN callouts -- "padding on
+   the outside, not spacing within" -- while each callout's own internal
+   text (title + value) keeps normal, un-stretched spacing. */
 .prospect-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0 1rem;
+  row-gap: 0.125rem;
   font-size: 0.9375rem;
   color: var(--color-text-muted);
-  /* Breathing room between Age/Level/ETA/Org Rank/Draft segments
-     (2026-08-26, Rees's spec) -- word-spacing widens the gaps around the
-     "·" separators without restructuring the text into separate
-     elements. Bumped again (0.15em -> 0.2em) the same day per a follow-up
-     "a bit more spacing" ask. */
-  word-spacing: 0.2em;
-  /* Further offset from the name specifically (2026-08-26 follow-up) --
-     on top of .prospect-headline's own flex `gap`, which applies evenly
-     between EVERY headline child (role/name/meta alike); this extra
-     margin only pushes meta further from name, leaving the role-pill-to-
-     name spacing untouched. */
-  margin-left: 1rem;
 }
 
 .prospect-meta b {
@@ -679,12 +701,13 @@ tbody tr:last-child td {
    the stat line reads as secondary detail, not competing with the name
    for attention. The <b> wrapper was removed in ProspectTable.tsx too,
    not just overridden here, so there's no leftover bold-by-default
-   markup if this rule ever gets removed. */
+   markup if this rule ever gets removed. Sits in .prospect-details now,
+   a flex sibling of .prospect-meta -- gap on the parent handles the
+   vertical spacing between them, no margin-top needed here anymore. */
 .prospect-stats {
   font-size: 0.9375rem;
   font-weight: 400;
   color: var(--color-text-muted);
-  margin-top: 0.25rem;
 }
 
 /* ── Role color-coding (2026-08-26) ──
@@ -778,6 +801,18 @@ tbody tr:last-child td {
     text-align: center;
     padding: 0.5rem 0.5rem;
     font-size: 0.8125rem;
+  }
+
+  /* .prospect-card-body doesn't wrap by default (nowrap, so .prospect-
+     namerow and .prospect-details can share a row at full width without
+     the details column randomly dropping below on a wide screen) -- but
+     at mobile width that squeezed .prospect-details down to ~25px,
+     wrapping every meta callout onto its own line and inflating card
+     height to 600+px. Stack name/role above meta/stats instead. */
+  .prospect-card-body {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 0.375rem;
   }
 }
 

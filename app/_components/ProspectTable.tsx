@@ -309,7 +309,14 @@ export function ProspectTable({ rows }: { rows: ProspectRow[] }) {
                   <span className="prospect-org">{r.orgAbbr ?? "—"}</span>
                 </div>
                 <div className="prospect-card-body">
-                  <div className="prospect-headline">
+                  {/* Role + Name group (2026-08-27, Rees's spec) -- its own
+                      block now, vertically centered by .prospect-card-body
+                      against .prospect-details next to it (which is taller,
+                      two lines: meta + stats). Used to be one row together
+                      with meta; splitting them out is what let Stats start
+                      at the same x as Meta regardless of name length -- see
+                      .prospect-details in globals.css. */}
+                  <div className="prospect-namerow">
                     <span className={`prospect-role ${roleClass(r.role)}`}>{r.role || "—"}</span>
                     <a
                       href={`https://atl-02.statsplus.net/thebigleague/player/${r.player_id}/`}
@@ -319,51 +326,70 @@ export function ProspectTable({ rows }: { rows: ProspectRow[] }) {
                     >
                       {r.first_name} {r.last_name}
                     </a>
-                    {/* Age/Level/ETA/Org Rank/Draft now sit to the right of
-                        the name on the same line (2026-08-26, Rees's spec --
-                        was its own line below the name), which is what
-                        actually shortens each card's height; the stat line
-                        stays on its own row below. */}
-                    <span className="prospect-meta">
-                      Age <b>{r.age ?? "—"}</b> · {levelLabel(r.level)}{r.teamAbbr ? ` (${r.teamAbbr})` : ""} · ETA <b>{r.eta ?? "—"}</b> · Org Rank{" "}
-                      <b>{rankLabel(r.prospect_org_rank)}</b>
-                      {r.delta?.isNew ? <NewBadge /> : <Delta value={r.delta?.prospectOrgRank} lowerIsBetter />} ·{" "}
-                      {undrafted ? (
-                        <span style={{ fontStyle: "italic" }}>INT</span>
-                      ) : (
-                        <span style={r.isRecentDraftPick ? { color: "#38bdf8", fontWeight: 700 } : undefined}>
-                          {r.draft_year ?? "—"} R{r.draft_round ?? "—"} Pk{r.draft_overall_pick ?? "—"}
-                        </span>
-                      )}
-                    </span>
                   </div>
-                  <div className="prospect-stats">
-                    {statLine(r)}
-                    {r.bio && (
-                      <>
-                        <button
-                          type="button"
-                          onClick={() => toggleBio(r.player_id)}
-                          aria-expanded={isOpen}
-                          style={bioToggle}
-                        >
-                          BIO {isOpen ? "▲" : "▼"}
-                        </button>
-                        {isOpen && (
-                          <div style={{ fontSize: 12, color: "var(--color-text-muted, #888)", marginTop: 4 }}>
-                            {capBio(r.bio)}
-                            {r.bioStale && r.bioDate && (
-                              <span
-                                title="This bio was written against an earlier snapshot -- ratings/rank have moved since."
-                                style={{ marginLeft: 4, fontStyle: "italic" }}
-                              >
-                                (stale since {fmtStaleDate(r.bioDate)})
-                              </span>
-                            )}
-                          </div>
+                  <div className="prospect-details">
+                    {/* Each callout is its own flex child now (2026-08-27,
+                        Rees's spec) -- was one text blob with word-spacing
+                        stretching every space, which also wrongly widened
+                        the space INSIDE "Org Rank" itself. A real `gap`
+                        between callouts (globals.css) fixes that: spacing
+                        lives between callouts, never inside one. */}
+                    <div className="prospect-meta">
+                      <span className="prospect-meta-item">Age <b>{r.age ?? "—"}</b></span>
+                      <span className="prospect-meta-item">{levelLabel(r.level)}{r.teamAbbr ? ` (${r.teamAbbr})` : ""}</span>
+                      <span className="prospect-meta-item">ETA <b>{r.eta ?? "—"}</b></span>
+                      <span className="prospect-meta-item">
+                        Org Rank <b>{rankLabel(r.prospect_org_rank)}</b>
+                        {r.delta?.isNew ? <NewBadge /> : <Delta value={r.delta?.prospectOrgRank} lowerIsBetter />}
+                      </span>
+                      {/* Role Rank (2026-08-27, new): leaguewide rank within
+                          this player's role bucket (SP/RP/C/1B/INF/SS/COF/
+                          CF/DH) by prospect potential -- computed server-side
+                          in scripts/compute-ratings.ts (player_computed.
+                          prospect_role_rank), not derived here. Placed right
+                          after Org Rank per spec. */}
+                      <span className="prospect-meta-item">
+                        Role Rank <b>{rankLabel(r.prospect_role_rank)}</b>
+                        {r.delta?.isNew ? <NewBadge /> : <Delta value={r.delta?.prospectRoleRank} lowerIsBetter />}
+                      </span>
+                      <span className="prospect-meta-item">
+                        {undrafted ? (
+                          <span style={{ fontStyle: "italic" }}>INT</span>
+                        ) : (
+                          <span style={r.isRecentDraftPick ? { color: "#38bdf8", fontWeight: 700 } : undefined}>
+                            {r.draft_year ?? "—"} R{r.draft_round ?? "—"} Pk{r.draft_overall_pick ?? "—"}
+                          </span>
                         )}
-                      </>
-                    )}
+                      </span>
+                    </div>
+                    <div className="prospect-stats">
+                      {statLine(r)}
+                      {r.bio && (
+                        <>
+                          <button
+                            type="button"
+                            onClick={() => toggleBio(r.player_id)}
+                            aria-expanded={isOpen}
+                            style={bioToggle}
+                          >
+                            BIO {isOpen ? "▲" : "▼"}
+                          </button>
+                          {isOpen && (
+                            <div style={{ fontSize: 12, color: "var(--color-text-muted, #888)", marginTop: 4 }}>
+                              {capBio(r.bio)}
+                              {r.bioStale && r.bioDate && (
+                                <span
+                                  title="This bio was written against an earlier snapshot -- ratings/rank have moved since."
+                                  style={{ marginLeft: 4, fontStyle: "italic" }}
+                                >
+                                  (stale since {fmtStaleDate(r.bioDate)})
+                                </span>
+                              )}
+                            </div>
+                          )}
+                        </>
+                      )}
+                    </div>
                   </div>
                 </div>
               </div>

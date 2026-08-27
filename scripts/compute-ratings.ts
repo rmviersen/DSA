@@ -342,6 +342,24 @@ async function main() {
     sorted.forEach((c, i) => prospectOrgRankByPlayer.set(c.player_id, i + 1));
   }
 
+  // Prospect role rank (2026-08-27, Rees's spec): leaguewide rank within
+  // role bucket (SP/RP/C/1B/INF/SS/COF/CF/DH), by prospect_potential --
+  // same idea as prospect_org_rank above, just grouped by role instead of
+  // org. Distinct from the pre-existing role_org_rank (role rank scoped
+  // to ORG, by Overall, not prospect-pool-scoped) and pos_rank (leaguewide
+  // by Overall, not Potential, not prospect-pool-scoped) -- neither of
+  // those already covered this.
+  const prospectRoleRankByPlayer = new Map<number, number>();
+  const prospectByRole = new Map<string | null, typeof prospectPool>();
+  for (const c of prospectPool) {
+    if (!prospectByRole.has(c.role)) prospectByRole.set(c.role, []);
+    prospectByRole.get(c.role)!.push(c);
+  }
+  for (const [, group] of prospectByRole) {
+    const sorted = [...group].sort((a, b) => b.prospect_potential - a.prospect_potential);
+    sorted.forEach((c, i) => prospectRoleRankByPlayer.set(c.player_id, i + 1));
+  }
+
   const rows = computed.map((c) => ({
     refresh_run_id: refreshRunId,
     player_id: c.player_id,
@@ -356,6 +374,7 @@ async function main() {
     prospect_rank: prospectRankByPlayer.get(c.player_id) ?? null,
     org_rank: orgRankByPlayer.get(c.player_id) ?? null,
     prospect_org_rank: prospectOrgRankByPlayer.get(c.player_id) ?? null,
+    prospect_role_rank: prospectRoleRankByPlayer.get(c.player_id) ?? null,
     eta: prospectRankByPlayer.has(c.player_id) ? estimateEta(c.role, effectiveLevel(playerById.get(c.player_id)?.level, playerById.get(c.player_id)?.league_id), c.overall, c.potential) : null,
     captured_at: capturedAt,
   }));

@@ -193,6 +193,7 @@ export interface PlayerRow extends RatingsSlice {
   prospect_rank: number | null;
   org_rank: number | null;
   prospect_org_rank: number | null;
+  prospect_role_rank: number | null; // leaguewide rank within role bucket, by prospect_potential (2026-08-27)
   role: string | null; // projected defensive role grouping (SP/RP/INF/OF/C/UTIL) -- distinct from `pos` (raw current position)
   draft_year: number | null;
   draft_round: number | null;
@@ -237,7 +238,7 @@ async function fetchComputedPlayers(opts: { orgId?: number; prospectsOnly?: bool
   const sortCol = opts.prospectsOnly ? "prospect_potential" : "overall";
   let cq = supabase
     .from("player_computed")
-    .select("player_id,overall,potential,prospect_potential,prospect_rank,org_rank,prospect_org_rank,role")
+    .select("player_id,overall,potential,prospect_potential,prospect_rank,org_rank,prospect_org_rank,prospect_role_rank,role")
     .eq("refresh_run_id", refreshRunId)
     .order(sortCol, { ascending: false })
     .limit(opts.limit + 50);
@@ -245,7 +246,7 @@ async function fetchComputedPlayers(opts: { orgId?: number; prospectsOnly?: bool
   if (idFilter) cq = cq.in("player_id", idFilter);
   const { data: computedData, error: computedErr } = await cq;
   if (computedErr) throw computedErr;
-  const computed = computedData as { player_id: number; overall: number; potential: number; prospect_potential: number; prospect_rank: number | null; org_rank: number | null; prospect_org_rank: number | null; role: string | null }[];
+  const computed = computedData as { player_id: number; overall: number; potential: number; prospect_potential: number; prospect_rank: number | null; org_rank: number | null; prospect_org_rank: number | null; prospect_role_rank: number | null; role: string | null }[];
   const relevantIds = computed.map((c) => c.player_id);
   if (relevantIds.length === 0) return [];
 
@@ -283,7 +284,8 @@ async function fetchComputedPlayers(opts: { orgId?: number; prospectsOnly?: bool
         first_name: p.first_name, last_name: p.last_name, age: p.age,
         team_name: team?.name ?? null, team_nickname: team?.nickname ?? null,
         overall: c.overall, potential: c.potential, prospect_potential: c.prospect_potential,
-        prospect_rank: c.prospect_rank, org_rank: c.org_rank, prospect_org_rank: c.prospect_org_rank, role: c.role,
+        prospect_rank: c.prospect_rank, org_rank: c.org_rank, prospect_org_rank: c.prospect_org_rank,
+        prospect_role_rank: c.prospect_role_rank, role: c.role,
         // StatsPlus returns literal 0, not null, for players who were never
         // drafted (international signees, etc.) -- confirmed 2026-08-19.
         // Normalize to null here so every consumer of PlayerRow gets a
@@ -608,6 +610,7 @@ export interface ProspectDelta {
   prospectPotential: number | null;
   prospectRank: number | null;
   prospectOrgRank: number | null;
+  prospectRoleRank: number | null; // 2026-08-27
   isNew: boolean; // true if the player has no row in the baseline snapshot
 }
 
@@ -726,15 +729,15 @@ export async function getTopProspectsDetailed(orgId?: number, baselineRefreshRun
 
   // Only for players currently on the list -- a player who fell off the top
   // 100 since the baseline doesn't need a delta, they're just not shown.
-  const baselineById = new Map<number, { overall: number; potential: number; prospect_potential: number; prospect_rank: number | null; prospect_org_rank: number | null }>();
+  const baselineById = new Map<number, { overall: number; potential: number; prospect_potential: number; prospect_rank: number | null; prospect_org_rank: number | null; prospect_role_rank: number | null }>();
   if (baselineRefreshRunId !== undefined) {
     for (let i = 0; i < ids.length; i += 500) {
       const chunk = ids.slice(i, i + 500);
       const { data, error } = await supabase.from("player_computed")
-        .select("player_id,overall,potential,prospect_potential,prospect_rank,prospect_org_rank")
+        .select("player_id,overall,potential,prospect_potential,prospect_rank,prospect_org_rank,prospect_role_rank")
         .eq("refresh_run_id", baselineRefreshRunId).in("player_id", chunk);
       if (error) throw error;
-      (data as never as { player_id: number; overall: number; potential: number; prospect_potential: number; prospect_rank: number | null; prospect_org_rank: number | null }[])
+      (data as never as { player_id: number; overall: number; potential: number; prospect_potential: number; prospect_rank: number | null; prospect_org_rank: number | null; prospect_role_rank: number | null }[])
         .forEach((b) => baselineById.set(b.player_id, b));
     }
   }
@@ -890,7 +893,7 @@ export async function getTopProspectsDetailed(orgId?: number, baselineRefreshRun
     if (baselineRefreshRunId !== undefined) {
       const b = baselineById.get(r.player_id);
       if (!b) {
-        delta = { overall: null, potential: null, prospectPotential: null, prospectRank: null, prospectOrgRank: null, isNew: true };
+        delta = { overall: null, potential: null, prospectPotential: null, prospectRank: null, prospectOrgRank: null, prospectRoleRank: null, isNew: true };
       } else {
         // Round each side to nearest 5 before diffing (see comment above
         // ProspectDelta) so the delta always matches the two visible numbers.
@@ -900,6 +903,7 @@ export async function getTopProspectsDetailed(orgId?: number, baselineRefreshRun
           prospectPotential: (roundGrade(r.prospect_potential) ?? 0) - (roundGrade(b.prospect_potential) ?? 0),
           prospectRank: r.prospect_rank !== null && b.prospect_rank !== null ? r.prospect_rank - b.prospect_rank : null,
           prospectOrgRank: r.prospect_org_rank !== null && b.prospect_org_rank !== null ? r.prospect_org_rank - b.prospect_org_rank : null,
+          prospectRoleRank: r.prospect_role_rank !== null && b.prospect_role_rank !== null ? r.prospect_role_rank - b.prospect_role_rank : null,
           isNew: false,
         };
       }
