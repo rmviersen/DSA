@@ -1,4 +1,4 @@
-import { getOrgTeams, getTopProspectsDetailed, getProspectSnapshotOptions, getTeamRankings } from "../../lib/queries";
+import { getOrgTeams, getTopProspectsDetailed, getProspectSnapshotOptions, getTeamRankings, TOP_PROSPECTS_LIMIT } from "../../lib/queries";
 import { ProspectFilters } from "./ProspectFilters";
 import { ProspectTable } from "./ProspectTable";
 import { TeamRankingsTable } from "./TeamRankingsTable";
@@ -49,7 +49,7 @@ export async function FarmSystemReportBody({
     <>
       <header className="page-header">
         <h1>{title}</h1>
-        <p>{orgId ? "Organization rankings by Prospect Potential" : "League-wide top 500 by Prospect Potential"}</p>
+        <p>{orgId ? "Organization rankings by Prospect Potential" : `League-wide top ${TOP_PROSPECTS_LIMIT} by Prospect Potential`}</p>
       </header>
       <ProspectFilters teams={teams} selectedOrgId={orgId} snapshots={snapshots} selectedBaselineId={baselineRefreshRunId} action={basePath} />
       {showRankings ? (

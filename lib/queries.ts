@@ -687,8 +687,12 @@ export interface ProspectRow extends PlayerRow {
 // already-computed data in the rating engine either way -- this only
 // controls how many cards the page renders/fetches, not what's computed.
 // Bio coverage (prospect_bios) is still just the original top-100 batch,
-// see the note below -- unaffected by this number either way.
-const TOP_PROSPECTS_LIMIT = 200;
+// see the note below -- unaffected by this number either way. Exported
+// (not just a local const) so FarmSystemReportBody's page-header subtitle
+// can read the real number instead of a hardcoded string that silently
+// went stale the last time this changed (found showing "top 500" live in
+// production after this had already been 200 for a while).
+export const TOP_PROSPECTS_LIMIT = 200;
 
 export async function getTopProspectsDetailed(orgId?: number, baselineRefreshRunId?: number): Promise<ProspectRow[]> {
   const base = await fetchComputedPlayers({ orgId, prospectsOnly: true, limit: TOP_PROSPECTS_LIMIT });
