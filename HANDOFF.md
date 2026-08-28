@@ -17,17 +17,13 @@ Reference docs, in the order you'd actually want to read them if you need the "w
 
 ## 2. Division of ownership
 
-**Cursor was removed from this project 2026-08-28** — Cowork is now the sole front-end collaborator, so the two-front-end-tools coordination concerns this section used to describe no longer apply. Kept as a plain ownership split rather than removed outright, since the backend/front-end boundary itself is still real:
+**Cursor was removed from this project 2026-08-28.** Rather than handing `app/**` to a second tool (Cowork), Claude Code now owns the *entire* codebase — backend and front end both. One engineering owner with full repo context, rather than splitting UI work across tools that each have to re-derive the data model from scratch. Cowork's role on this project is deliberately kept outside the codebase entirely — league/GM-facing operations (trades, roster moves, communications), not building or touching `app/**`. If that division changes again later, update this section rather than leaving it stale.
 
-**Backend session (Claude Code) owns:**
+**Claude Code owns the whole repo:**
 - `scripts/*.ts` (refresh.ts, compute-ratings.ts, compute-team-ratings.ts, import-draft-pool.ts)
-- `lib/statsplus-client.ts`, `lib/mappers.ts`, `lib/rating-engine.ts`, `lib/supabase-client.ts`
+- `lib/statsplus-client.ts`, `lib/mappers.ts`, `lib/rating-engine.ts`, `lib/supabase-client.ts`, `lib/queries.ts`
 - All Supabase migrations / schema changes
-- `lib/queries.ts` — **for now**. This is the data-access layer the current front end uses. If you're extending the existing pages, use it. If you're rebuilding the front end more substantially, treat it as a reference implementation you can replace. Coordinate with Rees before making big changes here.
-
-**Front end (Cowork) owns:**
-- `app/**` — pages, layouts, components
-- Anything else UI-specific you add (styling approach, component libraries, etc. — none of that has been decided, it's wide open)
+- `app/**` — pages, layouts, components, styling
 
 **Shared/read-only for both:** the Supabase database itself. Front-end work should treat every table as read-only (query only) — there is no scenario where the front end should be writing to the database directly. All writes happen through the backend's ingestion/compute scripts. This also means front-end work should never hold the `SUPABASE_SERVICE_ROLE_KEY` — see §3's secrets-location note for where that actually lives and why.
 
