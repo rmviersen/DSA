@@ -760,7 +760,7 @@ export interface ProspectRow extends PlayerRow {
   bio: string | null; // hand/AI-written blurb from prospect_bios, per prospect-bio-style-guide.md -- null for anyone not yet covered
   bioStale: boolean; // true if the stored bio was generated against an older refresh_run_id than "current"
   bioDate: string | null; // the league's in-game date (refresh_runs.game_date) for the refresh run this bio's data came from, shown next to the stale flag ("stale since mm/dd/yy") -- NOT when the bio text was typed
-  isRecentDraftPick: boolean; // true if draft_year matches the most recent imported draft class (see latestDraftClassImportId)
+  isRecentDraftPick: boolean; // true if draft_year matches the most recent draft year actually present in this prospect pool (fixed 2026-08-28 -- NOT the most recently imported draft-pool class, see getTopProspectsDetailed)
 }
 
 // Was 500 (expanded from 100 on 2026-08-20), shortened back down to 200
@@ -779,7 +779,17 @@ export async function getTopProspectsDetailed(orgId?: number, baselineRefreshRun
   const base = await fetchComputedPlayers({ orgId, prospectsOnly: true, limit: TOP_PROSPECTS_LIMIT });
   if (base.length === 0) return [];
   const ids = base.map((r) => r.player_id);
-  const latestDraftClass = await latestDraftClassImportId();
+  // "Most recent draft class" for the highlight, fixed 2026-08-28: this used
+  // to be latestDraftClassImportId() -- the newest *imported draft pool*,
+  // e.g. 2032 once that pool was loaded. That's right for getTopDraftees
+  // (the /draft page genuinely wants "the newest pool we loaded," pre-draft
+  // amateurs and all), but wrong here: importing a future draft pool doesn't
+  // mean any real prospect has actually been drafted with that year yet, so
+  // the highlight silently stopped matching anyone the moment 2032 was
+  // imported (no real player has draft_year=2032 -- that only gets set once
+  // StatsPlus reflects the real in-game draft). Now derived from the actual
+  // prospect pool being shown instead of the draft-pool-import table.
+  const latestDraftYear = base.reduce<number | null>((max, r) => (r.draft_year !== null && (max === null || r.draft_year > max) ? r.draft_year : max), null);
   const refreshRunId = await latestRefreshRunId();
 
   // Hand/AI-written blurbs, per prospect-bio-style-guide.md -- occasional
@@ -1011,7 +1021,7 @@ export async function getTopProspectsDetailed(orgId?: number, baselineRefreshRun
         const runId = bioById.get(r.player_id)?.refresh_run_id;
         return runId !== undefined ? (bioRunGameDateById.get(runId) ?? null) : null;
       })(),
-      isRecentDraftPick: r.draft_year !== null && latestDraftClass !== null && r.draft_year === latestDraftClass.draft_year,
+      isRecentDraftPick: r.draft_year !== null && latestDraftYear !== null && r.draft_year === latestDraftYear,
     };
   });
 }
