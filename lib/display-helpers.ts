@@ -62,3 +62,39 @@ export function teamLogoUrl(name: string | null, nickname: string | null): strin
   const slug = `${name}_${nickname}`.toLowerCase().replace(/[^a-z0-9]+/g, "_").replace(/^_+|_+$/g, "");
   return `https://atl-02.statsplus.net/thebigleague/reports/news/html/images/team_logos/${slug}_${LOGO_SIZE}.png`;
 }
+
+// Grade-color gradient, low to high: red -> orange -> yellow -> green -> light
+// blue (elite). Originally built for /org-minors (2026-08-19); pulled out
+// here 2026-08-27 so /players and /draft's PlayerTable can use the exact
+// same gradient instead of a second hand-copied one drifting out of sync.
+// Stops chosen to match real scouting-scale meaning (50 = MLB average, 65 =
+// plus/above-average, 80 = elite/generational), not a naive min/max stretch
+// of whatever's in the data this run.
+const GRADIENT_STOPS: { at: number; rgb: [number, number, number] }[] = [
+  { at: 20, rgb: [220, 38, 38] },   // red
+  { at: 40, rgb: [249, 115, 22] },  // orange
+  { at: 50, rgb: [234, 179, 8] },   // yellow
+  { at: 65, rgb: [34, 197, 94] },   // green
+  { at: 80, rgb: [56, 189, 248] },  // light blue
+];
+
+export function gradeStyle(v: number | null): { color: string; fontWeight: number } | undefined {
+  if (v === null) return undefined;
+  const stops = GRADIENT_STOPS;
+  let rgb: [number, number, number];
+  if (v <= stops[0].at) rgb = stops[0].rgb;
+  else if (v >= stops[stops.length - 1].at) rgb = stops[stops.length - 1].rgb;
+  else {
+    let i = 0;
+    while (i < stops.length - 2 && v > stops[i + 1].at) i++;
+    const a = stops[i], b = stops[i + 1];
+    const t = (v - a.at) / (b.at - a.at);
+    rgb = [
+      a.rgb[0] + (b.rgb[0] - a.rgb[0]) * t,
+      a.rgb[1] + (b.rgb[1] - a.rgb[1]) * t,
+      a.rgb[2] + (b.rgb[2] - a.rgb[2]) * t,
+    ];
+  }
+  const [r, g, b] = rgb.map(Math.round);
+  return { color: `rgb(${r},${g},${b})`, fontWeight: 700 };
+}

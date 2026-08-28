@@ -195,6 +195,7 @@ export interface PlayerRow extends RatingsSlice {
   prospect_org_rank: number | null;
   prospect_role_rank: number | null; // leaguewide rank within role bucket, by prospect_potential (2026-08-27)
   role: string | null; // projected defensive role grouping (SP/RP/INF/OF/C/UTIL) -- distinct from `pos` (raw current position)
+  ph: "H" | "P" | null; // hitter/pitcher, from player_computed -- added 2026-08-27 for /players and /draft's H/P filter
   draft_year: number | null;
   draft_round: number | null;
   draft_overall_pick: number | null;
@@ -238,7 +239,7 @@ async function fetchComputedPlayers(opts: { orgId?: number; prospectsOnly?: bool
   const sortCol = opts.prospectsOnly ? "prospect_potential" : "overall";
   let cq = supabase
     .from("player_computed")
-    .select("player_id,overall,potential,prospect_potential,prospect_rank,org_rank,prospect_org_rank,prospect_role_rank,role")
+    .select("player_id,overall,potential,prospect_potential,prospect_rank,org_rank,prospect_org_rank,prospect_role_rank,role,ph")
     .eq("refresh_run_id", refreshRunId)
     .order(sortCol, { ascending: false })
     .limit(opts.limit + 50);
@@ -246,7 +247,7 @@ async function fetchComputedPlayers(opts: { orgId?: number; prospectsOnly?: bool
   if (idFilter) cq = cq.in("player_id", idFilter);
   const { data: computedData, error: computedErr } = await cq;
   if (computedErr) throw computedErr;
-  const computed = computedData as { player_id: number; overall: number; potential: number; prospect_potential: number; prospect_rank: number | null; org_rank: number | null; prospect_org_rank: number | null; prospect_role_rank: number | null; role: string | null }[];
+  const computed = computedData as { player_id: number; overall: number; potential: number; prospect_potential: number; prospect_rank: number | null; org_rank: number | null; prospect_org_rank: number | null; prospect_role_rank: number | null; role: string | null; ph: "H" | "P" | null }[];
   const relevantIds = computed.map((c) => c.player_id);
   if (relevantIds.length === 0) return [];
 
@@ -285,7 +286,7 @@ async function fetchComputedPlayers(opts: { orgId?: number; prospectsOnly?: bool
         team_name: team?.name ?? null, team_nickname: team?.nickname ?? null,
         overall: c.overall, potential: c.potential, prospect_potential: c.prospect_potential,
         prospect_rank: c.prospect_rank, org_rank: c.org_rank, prospect_org_rank: c.prospect_org_rank,
-        prospect_role_rank: c.prospect_role_rank, role: c.role,
+        prospect_role_rank: c.prospect_role_rank, role: c.role, ph: c.ph,
         // StatsPlus returns literal 0, not null, for players who were never
         // drafted (international signees, etc.) -- confirmed 2026-08-19.
         // Normalize to null here so every consumer of PlayerRow gets a

@@ -2,6 +2,10 @@
 
 import { useMemo, useState } from "react";
 import type { MinorsPlayerRow, TeamPositionCounts } from "@/lib/org-minors-query";
+// gradeStyle moved to lib/display-helpers.ts (2026-08-27) so /players and
+// /draft's PlayerTable can share the exact same color gradient instead of a
+// second hand-copied one.
+import { gradeStyle } from "@/lib/display-helpers";
 
 type SortKey = "name" | "team" | "level" | "age" | "pos" | "overall" | "potential" | "promote";
 
@@ -9,39 +13,6 @@ const LEVEL_ORDER: Record<string, number> = { MLB: 0, AAA: 1, AA: 2, "A+": 3, "A
 
 function fmt1(n: number | null): string {
   return n === null ? "—" : n.toFixed(1);
-}
-
-// Grade-color gradient, low to high: red -> orange -> yellow -> green -> light
-// blue (elite). Stops chosen to match real scouting-scale meaning (50 = MLB
-// average, 65 = plus/above-average, 80 = elite/generational), not a naive
-// min/max stretch of whatever's in the data this run.
-const GRADIENT_STOPS: { at: number; rgb: [number, number, number] }[] = [
-  { at: 20, rgb: [220, 38, 38] },   // red
-  { at: 40, rgb: [249, 115, 22] },  // orange
-  { at: 50, rgb: [234, 179, 8] },   // yellow
-  { at: 65, rgb: [34, 197, 94] },   // green
-  { at: 80, rgb: [56, 189, 248] },  // light blue
-];
-
-function gradeStyle(v: number | null): { color: string; fontWeight: number } | undefined {
-  if (v === null) return undefined;
-  const stops = GRADIENT_STOPS;
-  let rgb: [number, number, number];
-  if (v <= stops[0].at) rgb = stops[0].rgb;
-  else if (v >= stops[stops.length - 1].at) rgb = stops[stops.length - 1].rgb;
-  else {
-    let i = 0;
-    while (i < stops.length - 2 && v > stops[i + 1].at) i++;
-    const a = stops[i], b = stops[i + 1];
-    const t = (v - a.at) / (b.at - a.at);
-    rgb = [
-      a.rgb[0] + (b.rgb[0] - a.rgb[0]) * t,
-      a.rgb[1] + (b.rgb[1] - a.rgb[1]) * t,
-      a.rgb[2] + (b.rgb[2] - a.rgb[2]) * t,
-    ];
-  }
-  const [r, g, b] = rgb.map(Math.round);
-  return { color: `rgb(${r},${g},${b})`, fontWeight: 700 };
 }
 
 export default function MinorsTable({ rows, teamCounts }: { rows: MinorsPlayerRow[]; teamCounts: TeamPositionCounts[] }) {
