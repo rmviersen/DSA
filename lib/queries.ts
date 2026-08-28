@@ -722,14 +722,32 @@ export async function getProspectSnapshotOptions(): Promise<ProspectSnapshotOpti
   // for this report. Capped at the 30 most recent -- nobody realistically
   // wants to compare against something from dozens of refreshes ago, and
   // this list is expected to keep growing indefinitely otherwise.
+  //
+  // status="succeeded" added 2026-08-29 -- belt-and-suspenders against a run
+  // that failed outright showing up here (a failed run can still write some
+  // player_computed rows before whatever step broke it, since refresh.ts
+  // writes incrementally, not in one atomic transaction, so the hasSnapshot
+  // check below alone can't be trusted to keep every failed run out).
+  //
+  // Investigated 2026-08-29 after Rees spotted two options for the same game
+  // date (10/8/2031): NOT actually a failed run in this case -- both refresh_
+  // runs 13 and 14 came back status="succeeded" with identical player_
+  // computed counts (13870 each), started 9 minutes apart. That's the
+  // automated pipeline firing twice for a game date that hadn't actually
+  // advanced in-game -- a duplicate/redundant run, not a broken one. Fixed
+  // below by deduping on game_date (keep the highest-id -- i.e. most
+  // recent -- run per date) in addition to the status filter, so a genuine
+  // duplicate run doesn't produce two selectable entries for one date
+  // either, regardless of why the duplicate happened.
   const { data: runsData, error: runsErr } = await supabase
     .from("refresh_runs")
     .select("id,game_date,started_at")
+    .eq("status", "succeeded")
     .not("game_date", "is", null)
     .order("id", { ascending: false })
     .limit(30);
   if (runsErr) throw runsErr;
-  const candidates = runsData as { id: number; game_date: string | null; started_at: string }[];
+  const candidates = runsData as { id: number; game_date: string; started_at: string }[];
   if (candidates.length === 0) return [];
 
   const hasSnapshot = await Promise.all(
@@ -741,8 +759,17 @@ export async function getProspectSnapshotOptions(): Promise<ProspectSnapshotOpti
   );
   const validIds = new Set(hasSnapshot.filter((r) => r.has).map((r) => r.id));
 
+  const seenDates = new Set<string>();
   return candidates
     .filter((r) => validIds.has(r.id))
+    // `candidates` is already ordered id-descending, so the first candidate
+    // seen for a given game_date is the most recent one -- keep that, drop
+    // any older duplicate runs for the same date.
+    .filter((r) => {
+      if (seenDates.has(r.game_date)) return false;
+      seenDates.add(r.game_date);
+      return true;
+    })
     .map((r) => ({ refreshRunId: r.id, gameDate: r.game_date, startedAt: r.started_at }));
 }
 
