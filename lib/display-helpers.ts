@@ -10,6 +10,16 @@
 // display-only helper that a client component might need should go here,
 // not in queries.ts, even if queries.ts also re-exports it for convenience.
 
+// A player's actual StatsPlus profile page (2026-08-28, Rees's ask, for
+// /players and the Minor League System page) -- confirmed live (HTTP 200,
+// real player-page HTML) against the same base URL the ingestion pipeline
+// already uses. No auth needed to view it. Pure string formatting, no
+// Supabase dependency -- belongs here, not org-minors-query.ts, so /players'
+// client-side PlayerTable.tsx can safely import it as a value.
+export function statsPlusPlayerUrl(playerId: number): string {
+  return `https://atl-02.statsplus.net/thebigleague/player/${playerId}`;
+}
+
 // Public-facing display rule (2026-08-18): never show Overall/Potential/
 // Prospect Potential at full precision anywhere a reader outside this org
 // could see it (Slack reports, eventually the public site) — that precision

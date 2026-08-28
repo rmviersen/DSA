@@ -10,6 +10,6 @@ export const dynamic = "force-dynamic";
 export default async function OrgMinorsPage({ searchParams }: { searchParams: Promise<{ org?: string }> }) {
   const params = await searchParams;
   const orgId = params.org ? Number(params.org) : DEFAULT_ORG_ID;
-  const { rows, teamCounts } = await getOrgMinorsPlayers(orgId);
-  return <MinorsTable rows={rows} teamCounts={teamCounts} />;
+  const { rows, teamCounts, roleHealth } = await getOrgMinorsPlayers(orgId);
+  return <MinorsTable rows={rows} teamCounts={teamCounts} roleHealth={roleHealth} />;
 }

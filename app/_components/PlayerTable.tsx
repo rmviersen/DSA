@@ -7,7 +7,7 @@ import type { PlayerRow } from "../../lib/queries";
 // would crash the browser bundle if a "use client" component pulled in even
 // one unrelated value export from that file. See display-helpers.ts's top
 // comment (and ProspectTable.tsx, which hit this for real first).
-import { gradeStyle } from "../../lib/display-helpers";
+import { gradeStyle, statsPlusPlayerUrl } from "../../lib/display-helpers";
 
 // Raw/full precision throughout (2026-08-27, Rees's spec) -- both /players
 // and /draft (the two pages sharing this component) are admin-only, not on
@@ -202,7 +202,10 @@ export function PlayerTable({ rows, showTeam, showProspectCols }: { rows: Player
           <tbody>
             {sortedRows.map((r) => (
               <tr key={r.player_id}>
-                <td>{r.first_name} {r.last_name}</td>
+                {/* StatsPlus profile link (2026-08-28, Rees's ask -- same
+                    change made on the Minor League System page). New tab so
+                    the table's sort/filter state isn't lost. */}
+                <td><a href={statsPlusPlayerUrl(r.player_id)} target="_blank" rel="noopener noreferrer" style={{ color: "inherit" }}>{r.first_name} {r.last_name}</a></td>
                 <td>{r.pos ?? "—"}</td>
                 {showTeam && <td>{r.team_name ? `${r.team_name} ${r.team_nickname}` : "—"}</td>}
                 <td>{r.age ?? "—"}</td>
