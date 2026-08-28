@@ -5,6 +5,7 @@
   "type": "module",
   "scripts": {
     "refresh": "tsx scripts/refresh.ts",
+    "check-new-sim": "tsx scripts/check-new-sim.ts",
     "refresh:public-only": "tsx scripts/refresh.ts --skip-ratings",
     "compute-ratings": "tsx scripts/compute-ratings.ts",
     "compute-team-ratings": "tsx scripts/compute-team-ratings.ts",

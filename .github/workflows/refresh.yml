@@ -1,17 +1,26 @@
 name: Refresh DSA data
 
-# Manually triggerable (workflow_dispatch) so the league-refresh-detect Claude
-# routine can fire this via GitHub's API the moment it sees the StatsPlus Bot
-# Slack announcement (2026-08-28) -- see platform/HANDOFF.md for the full
-# design. Secrets here (SUPABASE_SERVICE_ROLE_KEY, STATSPLUS_API_TOKEN) live
-# only in this repo's Actions secrets store -- never in a file, never visible
-# to Cowork's folder access to this repo, only injected at runtime and masked
-# in logs.
+# Fully self-contained automation (2026-08-28) -- see platform/HANDOFF.md for
+# the full design and the earlier Slack-routine approach this replaced.
+# Runs on its own schedule and detects new data itself (StatsPlus's own
+# public, no-auth current-date endpoint vs. Supabase's latest succeeded
+# refresh) -- no external trigger, no Slack dependency, no agent in the
+# critical path. workflow_dispatch is kept too, for a manual/forced run
+# (backfills, testing) -- a manual run always proceeds, skipping the
+# new-data check. Secrets here (SUPABASE_SERVICE_ROLE_KEY, STATSPLUS_API_TOKEN)
+# live only in this repo's Actions secrets store -- never in a file, never
+# visible to Cowork's folder access to this repo, only injected at runtime
+# and masked in logs.
 on:
+  schedule:
+    # Every 30 minutes. GitHub does not guarantee exact timing on schedule
+    # triggers (can slip further under platform load) -- fine here, "within
+    # about half an hour of a sim" is the actual target, not split-second.
+    - cron: "*/30 * * * *"
   workflow_dispatch:
     inputs:
       reason:
-        description: "Why this run was triggered (e.g. the game date the routine detected)"
+        description: "Why this run was triggered (informational only)"
         required: false
         default: "manual trigger"
 
@@ -32,7 +41,19 @@ jobs:
 
       - run: npm ci
 
+      - name: Check for new sim data
+        id: check
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+          STATSPLUS_BASE_URL: https://atl-02.statsplus.net/thebigleague/api
+        run: npm run check-new-sim
+
+      # A scheduled tick only proceeds if new data was actually found -- most
+      # ticks stop here. A manual workflow_dispatch always proceeds (forcing
+      # a run doesn't make sense if it's gated on the same check).
       - name: Refresh from StatsPlus
+        if: steps.check.outputs.new_data == 'true' || github.event_name == 'workflow_dispatch'
         env:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
@@ -41,12 +62,14 @@ jobs:
         run: npm run refresh
 
       - name: Compute player ratings
+        if: steps.check.outputs.new_data == 'true' || github.event_name == 'workflow_dispatch'
         env:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
         run: npm run compute-ratings
 
       - name: Compute team ratings
+        if: steps.check.outputs.new_data == 'true' || github.event_name == 'workflow_dispatch'
         env:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
