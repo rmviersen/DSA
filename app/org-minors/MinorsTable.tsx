@@ -13,6 +13,11 @@ type SortKey = "name" | "team" | "level" | "age" | "pos" | "role" | "overall" | 
 
 const LEVEL_ORDER: Record<string, number> = { MLB: 0, AAA: 1, AA: 2, "A+": 3, "A-": 4, Rookie: 5 };
 
+// Same order as LEVEL_ORDER plus "Int'l" (the International Academy box,
+// which LEVEL_ORDER doesn't need since it's never sorted against a real
+// level number) -- used for the new Level filter buttons (2026-08-28).
+const LEVEL_FILTER_ORDER = ["MLB", "AAA", "AA", "A+", "A-", "Rookie", "Int'l"];
+
 // Canonical role order (2026-08-28, Rees's spec) -- used for the role
 // filter buttons, the roster tables' Role column sort, AND the RAG table's
 // row order below (the RAG table interleaves its two aggregate rows into
@@ -31,6 +36,12 @@ export default function MinorsTable({ rows, teamCounts, roleHealth }: { rows: Mi
   // Multi-select role filter, same pattern as PlayerTable.tsx/ProspectTable.tsx
   // (2026-08-28, Rees's ask -- clickable role buttons instead of a dropdown).
   const [roleFilter, setRoleFilter] = useState<Set<string>>(new Set());
+  // Level filter (2026-08-28, Rees's ask) -- same multi-select button
+  // pattern as Role/H-P above. Filters which TEAM BOXES show below, not
+  // individual rows within a box (a box's level is fixed) -- same scope as
+  // the existing filters, which the page's own caption already describes as
+  // applying "to every team box."
+  const [levelFilter, setLevelFilter] = useState<Set<string>>(new Set());
   const [sortKey, setSortKey] = useState<SortKey>("potential");
   const [sortDir, setSortDir] = useState<"asc" | "desc">("desc");
 
@@ -56,6 +67,15 @@ export default function MinorsTable({ rows, teamCounts, roleHealth }: { rows: Mi
     });
   }
 
+  function toggleLevel(level: string) {
+    setLevelFilter((prev) => {
+      const next = new Set(prev);
+      if (next.has(level)) next.delete(level);
+      else next.add(level);
+      return next;
+    });
+  }
+
   const phFiltered = useMemo(() => rows.filter((r) => filter === "all" || r.ph === filter), [rows, filter]);
 
   // Role options derived from the current H/P-filtered set, same pattern as
@@ -64,6 +84,15 @@ export default function MinorsTable({ rows, teamCounts, roleHealth }: { rows: Mi
     const present = new Set(phFiltered.map((r) => r.role).filter((r): r is string => !!r));
     return ROLE_FILTER_ORDER.filter((role) => present.has(role));
   }, [phFiltered]);
+
+  // Level options -- not scoped to phFiltered/roleFilter (unlike roleOptions
+  // above): which levels exist is a property of the org's affiliates, not
+  // of the H/P or Role selection, so this list shouldn't narrow as those
+  // change the way Role's does.
+  const levelOptions = useMemo(() => {
+    const present = new Set(teamCounts.map((t) => t.levelLabel));
+    return LEVEL_FILTER_ORDER.filter((lvl) => present.has(lvl));
+  }, [teamCounts]);
 
   const filtered = useMemo(
     () => (roleFilter.size === 0 ? phFiltered : phFiltered.filter((r) => r.role !== null && roleFilter.has(r.role))),
@@ -110,9 +139,9 @@ export default function MinorsTable({ rows, teamCounts, roleHealth }: { rows: Mi
     }
     // Order teams the same way the position-counts table does (by level).
     return teamCounts
-      .filter((t) => groups.has(t.team_id))
+      .filter((t) => groups.has(t.team_id) && (levelFilter.size === 0 || levelFilter.has(t.levelLabel)))
       .map((t) => ({ team: t, players: groups.get(t.team_id)! }));
-  }, [sorted, teamCounts]);
+  }, [sorted, teamCounts, levelFilter]);
 
   // Role Health is stored role-major (roleHealth[i].byLevel[levelIdx]) --
   // 2026-08-28's card redesign needs it level-major instead (one card per
@@ -265,6 +294,35 @@ export default function MinorsTable({ rows, teamCounts, roleHealth }: { rows: Mi
             style={{ padding: "3px 10px", fontSize: 12, border: "1px solid var(--color-border-strong)", borderRadius: 4, background: "transparent", cursor: "pointer" }}
           >
             Clear roles
+          </button>
+        )}
+        {/* Level filter (2026-08-28) -- same clickable multi-select button
+            pattern as Role above, filtering which team boxes show below. */}
+        <span style={{ fontSize: 12, marginLeft: 8 }}>Level</span>
+        {levelOptions.map((level) => (
+          <button
+            key={level}
+            onClick={() => toggleLevel(level)}
+            aria-pressed={levelFilter.has(level)}
+            style={{
+              padding: "3px 10px",
+              fontSize: 12,
+              border: "1px solid var(--color-border-strong)",
+              borderRadius: 4,
+              background: levelFilter.has(level) ? "var(--color-navy)" : "transparent",
+              color: levelFilter.has(level) ? "var(--color-text-on-navy)" : "inherit",
+              cursor: "pointer",
+            }}
+          >
+            {level}
+          </button>
+        ))}
+        {levelFilter.size > 0 && (
+          <button
+            onClick={() => setLevelFilter(new Set())}
+            style={{ padding: "3px 10px", fontSize: 12, border: "1px solid var(--color-border-strong)", borderRadius: 4, background: "transparent", cursor: "pointer" }}
+          >
+            Clear levels
           </button>
         )}
       </div>
