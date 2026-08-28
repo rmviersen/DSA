@@ -192,8 +192,16 @@ async function main() {
     const mlbCount = await playerCount((q) => q.select("*", { count: "exact", head: true }).eq("level", 1).gte("league_id", 0).neq("retired", true).neq("free_agent", true));
     const minorLeagueCount = await playerCount((q) => q.select("*", { count: "exact", head: true }).gte("level", 2).lte("level", 6).neq("retired", true).neq("free_agent", true));
     const internationalCount = await playerCount((q) => q.select("*", { count: "exact", head: true }).eq("level", 1).lt("league_id", 0).neq("retired", true).neq("free_agent", true));
-    const draftPoolCount = await playerCount((q) => q.select("*", { count: "exact", head: true }).eq("free_agent", true).eq("draft_eligible", true));
-    const freeAgentCount = await playerCount((q) => q.select("*", { count: "exact", head: true }).eq("free_agent", true).eq("draft_eligible", false));
+    // Bug found 2026-08-28 via the first real run: retired players ALSO
+    // have free_agent=true (confirmed directly against real data), so these
+    // two need the same .neq("retired", true) guard the three roster
+    // buckets above already had -- without it, all 31,945 retired players
+    // leaked into free_agent_count (34,430 instead of the real ~2,485).
+    // draft_pool_count happened to come out right anyway (no retired row
+    // currently has draft_eligible=true), but the guard belongs here too --
+    // relying on that coincidence would be a real, if currently-invisible, bug.
+    const draftPoolCount = await playerCount((q) => q.select("*", { count: "exact", head: true }).eq("free_agent", true).eq("draft_eligible", true).neq("retired", true));
+    const freeAgentCount = await playerCount((q) => q.select("*", { count: "exact", head: true }).eq("free_agent", true).eq("draft_eligible", false).neq("retired", true));
     const retiredCount = await playerCount((q) => q.select("*", { count: "exact", head: true }).eq("retired", true));
     console.log(`  MLB ${mlbCount}, Minors ${minorLeagueCount}, Int'l ${internationalCount}, Draft pool ${draftPoolCount}, Free agents ${freeAgentCount}, Retired ${retiredCount}`);
 
