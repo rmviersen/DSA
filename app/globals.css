@@ -249,6 +249,67 @@ body {
   background: rgba(255, 255, 255, 0.08);
 }
 
+/* "My Team" hover dropdown (2026-08-28) -- first nav item with subpages
+   (Minor League System now, Team Rankings/Trade Tracker later). Hover-only
+   by design, no click-to-open state: the trigger itself has no page of its
+   own to navigate to yet. Positioned/sized to sit inline with the plain
+   .site-nav-links <a> siblings so the row doesn't visually break. */
+.site-nav-dropdown {
+  position: relative;
+}
+
+.site-nav-dropdown-trigger {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3em;
+  font-family: var(--font-display), system-ui, sans-serif;
+  font-size: 0.9375rem;
+  font-weight: 600;
+  color: var(--color-text-on-navy-muted);
+  padding: 0.5rem 0.875rem;
+  border-radius: var(--radius-sm);
+  cursor: default;
+  transition: color 0.15s, background 0.15s;
+}
+
+.site-nav-dropdown-trigger::after {
+  content: "\25BE"; /* ▾ */
+  font-size: 0.8em;
+}
+
+.site-nav-dropdown:hover .site-nav-dropdown-trigger,
+.site-nav-dropdown:focus-within .site-nav-dropdown-trigger {
+  color: var(--color-text-on-navy);
+  background: rgba(255, 255, 255, 0.08);
+}
+
+.site-nav-dropdown-menu {
+  display: none;
+  position: absolute;
+  top: 100%;
+  left: 0;
+  flex-direction: column;
+  min-width: 12rem;
+  padding: 0.4rem;
+  margin-top: 0.25rem;
+  background: var(--color-navy);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: var(--radius-sm);
+  box-shadow: var(--shadow-md);
+  z-index: 20;
+}
+
+.site-nav-dropdown:hover .site-nav-dropdown-menu,
+.site-nav-dropdown:focus-within .site-nav-dropdown-menu {
+  display: flex;
+}
+
+.site-nav-dropdown-menu a {
+  padding: 0.5rem 0.75rem;
+  border-radius: var(--radius-sm);
+  white-space: nowrap;
+}
+
 .site-game-date {
   font-size: 0.75rem;
   color: var(--color-text-on-navy-muted);

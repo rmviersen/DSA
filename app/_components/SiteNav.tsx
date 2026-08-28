@@ -4,11 +4,24 @@ import { buttonVariants } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import { ThemeToggle } from "./ThemeToggle";
 
-const NAV_ITEMS = [
+// A plain item is a direct link; a dropdown item (2026-08-28, "My Team")
+// opens on hover and lists its subpages -- the hub page itself isn't built
+// yet, so its own entry has no href of its own for now, just children.
+// Add more children here as My Team's other modules (Team Rankings, Trade
+// Tracker) ship -- no other nav code needs to change.
+type NavItem =
+  | { href: string; label: string; children?: undefined }
+  | { label: string; href?: undefined; children: { href: string; label: string }[] };
+
+const NAV_ITEMS: NavItem[] = [
   // Rees's intended home/landing page as site owner (2026-08-28) -- listed
   // first deliberately. Automatically owner-only via middleware.ts (not in
   // GUEST_ALLOWED_PATHS), so no separate visibility check needed here.
   { href: "/admin", label: "Admin" },
+  // "My Team" hub page (2026-08-28) -- not built yet, this is deliberately a
+  // hover-dropdown-only entry (no href) until it exists. First module:
+  // Minor League System (moved here from its own top-level nav slot).
+  { label: "My Team", children: [{ href: "/org-minors", label: "Minor League System" }] },
   { href: "/players", label: "Top Players" },
   // Points at the guest-facing /TBL/prospects (cards, no side-by-side
   // System Rankings table) instead of the internal /prospects combined
@@ -19,10 +32,12 @@ const NAV_ITEMS = [
   // ConditionalNav.tsx) -- a real owner still gets "Full Site ->" back
   // to the internal pages, same as the guest-view toggle already does.
   { href: "/TBL/prospects", label: "Top Prospects" },
-  { href: "/draft", label: "Top Draftees" },
-  { href: "/org-minors", label: "Minor League System" },
+  // Relabeled from "Top Draftees" to "Draft Pool" 2026-08-28, matching
+  // Rees's own naming once draft-pool imports (2031, 2032) became a real,
+  // ongoing part of this project rather than a one-off.
+  { href: "/draft", label: "Draft Pool" },
   { href: "/glossary", label: "Glossary" },
-] as const;
+];
 
 export function SiteNav({ latestGameDate, isRealOwner }: { latestGameDate: string | null; isRealOwner: boolean }) {
   return (
@@ -36,11 +51,24 @@ export function SiteNav({ latestGameDate, isRealOwner }: { latestGameDate: strin
           </span>
         </Link>
         <div className="site-nav-links">
-          {NAV_ITEMS.map(({ href, label }) => (
-            <Link key={href} href={href}>
-              {label}
-            </Link>
-          ))}
+          {NAV_ITEMS.map((item) =>
+            item.children ? (
+              <div key={item.label} className="site-nav-dropdown">
+                <span className="site-nav-dropdown-trigger">{item.label}</span>
+                <div className="site-nav-dropdown-menu">
+                  {item.children.map((c) => (
+                    <Link key={c.href} href={c.href}>
+                      {c.label}
+                    </Link>
+                  ))}
+                </div>
+              </div>
+            ) : (
+              <Link key={item.href} href={item.href}>
+                {item.label}
+              </Link>
+            )
+          )}
         </div>
         {/* "Preview as Guest" toggle (2026-08-25) -- SiteNav only ever
             renders for a real, non-previewing owner in practice (a real
