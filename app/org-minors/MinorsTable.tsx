@@ -1,6 +1,7 @@
 "use client";
 
 import { useMemo, useState } from "react";
+import Link from "next/link";
 import type { MinorsPlayerRow, TeamPositionCounts, RoleHealthRow } from "@/lib/org-minors-query";
 // gradeStyle/percentileStyle/statsPlusPlayerUrl: pure, no-Supabase-dependency
 // helpers, live in display-helpers.ts specifically so a "use client"
@@ -382,12 +383,13 @@ export default function MinorsTable({ rows, teamCounts, roleHealth }: { rows: Mi
                   {players.map((r) => (
                     <tr key={r.player_id}>
                       <td style={{ padding: "3px 8px", borderBottom: "1px solid var(--color-border, #333)", whiteSpace: "nowrap" }}>
-                        {/* StatsPlus profile link (2026-08-28, Rees's ask --
-                            same change made to /players). Opens in a new tab
-                            so the roster view isn't lost. */}
-                        <a href={statsPlusPlayerUrl(r.player_id)} target="_blank" rel="noopener noreferrer" style={{ color: "inherit" }}>
+                        {/* Name links to our own player detail page
+                            (2026-08-29); StatsPlus moved to its own small
+                            "↗" link right after. */}
+                        <Link href={`/players/${r.player_id}`} style={{ color: "inherit" }}>
                           {r.first_name} {r.last_name}
-                        </a>
+                        </Link>
+                        <a href={statsPlusPlayerUrl(r.player_id)} target="_blank" rel="noopener noreferrer" title="View on StatsPlus" style={{ marginLeft: 4, fontSize: 11, opacity: 0.7 }}>↗</a>
                         {!r.available && <span title="Injured, not back within 7 days" style={{ marginLeft: 4, color: "#c0392b" }}>✚</span>}
                       </td>
                       <td style={{ padding: "3px 8px", borderBottom: "1px solid var(--color-border, #333)" }}>{r.age ?? "—"}</td>

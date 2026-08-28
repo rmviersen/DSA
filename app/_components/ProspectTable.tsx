@@ -1,13 +1,14 @@
 "use client";
 
 import { useMemo, useState, type CSSProperties } from "react";
+import Link from "next/link";
 import type { ProspectRow } from "../../lib/queries";
 // Import from display-helpers directly, NOT queries.ts -- queries.ts also
 // creates a Supabase client at module scope using server-only secrets, which
 // would get bundled into the browser (and crash) if a "use client" component
 // pulls in even one unrelated value export from that file. See
 // display-helpers.ts's top comment.
-import { levelLabel, teamLogoUrl } from "../../lib/display-helpers";
+import { levelLabel, statsPlusPlayerUrl, teamLogoUrl } from "../../lib/display-helpers";
 
 // Bio length cap (2026-08-20) -- a long unbroken write-up was inflating the
 // table's auto column widths back when this was a <table>; kept as a
@@ -318,13 +319,21 @@ export function ProspectTable({ rows }: { rows: ProspectRow[] }) {
                       .prospect-details in globals.css. */}
                   <div className="prospect-namerow">
                     <span className={`prospect-role ${roleClass(r.role)}`}>{r.role || "—"}</span>
+                    {/* Name now links to our own player detail page
+                        (2026-08-29, Rees's spec) -- StatsPlus moved to its
+                        own small "↗" link right after, rather than being
+                        the name's own destination. */}
+                    <Link href={`/players/${r.player_id}`} className="prospect-name">
+                      {r.first_name} {r.last_name}
+                    </Link>
                     <a
-                      href={`https://atl-02.statsplus.net/thebigleague/player/${r.player_id}/`}
+                      href={statsPlusPlayerUrl(r.player_id)}
                       target="_blank"
                       rel="noopener noreferrer"
-                      className="prospect-name"
+                      title="View on StatsPlus"
+                      style={{ marginLeft: 4, fontSize: 11, opacity: 0.7 }}
                     >
-                      {r.first_name} {r.last_name}
+                      ↗
                     </a>
                   </div>
                   <div className="prospect-details">

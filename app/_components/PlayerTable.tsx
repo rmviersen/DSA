@@ -1,6 +1,7 @@
 "use client";
 
 import { useMemo, useState } from "react";
+import Link from "next/link";
 import type { PlayerRow } from "../../lib/queries";
 // Import from display-helpers directly, NOT queries.ts -- queries.ts also
 // creates a Supabase client at module scope using server-only secrets, which
@@ -205,7 +206,12 @@ export function PlayerTable({ rows, showTeam, showProspectCols }: { rows: Player
                 {/* StatsPlus profile link (2026-08-28, Rees's ask -- same
                     change made on the Minor League System page). New tab so
                     the table's sort/filter state isn't lost. */}
-                <td><a href={statsPlusPlayerUrl(r.player_id)} target="_blank" rel="noopener noreferrer" style={{ color: "inherit" }}>{r.first_name} {r.last_name}</a></td>
+                <td style={{ whiteSpace: "nowrap" }}>
+                  {/* Name links to our own player detail page (2026-08-29);
+                      StatsPlus is a small separate "↗" link right after. */}
+                  <Link href={`/players/${r.player_id}`} style={{ color: "inherit" }}>{r.first_name} {r.last_name}</Link>
+                  <a href={statsPlusPlayerUrl(r.player_id)} target="_blank" rel="noopener noreferrer" title="View on StatsPlus" style={{ marginLeft: 4, fontSize: 11, opacity: 0.7 }}>↗</a>
+                </td>
                 <td>{r.pos ?? "—"}</td>
                 {showTeam && <td>{r.team_name ? `${r.team_name} ${r.team_nickname}` : "—"}</td>}
                 <td>{r.age ?? "—"}</td>
