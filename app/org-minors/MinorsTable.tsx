@@ -32,7 +32,9 @@ function fmt0(n: number | null): string {
 
 export default function MinorsTable({ rows, teamCounts, roleHealth }: { rows: MinorsPlayerRow[]; teamCounts: TeamPositionCounts[]; roleHealth: RoleHealthRow[] }) {
   const [filter, setFilter] = useState<"all" | "H" | "P">("all");
-  const [roleFilter, setRoleFilter] = useState<string>("all");
+  // Multi-select role filter, same pattern as PlayerTable.tsx/ProspectTable.tsx
+  // (2026-08-28, Rees's ask -- clickable role buttons instead of a dropdown).
+  const [roleFilter, setRoleFilter] = useState<Set<string>>(new Set());
   const [sortKey, setSortKey] = useState<SortKey>("potential");
   const [sortDir, setSortDir] = useState<"asc" | "desc">("desc");
 
@@ -44,9 +46,32 @@ export default function MinorsTable({ rows, teamCounts, roleHealth }: { rows: Mi
     }
   }
 
+  function handlePhFilter(f: "all" | "H" | "P") {
+    setFilter(f);
+    setRoleFilter(new Set()); // last role selection may not apply to the new H/P set
+  }
+
+  function toggleRole(role: string) {
+    setRoleFilter((prev) => {
+      const next = new Set(prev);
+      if (next.has(role)) next.delete(role);
+      else next.add(role);
+      return next;
+    });
+  }
+
+  const phFiltered = useMemo(() => rows.filter((r) => filter === "all" || r.ph === filter), [rows, filter]);
+
+  // Role options derived from the current H/P-filtered set, same pattern as
+  // PlayerTable/ProspectTable -- switching to Pitchers only ever offers SP/RP.
+  const roleOptions = useMemo(() => {
+    const present = new Set(phFiltered.map((r) => r.role).filter((r): r is string => !!r));
+    return ROLE_FILTER_ORDER.filter((role) => present.has(role));
+  }, [phFiltered]);
+
   const filtered = useMemo(
-    () => rows.filter((r) => (filter === "all" || r.ph === filter) && (roleFilter === "all" || r.role === roleFilter)),
-    [rows, filter, roleFilter]
+    () => (roleFilter.size === 0 ? phFiltered : phFiltered.filter((r) => r.role !== null && roleFilter.has(r.role))),
+    [phFiltered, roleFilter]
   );
 
   const sorted = useMemo(() => {
@@ -60,7 +85,10 @@ export default function MinorsTable({ rows, teamCounts, roleHealth }: { rows: Mi
         case "level": av = LEVEL_ORDER[a.levelLabel] ?? 9; bv = LEVEL_ORDER[b.levelLabel] ?? 9; break;
         case "age": av = a.age ?? -1; bv = b.age ?? -1; break;
         case "pos": av = a.pos ?? ""; bv = b.pos ?? ""; break;
-        case "role": av = a.role ?? ""; bv = b.role ?? ""; break;
+        // Fixed role order (same as the RAG table/filter buttons above), not
+        // alphabetical -- 2026-08-28, Rees's ask. Missing role sorts last
+        // regardless of direction.
+        case "role": av = a.role ? ROLE_FILTER_ORDER.indexOf(a.role) : 999; bv = b.role ? ROLE_FILTER_ORDER.indexOf(b.role) : 999; break;
         case "overall": av = a.overall ?? -1; bv = b.overall ?? -1; break;
         case "potential": av = a.potential ?? -1; bv = b.potential ?? -1; break;
         case "ab": av = a.ab ?? -1; bv = b.ab ?? -1; break;
@@ -73,12 +101,6 @@ export default function MinorsTable({ rows, teamCounts, roleHealth }: { rows: Mi
       return 0;
     });
   }, [filtered, sortKey, sortDir]);
-
-  const allPositions = useMemo(() => {
-    const s = new Set<string>();
-    teamCounts.forEach((t) => Object.keys(t.counts).forEach((p) => s.add(p)));
-    return [...s].sort();
-  }, [teamCounts]);
 
   // One independently-scrollable box per team. Grouping preserves the
   // already-applied global sort order within each team's list.
@@ -106,7 +128,11 @@ export default function MinorsTable({ rows, teamCounts, roleHealth }: { rows: Mi
   );
 
   return (
-    <div style={{ fontFamily: "var(--font-body), system-ui, sans-serif", padding: "16px 40px", fontSize: 13 }}>
+    // "org-minors-page" marker class -- picked up by a `.site-main:has(...)`
+    // rule in globals.css that widens just this page's shared max-width
+    // (2026-08-28, Rees's ask: this page's tables need more room than the
+    // site's normal 1200px content width). No effect on any other page.
+    <div className="org-minors-page" style={{ fontFamily: "var(--font-body), system-ui, sans-serif", padding: "16px 24px", fontSize: 13 }}>
       <h1 style={{ marginBottom: 4, fontSize: 22 }}>Minor League System</h1>
       <p style={{ color: "var(--color-text-muted, #888)", marginTop: 0, marginBottom: 12, fontSize: 12 }}>
         {rows.length} players. Overall/Potential shown at full precision (this is your own org, not public).
@@ -142,12 +168,23 @@ export default function MinorsTable({ rows, teamCounts, roleHealth }: { rows: Mi
                       textAlign: "right",
                       borderBottom: "1px solid var(--color-border)",
                       fontWeight: c.status === "none" ? 400 : 700,
-                      color: c.status === "none" ? undefined : "#fff",
-                      background: c.status === "none" ? undefined : RAG_COLOR[c.status],
+                      // Font color carries the RAG signal (2026-08-28, Rees's
+                      // ask) -- a background fill looked bad against the
+                      // table's existing striping/borders. No color at all
+                      // for "none" rows (RP/1B/DH -- no minimum to grade).
+                      color: c.status === "none" ? undefined : RAG_COLOR[c.status],
                     }}
                     title={c.min > 0 ? `Minimum ${c.min}` : undefined}
                   >
                     {c.count}
+                    {/* Injured count in parens (2026-08-28) -- players in
+                        this role/level who exist but aren't counted above
+                        (hurt, not back within 7 days), so a red/amber cell
+                        reads as "actually short" vs. "fine on paper, just
+                        hurt right now." Omitted entirely at 0, not "(0)". */}
+                    {c.injuredCount > 0 && (
+                      <span style={{ fontWeight: 400, color: "var(--color-text-muted, #888)" }}> ({c.injuredCount})</span>
+                    )}
                   </td>
                 ))}
               </tr>
@@ -156,40 +193,11 @@ export default function MinorsTable({ rows, teamCounts, roleHealth }: { rows: Mi
         </table>
       </div>
 
-      <h2 style={{ fontSize: 14, marginBottom: 6 }}>Position counts by team</h2>
-      <div style={{ overflowX: "auto", marginBottom: 16 }}>
-        <table style={{ borderCollapse: "collapse", fontSize: 12, minWidth: 600 }}>
-          <thead>
-            <tr>
-              <th style={{ padding: "3px 8px", textAlign: "left", borderBottom: "2px solid var(--color-tan)", background: "var(--color-navy)", color: "var(--color-text-on-navy)" }}>Team (Level)</th>
-              {allPositions.map((p) => (
-                <th key={p} style={{ padding: "3px 8px", textAlign: "right", borderBottom: "2px solid var(--color-tan)", background: "var(--color-navy)", color: "var(--color-text-on-navy)" }}>{p}</th>
-              ))}
-              <th style={{ padding: "3px 8px", textAlign: "right", borderBottom: "2px solid var(--color-tan)", background: "var(--color-navy)", color: "var(--color-text-on-navy)" }}>Total</th>
-            </tr>
-          </thead>
-          <tbody>
-            {teamCounts.map((t) => {
-              const total = Object.values(t.counts).reduce((a, b) => a + b, 0);
-              return (
-                <tr key={t.team_id}>
-                  <td style={{ padding: "3px 8px", borderBottom: "1px solid var(--color-border)" }}>{t.team_nickname} ({t.levelLabel})</td>
-                  {allPositions.map((p) => (
-                    <td key={p} style={{ padding: "3px 8px", textAlign: "right", borderBottom: "1px solid var(--color-border)" }}>{t.counts[p] ?? ""}</td>
-                  ))}
-                  <td style={{ padding: "3px 8px", textAlign: "right", borderBottom: "1px solid var(--color-border)", fontWeight: 600 }}>{total}</td>
-                </tr>
-              );
-            })}
-          </tbody>
-        </table>
-      </div>
-
       <div style={{ marginBottom: 10, display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
         {(["all", "H", "P"] as const).map((f) => (
           <button
             key={f}
-            onClick={() => setFilter(f)}
+            onClick={() => handlePhFilter(f)}
             style={{
               padding: "3px 10px",
               fontSize: 12,
@@ -203,21 +211,36 @@ export default function MinorsTable({ rows, teamCounts, roleHealth }: { rows: Mi
             {f === "all" ? "All" : f === "H" ? "Hitters" : "Pitchers"}
           </button>
         ))}
-        {/* Role filter (2026-08-28) -- applies across every team box below,
-            same as the existing H/P filter. */}
-        <select
-          value={roleFilter}
-          onChange={(e) => setRoleFilter(e.target.value)}
-          style={{ padding: "3px 8px", fontSize: 12, border: "1px solid var(--color-border-strong)", borderRadius: 4, background: "var(--color-surface)", color: "inherit" }}
-        >
-          <option value="all">All roles</option>
-          {ROLE_FILTER_ORDER.map((r) => (
-            <option key={r} value={r}>{r}</option>
-          ))}
-        </select>
-        <span style={{ fontSize: 11, color: "var(--color-text-muted, #888)", marginLeft: 8 }}>
-          Ovr/Pot color: <span style={{ color: "rgb(220,38,38)" }}>low</span> → <span style={{ color: "rgb(249,115,22)" }}>orange</span> → <span style={{ color: "rgb(180,150,10)" }}>yellow</span> → <span style={{ color: "rgb(34,197,94)" }}>green</span> → <span style={{ color: "rgb(56,189,248)" }}>elite</span>
-        </span>
+        {/* Role filter (2026-08-28) -- clickable buttons, not a dropdown, same
+            multi-select pattern as PlayerTable/ProspectTable's Role filter.
+            Applies across every team box below, same as the H/P filter. */}
+        <span style={{ fontSize: 12 }}>Role</span>
+        {roleOptions.map((role) => (
+          <button
+            key={role}
+            onClick={() => toggleRole(role)}
+            aria-pressed={roleFilter.has(role)}
+            style={{
+              padding: "3px 10px",
+              fontSize: 12,
+              border: "1px solid var(--color-border-strong)",
+              borderRadius: 4,
+              background: roleFilter.has(role) ? "var(--color-navy)" : "transparent",
+              color: roleFilter.has(role) ? "var(--color-text-on-navy)" : "inherit",
+              cursor: "pointer",
+            }}
+          >
+            {role}
+          </button>
+        ))}
+        {roleFilter.size > 0 && (
+          <button
+            onClick={() => setRoleFilter(new Set())}
+            style={{ padding: "3px 10px", fontSize: 12, border: "1px solid var(--color-border-strong)", borderRadius: 4, background: "transparent", cursor: "pointer" }}
+          >
+            Clear roles
+          </button>
+        )}
       </div>
 
       <div

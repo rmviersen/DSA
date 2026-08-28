@@ -87,6 +87,7 @@ export interface RoleHealthCell {
   level: number;
   levelLabel: string;
   count: number;
+  injuredCount: number; // players in this role/level excluded from `count` for not being back within 7 days
   min: number; // 0 = no minimum, not scored
   status: "red" | "amber" | "green" | "none";
 }
@@ -292,8 +293,15 @@ export async function getOrgMinorsPlayers(orgId: number): Promise<{ rows: Minors
     label,
     byLevel: Object.entries(LEVEL_LABELS).map(([lvlStr, lvlLabel]) => {
       const level = Number(lvlStr);
-      const count = rows.filter((r) => r.level === level && r.levelLabel !== "Int'l" && r.role && roles.includes(r.role) && r.available).length;
-      return { level, levelLabel: lvlLabel, count, min, status: rowStatus(count, min) };
+      const inRole = rows.filter((r) => r.level === level && r.levelLabel !== "Int'l" && r.role && roles.includes(r.role));
+      const count = inRole.filter((r) => r.available).length;
+      // Shown alongside `count` (2026-08-28, Rees's ask) so a red/amber cell
+      // reads as "actually short" vs. "fine on paper, just hurt right now" --
+      // these players are excluded from `count` for the same reason
+      // isAvailable() excludes them (not back within 7 days), not double-
+      // counted with it.
+      const injuredCount = inRole.length - count;
+      return { level, levelLabel: lvlLabel, count, injuredCount, min, status: rowStatus(count, min) };
     }),
   }));
 

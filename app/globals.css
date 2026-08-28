@@ -359,6 +359,15 @@ body {
   padding: 1.75rem 1.5rem 3rem;
 }
 
+/* Minor League System page needs more horizontal room than the site's normal
+   1200px content width (per-team roster tables have 10 columns each, laid
+   out 2-wide) -- 2026-08-28, Rees's ask, scoped to this page only via the
+   .org-minors-page marker class MinorsTable.tsx renders. `:has()` is
+   supported in every evergreen browser as of 2026, so no fallback needed. */
+.site-main:has(.org-minors-page) {
+  max-width: 1600px;
+}
+
 .page-header {
   margin-bottom: 1.25rem;
 }
