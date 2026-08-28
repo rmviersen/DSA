@@ -14,6 +14,22 @@ export interface RefreshRunSummary {
   status: string;
   game_date: string | null;
   ratings_included: boolean | null;
+  playerCount: number;
+  teamCount: number;
+}
+
+// player_computed/team_computed have no FK to refresh_runs (gotcha 1 -- no
+// FK between any of the computed/snapshot sibling tables), so these are
+// separate count queries per run, not a join. head:true means Postgres
+// returns just the count, not the matching rows -- cheap even though this
+// runs twice per row shown (5 runs x 2 tables = 10 small count queries).
+async function countFor(table: "player_computed" | "team_computed", refreshRunId: number): Promise<number> {
+  const { count, error } = await supabase
+    .from(table)
+    .select("*", { count: "exact", head: true })
+    .eq("refresh_run_id", refreshRunId);
+  if (error) throw error;
+  return count ?? 0;
 }
 
 export async function getRecentRefreshRuns(limit = 5): Promise<RefreshRunSummary[]> {
@@ -23,7 +39,15 @@ export async function getRecentRefreshRuns(limit = 5): Promise<RefreshRunSummary
     .order("id", { ascending: false })
     .limit(limit);
   if (error) throw error;
-  return data as RefreshRunSummary[];
+  const runs = data as Omit<RefreshRunSummary, "playerCount" | "teamCount">[];
+
+  return Promise.all(
+    runs.map(async (r) => ({
+      ...r,
+      playerCount: await countFor("player_computed", r.id),
+      teamCount: await countFor("team_computed", r.id),
+    }))
+  );
 }
 
 export interface FreshnessCheck {

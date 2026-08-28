@@ -110,9 +110,20 @@ export default async function AdminPage() {
                 <th>Started</th>
                 <th>Status</th>
                 <th>Ratings included</th>
+                <th>Players</th>
+                <th>Teams</th>
               </tr>
             </thead>
             <tbody>
+              {/* Players/Teams (2026-08-28, Rees's ask): row counts in
+                  player_computed/team_computed for that run -- the same
+                  "did everyone actually get captured" check this project has
+                  been doing by hand via SQL all day, now visible at a glance.
+                  32 is TheBigLeague's real, fixed team count (confirmed
+                  repeatedly this session) -- a real, permanent number worth
+                  flagging against directly, unlike the player count, which
+                  drifts run to run (call-ups, retirements) and is better
+                  judged by eye against the other rows than a fixed target. */}
               {runs.map((r) => (
                 <tr key={r.id}>
                   <td>{r.id}</td>
@@ -120,6 +131,16 @@ export default async function AdminPage() {
                   <td>{new Date(r.started_at).toLocaleString()}</td>
                   <td><StatusPill ok={r.status === "succeeded"} label={r.status} /></td>
                   <td>{r.ratings_included ? "Yes" : "No"}</td>
+                  {/* A run still in progress legitimately has 0 rows so far --
+                      only flag a zero/wrong count as a problem once the run
+                      has actually finished (status !== "running"), or every
+                      in-flight run would show a false alarm. */}
+                  <td style={{ color: r.playerCount === 0 && r.status !== "running" ? "#c0392b" : undefined, fontWeight: r.playerCount === 0 && r.status !== "running" ? 700 : undefined }}>
+                    {r.playerCount.toLocaleString()}
+                  </td>
+                  <td style={{ color: r.teamCount !== 32 && r.status !== "running" ? "#c0392b" : undefined, fontWeight: r.teamCount !== 32 && r.status !== "running" ? 700 : undefined }}>
+                    {r.teamCount}
+                  </td>
                 </tr>
               ))}
             </tbody>
