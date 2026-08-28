@@ -50,6 +50,13 @@ export async function FarmSystemReportBody({
       <header className="page-header">
         <h1>{title}</h1>
         <p>{orgId ? "Organization rankings by Prospect Potential" : `League-wide top ${TOP_PROSPECTS_LIMIT} by Prospect Potential`}</p>
+        {/* Subtle prospect-eligibility disclaimer (2026-08-27, Rees's spec) --
+            added alongside the age <= 25 prospect-pool requirement in
+            compute-ratings.ts, so a reader isn't left guessing why a given
+            player (e.g. a rookie-eligible 27-year-old) doesn't show up here. */}
+        <p style={{ color: "var(--color-text-muted, #888)", fontSize: 12, marginTop: -6 }}>
+          Eligible players: under 45 days of MLB service time and age 25 or younger.
+        </p>
       </header>
       <ProspectFilters teams={teams} selectedOrgId={orgId} snapshots={snapshots} selectedBaselineId={baselineRefreshRunId} action={basePath} />
       {showRankings ? (

@@ -53,8 +53,8 @@ async function main() {
   // ~0.1pt (caught 2026-08-24 while verifying the Ks blend fix -- a
   // hand-computed split via direct SQL didn't match player_computed's
   // actual batting values until this was added).
-  const players = await fetchAll<{ id: number; organization_id: number | null; mlb_service_days: number | null; last_team_id: number | null; level: number | null; is_active: boolean | null; league_id: number | null }>((from, to) =>
-    supabase.from("players").select("id, organization_id, mlb_service_days, last_team_id, level, is_active, league_id").order("id").range(from, to) as never
+  const players = await fetchAll<{ id: number; organization_id: number | null; mlb_service_days: number | null; last_team_id: number | null; level: number | null; is_active: boolean | null; league_id: number | null; age: number | null }>((from, to) =>
+    supabase.from("players").select("id, organization_id, mlb_service_days, last_team_id, level, is_active, league_id, age").order("id").range(from, to) as never
   );
   const playerById = new Map(players.map((p) => [p.id, p]));
   console.log(`  ${players.length} players`);
@@ -146,7 +146,10 @@ async function main() {
   console.log("Computing core ratings...");
   const capturedAt = new Date().toISOString();
   const computed = ratings.map((r) => {
-    const c = computeRatings(r, weights, splits);
+    // age lives on `players`, not `player_ratings_snapshots` -- merged in
+    // here for the age-gated Contact/Control floor gates (2026-08-27).
+    const age = playerById.get(r.player_id)?.age ?? null;
+    const c = computeRatings({ ...r, age }, weights, splits);
     return { player_id: r.player_id, ...c };
   });
 
@@ -306,9 +309,17 @@ async function main() {
   // recent actual draft class), while free agents WITH a last_team_id are
   // legitimately rare (1,236 total) and never overlap the draft pool at all.
   // Those amateur/future-class players belong on the Draft page, not here.
+  // Age <= 25 requirement added 2026-08-27 (Rees's spec): rookie eligibility
+  // alone lets in career minor-league journeymen who are technically still
+  // under the service-day cap but are clearly not "prospects" in any real
+  // sense. Matches PROSPECT_AGE_CUTOFF below, which also drives the
+  // rating-engine's developed_age_threshold via rating_weights -- same
+  // conceptual line, two different places it has to be enforced.
+  const PROSPECT_AGE_CUTOFF = 25;
   const prospectPool = computed.filter((c) => {
     const p = playerById.get(c.player_id);
     if (!p || (p.mlb_service_days ?? 0) >= 45) return false;
+    if ((p.age ?? Infinity) > PROSPECT_AGE_CUTOFF) return false;
     return p.organization_id !== null || (p.last_team_id !== null && p.last_team_id !== 0);
   });
   const byProspectPotentialDesc = [...prospectPool].sort((a, b) => b.prospect_potential - a.prospect_potential);
@@ -379,21 +390,55 @@ async function main() {
     captured_at: capturedAt,
   }));
 
-  console.log(`Writing ${rows.length} rows to player_computed...`);
-  const MAX_ATTEMPTS = 3;
-  for (let i = 0; i < rows.length; i += 500) {
-    const batch = rows.slice(i, i + 500);
-    let lastErr: unknown;
-    let ok = false;
-    for (let attempt = 1; attempt <= MAX_ATTEMPTS && !ok; attempt++) {
-      const { error } = await supabase.from("player_computed").insert(batch as never[]);
-      if (!error) { ok = true; break; }
-      lastErr = error;
-      console.warn(`player_computed insert (rows ${i}-${i + batch.length}) failed on attempt ${attempt}/${MAX_ATTEMPTS}: ${error.message}`);
-      if (attempt < MAX_ATTEMPTS) await new Promise((r) => setTimeout(r, 2000 * attempt));
+  // Shared batched-upsert-with-retry helper (2026-08-28, factored out of the
+  // player_computed loop below so player_projected_splits can reuse the same
+  // retry/backoff behavior instead of a second copy-pasted loop).
+  async function writeBatched(table: string, allRows: Record<string, unknown>[]) {
+    console.log(`Writing ${allRows.length} rows to ${table}...`);
+    const MAX_ATTEMPTS = 3;
+    for (let i = 0; i < allRows.length; i += 500) {
+      const batch = allRows.slice(i, i + 500);
+      let lastErr: unknown;
+      let ok = false;
+      for (let attempt = 1; attempt <= MAX_ATTEMPTS && !ok; attempt++) {
+        // upsert, not insert (2026-08-27): a weight retune re-runs this
+        // against a refresh_run_id that's already been computed once, which
+        // a plain insert can never do -- it collides on the unique
+        // (refresh_run_id, player_id) constraint every time. onConflict
+        // overwrites the existing row in place, which is exactly what a
+        // recompute should do.
+        const { error } = await supabase.from(table).upsert(batch as never[], { onConflict: "refresh_run_id,player_id" });
+        if (!error) { ok = true; break; }
+        lastErr = error;
+        console.warn(`${table} upsert (rows ${i}-${i + batch.length}) failed on attempt ${attempt}/${MAX_ATTEMPTS}: ${error.message}`);
+        if (attempt < MAX_ATTEMPTS) await new Promise((r) => setTimeout(r, 2000 * attempt));
+      }
+      if (!ok) throw new Error(`${table} upsert failed at row ${i}: ${lastErr}`);
     }
-    if (!ok) throw new Error(`player_computed insert failed at row ${i}: ${lastErr}`);
   }
+
+  await writeBatched("player_computed", rows);
+
+  // player_projected_splits (2026-08-28, Rees's spec): the extrapolated
+  // Potential L/R split profile, one row per player per refresh, written
+  // alongside player_computed as its own sibling table (gotcha 1 pattern --
+  // not folded into player_computed itself, kept separately inspectable).
+  const projectedSplitRows = computed.map((c) => ({
+    refresh_run_id: refreshRunId,
+    player_id: c.player_id,
+    pot_cntct_l: c.projectedSplits.cntct.l, pot_cntct_r: c.projectedSplits.cntct.r,
+    pot_pow_l: c.projectedSplits.pow.l, pot_pow_r: c.projectedSplits.pow.r,
+    pot_eye_l: c.projectedSplits.eye.l, pot_eye_r: c.projectedSplits.eye.r,
+    pot_gap_l: c.projectedSplits.gap.l, pot_gap_r: c.projectedSplits.gap.r,
+    pot_ks_l: c.projectedSplits.ks.l, pot_ks_r: c.projectedSplits.ks.r,
+    pot_stf_l: c.projectedSplits.stf.l, pot_stf_r: c.projectedSplits.stf.r,
+    pot_mov_l: c.projectedSplits.mov.l, pot_mov_r: c.projectedSplits.mov.r,
+    pot_ctrl_l: c.projectedSplits.ctrl.l, pot_ctrl_r: c.projectedSplits.ctrl.r,
+    pot_hra_l: c.projectedSplits.hra.l, pot_hra_r: c.projectedSplits.hra.r,
+    pot_pbabip_l: c.projectedSplits.pbabip.l, pot_pbabip_r: c.projectedSplits.pbabip.r,
+    computed_at: capturedAt,
+  }));
+  await writeBatched("player_projected_splits", projectedSplitRows);
 
   console.log(`Done. Top 5 by computed Overall:`);
   byOverallDesc.slice(0, 5).forEach((c, i) => console.log(`  ${i + 1}. player ${c.player_id} — Overall ${c.overall.toFixed(2)}`));

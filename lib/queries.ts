@@ -483,8 +483,11 @@ export interface ActiveWeightSet {
   sp_rp_stamina_threshold: number; sp_rp_min_pitches: number;
   catcher_batting_multiplier: number; ss_batting_multiplier: number; cf_batting_multiplier: number;
   catcher_fielding_bonus: number; infield_fielding_bonus: number; outfield_fielding_bonus: number;
-  contact_gate_threshold: number; contact_gate_floor: number;
-  control_gate_threshold: number; control_gate_floor: number;
+  contact_gate_mid_threshold: number; contact_gate_mid_multiplier: number;
+  contact_gate_low_threshold: number; contact_gate_low_multiplier: number;
+  control_gate_mid_threshold: number; control_gate_mid_multiplier: number;
+  control_gate_low_threshold: number; control_gate_low_multiplier: number;
+  developed_age_threshold: number;
   notes: string | null;
 }
 

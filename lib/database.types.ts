@@ -1845,6 +1845,87 @@ export type Database = {
           },
         ]
       }
+      player_projected_splits: {
+        Row: {
+          computed_at: string
+          id: number
+          player_id: number
+          pot_cntct_l: number | null
+          pot_cntct_r: number | null
+          pot_ctrl_l: number | null
+          pot_ctrl_r: number | null
+          pot_eye_l: number | null
+          pot_eye_r: number | null
+          pot_gap_l: number | null
+          pot_gap_r: number | null
+          pot_hra_l: number | null
+          pot_hra_r: number | null
+          pot_ks_l: number | null
+          pot_ks_r: number | null
+          pot_mov_l: number | null
+          pot_mov_r: number | null
+          pot_pbabip_l: number | null
+          pot_pbabip_r: number | null
+          pot_pow_l: number | null
+          pot_pow_r: number | null
+          pot_stf_l: number | null
+          pot_stf_r: number | null
+          refresh_run_id: number
+        }
+        Insert: {
+          computed_at?: string
+          id?: never
+          player_id: number
+          pot_cntct_l?: number | null
+          pot_cntct_r?: number | null
+          pot_ctrl_l?: number | null
+          pot_ctrl_r?: number | null
+          pot_eye_l?: number | null
+          pot_eye_r?: number | null
+          pot_gap_l?: number | null
+          pot_gap_r?: number | null
+          pot_hra_l?: number | null
+          pot_hra_r?: number | null
+          pot_ks_l?: number | null
+          pot_ks_r?: number | null
+          pot_mov_l?: number | null
+          pot_mov_r?: number | null
+          pot_pbabip_l?: number | null
+          pot_pbabip_r?: number | null
+          pot_pow_l?: number | null
+          pot_pow_r?: number | null
+          pot_stf_l?: number | null
+          pot_stf_r?: number | null
+          refresh_run_id: number
+        }
+        Update: {
+          computed_at?: string
+          id?: never
+          player_id?: number
+          pot_cntct_l?: number | null
+          pot_cntct_r?: number | null
+          pot_ctrl_l?: number | null
+          pot_ctrl_r?: number | null
+          pot_eye_l?: number | null
+          pot_eye_r?: number | null
+          pot_gap_l?: number | null
+          pot_gap_r?: number | null
+          pot_hra_l?: number | null
+          pot_hra_r?: number | null
+          pot_ks_l?: number | null
+          pot_ks_r?: number | null
+          pot_mov_l?: number | null
+          pot_mov_r?: number | null
+          pot_pbabip_l?: number | null
+          pot_pbabip_r?: number | null
+          pot_pow_l?: number | null
+          pot_pow_r?: number | null
+          pot_stf_l?: number | null
+          pot_stf_r?: number | null
+          refresh_run_id?: number
+        }
+        Relationships: []
+      }
       player_ratings_snapshots: {
         Row: {
           acc: string | null
@@ -2488,12 +2569,17 @@ export type Database = {
           catcher_fielding_bonus: number
           cf_batting_multiplier: number
           contact: number
-          contact_gate_floor: number
-          contact_gate_threshold: number
+          contact_gate_low_multiplier: number
+          contact_gate_low_threshold: number
+          contact_gate_mid_multiplier: number
+          contact_gate_mid_threshold: number
           control: number
-          control_gate_floor: number
-          control_gate_threshold: number
+          control_gate_low_multiplier: number
+          control_gate_low_threshold: number
+          control_gate_mid_multiplier: number
+          control_gate_mid_threshold: number
           created_at: string
+          developed_age_threshold: number
           eye: number
           fielding: number
           gap: number
@@ -2522,12 +2608,17 @@ export type Database = {
           catcher_fielding_bonus?: number
           cf_batting_multiplier?: number
           contact: number
-          contact_gate_floor?: number
-          contact_gate_threshold?: number
+          contact_gate_low_multiplier?: number
+          contact_gate_low_threshold?: number
+          contact_gate_mid_multiplier?: number
+          contact_gate_mid_threshold?: number
           control: number
-          control_gate_floor?: number
-          control_gate_threshold?: number
+          control_gate_low_multiplier?: number
+          control_gate_low_threshold?: number
+          control_gate_mid_multiplier?: number
+          control_gate_mid_threshold?: number
           created_at?: string
+          developed_age_threshold?: number
           eye: number
           fielding: number
           gap: number
@@ -2556,12 +2647,17 @@ export type Database = {
           catcher_fielding_bonus?: number
           cf_batting_multiplier?: number
           contact?: number
-          contact_gate_floor?: number
-          contact_gate_threshold?: number
+          contact_gate_low_multiplier?: number
+          contact_gate_low_threshold?: number
+          contact_gate_mid_multiplier?: number
+          contact_gate_mid_threshold?: number
           control?: number
-          control_gate_floor?: number
-          control_gate_threshold?: number
+          control_gate_low_multiplier?: number
+          control_gate_low_threshold?: number
+          control_gate_mid_multiplier?: number
+          control_gate_mid_threshold?: number
           created_at?: string
+          developed_age_threshold?: number
           eye?: number
           fielding?: number
           gap?: number
