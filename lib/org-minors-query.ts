@@ -279,14 +279,62 @@ export async function getOrgMinorsPlayers(orgId: number): Promise<{ rows: Minors
     }
   }
 
-  // Role x Level Overall benchmarks (leaguewide -- queries.ts's existing
-  // Glossary-page aggregation, reused as-is rather than re-derived here).
+  // Role x Level Overall benchmarks (leaguewide full-pool average -- queries.ts's
+  // existing Glossary-page aggregation, reused as-is for promote/demote below).
+  // Deliberately NOT used for the Role Health table's own "Lg" column (see
+  // leagueByTeamLevelRole below) -- Rees's call (2026-08-28) to keep the two
+  // benchmarks separate: Glossary/promote-demote still means "typical talent
+  // leaguewide," Role Health means "typical team's top-N roster strength."
   const benchmarks = await getRoleLevelBenchmarks("overall");
   const benchByRole = new Map(benchmarks.map((b) => [b.role, new Map(b.byLevel.map((c) => [c.level, c.avgValue]))]));
-  // Same benchmarks, but keeping `n` too (2026-08-28) -- needed to combine
-  // multiple roles' leaguewide averages into one weighted average for the
-  // "(Total)" rows below, which benchByRole's plain avgValue can't do.
-  const benchCellByRole = new Map(benchmarks.map((b) => [b.role, new Map(b.byLevel.map((c) => [c.level, c]))]));
+
+  // Leaguewide, per-team roster data for the Role Health table's "Lg" column
+  // (2026-08-28) -- a separate fetch from benchmarks above, deliberately: this
+  // needs each player's team_id to group by team before averaging, which the
+  // flat leaguewide sum getRoleLevelBenchmarks returns can't provide. Same
+  // level-1/international filtering convention as getRoleLevelBenchmarks
+  // (real active MLB roster only; international signees, negative league_id,
+  // excluded at every level) so the two stay conceptually comparable.
+  const leagueAllPlayers = await fetchAll<{ id: number; level: number | null; team_id: number | null; league_id: number | null; is_active: boolean | null }>((from, to) =>
+    supabase.from("players").select("id,level,team_id,league_id,is_active").not("level", "is", null).range(from, to) as never
+  );
+  const leaguePlayerById = new Map(leagueAllPlayers.map((p) => [p.id, p]));
+  const leagueComputed = await fetchAll<{ player_id: number; role: string | null; overall: number | null }>((from, to) =>
+    supabase.from("player_computed").select("player_id,role,overall").eq("refresh_run_id", refreshRunId).range(from, to) as never
+  );
+  // `${level}|${role}` -> team_id -> that team's Overall values at this role/level.
+  const leagueByTeamLevelRole = new Map<string, Map<number, number[]>>();
+  for (const c of leagueComputed) {
+    if (!c.role || c.overall === null) continue;
+    const p = leaguePlayerById.get(c.player_id);
+    if (!p || p.level === null || p.team_id === null) continue;
+    if (p.level === 1 && p.is_active !== true) continue; // real MLB roster only
+    if (p.level === 1 && p.league_id !== null && p.league_id < 0) continue; // exclude international signees at every org, not just this one
+    const key = `${p.level}|${c.role}`;
+    const byTeam = leagueByTeamLevelRole.get(key) ?? new Map<number, number[]>();
+    const arr = byTeam.get(p.team_id) ?? [];
+    arr.push(c.overall);
+    byTeam.set(p.team_id, arr);
+    leagueByTeamLevelRole.set(key, byTeam);
+  }
+  // Average, across every team that has at least one player there, of that
+  // team's OWN top-`topN` average -- "roster strength" per Rees's framing,
+  // one data point per team (not one per player, which would let a few
+  // stacked orgs skew the number the way a flat pool average can).
+  function leagueTopNPerTeamAvg(roles: string[], level: number, topN: number): number | null {
+    const perTeam = new Map<number, number[]>();
+    for (const role of roles) {
+      const byTeam = leagueByTeamLevelRole.get(`${level}|${role}`);
+      if (!byTeam) continue;
+      for (const [teamId, vals] of byTeam) {
+        const arr = perTeam.get(teamId) ?? [];
+        arr.push(...vals);
+        perTeam.set(teamId, arr);
+      }
+    }
+    const teamAvgs = [...perTeam.values()].map((vals) => topNAvg(vals, topN)).filter((v): v is number => v !== null);
+    return teamAvgs.length > 0 ? teamAvgs.reduce((a, b) => a + b, 0) / teamAvgs.length : null;
+  }
 
   const rows: MinorsPlayerRow[] = players.map((p) => {
     const c = computedById.get(p.id);
@@ -341,19 +389,6 @@ export async function getOrgMinorsPlayers(orgId: number): Promise<{ rows: Minors
   const orderKey = (t: TeamPositionCounts) => (t.team_id === internationalTeamId ? 99 : (t.level ?? 98));
   const teamCounts = [...countsByTeam.values()].sort((a, b) => orderKey(a) - orderKey(b));
 
-  // Leaguewide combined average for a set of roles at one level -- weighted
-  // by each role's own leaguewide sample size, so e.g. Pitching (Total)'s
-  // league average isn't just a naive 50/50 blend of the SP and RP averages
-  // when the league actually has far more RPs than SPs (or vice versa).
-  function combinedLeagueAvg(roles: string[], level: number): number | null {
-    let sum = 0, n = 0;
-    for (const role of roles) {
-      const cell = benchCellByRole.get(role)?.get(level);
-      if (cell && cell.avgValue !== null && cell.n > 0) { sum += cell.avgValue * cell.n; n += cell.n; }
-    }
-    return n > 0 ? sum / n : null;
-  }
-
   // Role-health RAG table (2026-08-28) -- healthy-only counts by role, per
   // level (MLB through Rookie; international excluded, it's not a real
   // competitive roster with staffing minimums the way an affiliate is).
@@ -378,13 +413,13 @@ export async function getOrgMinorsPlayers(orgId: number): Promise<{ rows: Minors
       // Health status doesn't factor in here (unlike `count` above) -- a
       // talent grade doesn't change because someone's hurt.
       const orgAvg = topNAvg(inRole.filter((r) => r.overall !== null).map((r) => r.overall as number), topN);
-      // League side is still a full-pool average (2026-08-28) -- NOT the
-      // same top-N treatment as orgAvg. Matching it would mean top-N *per
-      // team* across the whole league (a materially bigger query, since
-      // getRoleLevelBenchmarks's leaguewide average has no per-team
-      // grouping today), which Rees hasn't asked for -- flagged to him as
-      // an open asymmetry rather than assumed either way.
-      const leagueAvg = combinedLeagueAvg(roles, level);
+      // League side (2026-08-28) -- now matches orgAvg's methodology: the
+      // average, across every team with at least one player there, of that
+      // team's own top-`topN` average. Explicitly NOT the same benchmark
+      // Glossary/promote-demote use (that one stays a flat leaguewide pool
+      // average) -- Rees's call to keep "typical team's roster strength"
+      // and "typical individual player" as two separate numbers.
+      const leagueAvg = leagueTopNPerTeamAvg(roles, level, topN);
 
       return {
         level, levelLabel: lvlLabel, count, injuredCount, min,

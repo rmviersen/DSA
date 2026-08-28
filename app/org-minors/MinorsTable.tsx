@@ -150,7 +150,8 @@ export default function MinorsTable({ rows, teamCounts, roleHealth }: { rows: Mi
       <h2 style={{ fontSize: 14, marginBottom: 6 }}>Role health by level</h2>
       <p style={{ color: "var(--color-text-muted, #888)", marginTop: 0, marginBottom: 6, fontSize: 11 }}>
         Cnt = healthy headcount (injured-not-back-within-7-days shown in parens), graded against the role's staffing minimum.
-        Lg/Org = leaguewide vs. Oklahoma City average Overall at that role/level -- Org is graded against Lg.
+        Lg/Org = average of each team's own top-N Overall at that role/level (N = expected playing-time slots, e.g. top 5 for SP) --
+        Lg averages that number across every team in the league, Org is Oklahoma City's own number, graded against Lg (green +1 or above, red under -1).
       </p>
       <div style={{ overflowX: "auto", marginBottom: 16 }}>
         <table style={{ borderCollapse: "collapse", fontSize: 12, minWidth: 600 }}>
