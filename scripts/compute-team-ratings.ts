@@ -143,13 +143,23 @@ async function main() {
     const batch = outRows.slice(i, i + 500);
     let ok = false, lastErr: unknown;
     for (let attempt = 1; attempt <= MAX_ATTEMPTS && !ok; attempt++) {
-      const { error } = await supabase.from("team_computed").insert(batch as never[]);
+      // upsert, not insert (2026-08-28, same fix as compute-ratings.ts,
+      // gotcha 31 -- never ported here until a live GitHub Actions run
+      // caught it): confirmed via direct query that the very first
+      // "failed" attempt against refresh_run_id 13 had actually already
+      // written all 32 rows -- a transient network hiccup lost the success
+      // response client-side, so the retry collided with its own prior
+      // write on the (refresh_run_id, team_id) unique constraint. The data
+      // was correct the whole time; only the error handling was wrong.
+      // onConflict makes a retry (transient or a deliberate re-tune)
+      // overwrite in place instead of colliding.
+      const { error } = await supabase.from("team_computed").upsert(batch as never[], { onConflict: "refresh_run_id,team_id" });
       if (!error) { ok = true; break; }
       lastErr = error;
-      console.warn(`team_computed insert (rows ${i}-${i + batch.length}) failed on attempt ${attempt}/${MAX_ATTEMPTS}: ${error.message}`);
+      console.warn(`team_computed upsert (rows ${i}-${i + batch.length}) failed on attempt ${attempt}/${MAX_ATTEMPTS}: ${error.message}`);
       if (attempt < MAX_ATTEMPTS) await new Promise((r) => setTimeout(r, 2000 * attempt));
     }
-    if (!ok) throw new Error(`team_computed insert failed at row ${i}: ${lastErr}`);
+    if (!ok) throw new Error(`team_computed upsert failed at row ${i}: ${lastErr}`);
   }
 
   console.log("Done.");
