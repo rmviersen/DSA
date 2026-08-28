@@ -5,6 +5,10 @@ import { cn } from "@/lib/utils";
 import { ThemeToggle } from "./ThemeToggle";
 
 const NAV_ITEMS = [
+  // Rees's intended home/landing page as site owner (2026-08-28) -- listed
+  // first deliberately. Automatically owner-only via middleware.ts (not in
+  // GUEST_ALLOWED_PATHS), so no separate visibility check needed here.
+  { href: "/admin", label: "Admin" },
   { href: "/players", label: "Top Players" },
   // Points at the guest-facing /TBL/prospects (cards, no side-by-side
   // System Rankings table) instead of the internal /prospects combined

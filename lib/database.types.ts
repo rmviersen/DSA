@@ -1115,6 +1115,36 @@ export type Database = {
           },
         ]
       }
+      platform_events: {
+        Row: {
+          created_at: string
+          details: Json | null
+          id: number
+          message: string
+          refresh_run_id: number | null
+          severity: string
+          source: string
+        }
+        Insert: {
+          created_at?: string
+          details?: Json | null
+          id?: never
+          message: string
+          refresh_run_id?: number | null
+          severity: string
+          source: string
+        }
+        Update: {
+          created_at?: string
+          details?: Json | null
+          id?: never
+          message?: string
+          refresh_run_id?: number | null
+          severity?: string
+          source?: string
+        }
+        Relationships: []
+      }
       player_batting_stats_snapshots: {
         Row: {
           ab: number | null
