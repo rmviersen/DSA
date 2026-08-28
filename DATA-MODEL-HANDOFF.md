@@ -1,8 +1,8 @@
 # Data Model Handoff — start here if you're a new agent picking up backend/data-model work
 
-**Who this is for:** a fresh Claude Code session taking over database/schema/rating-engine work from a prior session, specifically — not Cursor (front-end) and not someone extending existing pages. If you're building UI, read [`HANDOFF.md`](HANDOFF.md) instead; it's written for that.
+**Who this is for:** a fresh Claude Code session taking over database/schema/rating-engine work from a prior session, specifically — not the front-end work (owned by Cowork as of 2026-08-28) and not someone extending existing pages. If you're building UI, read [`HANDOFF.md`](HANDOFF.md) instead; it's written for that.
 
-**Why this doc exists:** `HANDOFF.md` is the real, continuously-maintained backend→front-end contract and has the full history of everything — but it's 270+ lines written for Cursor, and most of it (card layouts, colors, hover states, fonts) has nothing to do with the data model. This doc is a shorter front door: what to read, what already works, what's actually still open, and the gotchas that will bite you if you skip them. It intentionally doesn't duplicate anything — it points into the real docs.
+**Why this doc exists:** `HANDOFF.md` is the real, continuously-maintained backend→front-end contract and has the full history of everything — but it's 270+ lines written for the front-end side, and most of it (card layouts, colors, hover states, fonts) has nothing to do with the data model. This doc is a shorter front door: what to read, what already works, what's actually still open, and the gotchas that will bite you if you skip them. It intentionally doesn't duplicate anything — it points into the real docs.
 
 ## 1. What DSA is, in 3 sentences
 
