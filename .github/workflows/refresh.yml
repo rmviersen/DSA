@@ -36,7 +36,13 @@ jobs:
 
       - uses: actions/setup-node@v4
         with:
-          node-version: 20
+          # 22, not 20 (2026-08-28, fixed after the first live run failed
+          # immediately): @supabase/supabase-js's RealtimeClient requires a
+          # native global WebSocket at client-construction time, even though
+          # nothing here uses realtime features -- Node 20 doesn't have one
+          # built in, Node 22 does. Exact error was Supabase's own suggested
+          # fix: "Ensure you are running Node.js 22+."
+          node-version: 22
           cache: npm
 
       - run: npm ci
