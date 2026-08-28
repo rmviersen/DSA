@@ -72,14 +72,25 @@ export interface MinorsPlayerRow {
   ab: number | null;
   ip: number | null;
   available: boolean;
-  // Role-Level-benchmark-based (2026-08-28, replaces the old age+ceiling
-  // heuristic entirely): "promote" if this player's current Overall already
-  // clears the role's average Overall for the level immediately above
-  // theirs -- the goal is nobody sitting meaningfully above where they're
-  // rostered. "demote" if current Overall is below the role's own average
-  // for the level they're AT -- they're behind their own level's bar.
-  // International (no real rung on the ladder) and MLB (no level above it)
-  // never get a promote flag; MLB players can still get flagged demote.
+  // Role-Level-benchmark-based, reworked 2026-08-28 (v2 -- see HANDOFF.md/
+  // git history for the original one-average-per-level version, replaced
+  // because comparing to a level's own average structurally caught ~half
+  // of any level's players as "below average," which read as far too many
+  // demotions). Both bars are against the FULL-POOL leaguewide average
+  // (queries.ts's getRoleLevelBenchmarks), same as before -- NOT the
+  // Role Health table's top-N-per-team number, which is a deliberately
+  // separate benchmark.
+  // "promote" if current Overall already clears the level ABOVE's own
+  // average -- unchanged from before: "ready to contribute there," not
+  // just "better than average here."
+  // "demote" if current Overall is below the MIDPOINT between this
+  // level's average and the level BELOW's average -- Rees's fix for the
+  // above: a player has to be closer to belonging a level down than to
+  // where they are now, not merely below-average for their own level.
+  // International (no real rung on the ladder) never gets either flag.
+  // MLB (no level above) can only ever demote; Rookie (no level below)
+  // can only ever promote -- a Rookie-level player can no longer be
+  // flagged demote at all, since there's nowhere lower to send them.
   levelFlag: "promote" | "demote" | null;
 }
 
@@ -350,15 +361,20 @@ export async function getOrgMinorsPlayers(orgId: number): Promise<{ rows: Minors
     const teamNickname = isInternational ? "International Academy" : (team?.nickname ?? null);
     const levelLabel = isInternational ? "Int'l" : (p.level !== null ? (LEVEL_LABELS[p.level] ?? `Lvl ${p.level}`) : "—");
 
+    // v2 promote/demote (2026-08-28) -- see the levelFlag field comment on
+    // MinorsPlayerRow above for the full rationale.
     let levelFlag: MinorsPlayerRow["levelFlag"] = null;
     if (!isInternational && p.level !== null && role && overall !== null) {
       const byLevel = benchByRole.get(role);
-      const ownLevelAvg = byLevel?.get(p.level) ?? null;
-      if (ownLevelAvg !== null && overall < ownLevelAvg) levelFlag = "demote";
-      else if (p.level > 1) {
-        const levelAbove = p.level - 1; // level 1 = MLB = the top rung, no level "above" it
-        const aboveAvg = byLevel?.get(levelAbove) ?? null;
+      const ownAvg = byLevel?.get(p.level) ?? null;
+
+      if (p.level > 1) {
+        const aboveAvg = byLevel?.get(p.level - 1) ?? null; // level 1 = MLB = the top rung, no level "above" it
         if (aboveAvg !== null && overall >= aboveAvg) levelFlag = "promote";
+      }
+      if (levelFlag === null && p.level < 6) { // level 6 = Rookie = the bottom rung, no level "below" it
+        const belowAvg = byLevel?.get(p.level + 1) ?? null;
+        if (ownAvg !== null && belowAvg !== null && overall < (ownAvg + belowAvg) / 2) levelFlag = "demote";
       }
     }
 

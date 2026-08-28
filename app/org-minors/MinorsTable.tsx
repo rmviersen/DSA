@@ -363,7 +363,7 @@ export default function MinorsTable({ rows, teamCounts, roleHealth }: { rows: Mi
         ))}
       </div>
       <p style={{ color: "var(--color-text-muted, #888)", fontSize: 11, marginTop: 10 }}>
-        Sort/filter controls above apply to every team box. Flag: ▲ promote (current Overall already clears the role's average for the level above), ▼ demote (current Overall is below the role's own average for their current level) -- both against leaguewide Role × Level Overall benchmarks, not a scouted recommendation. ✚ marks a player who won't be healthy within 7 days.
+        Sort/filter controls above apply to every team box. Flag: ▲ promote (current Overall already clears the level above's own average -- ready to contribute there, not just better than average here), ▼ demote (current Overall is below the midpoint between this level's average and the level below's) -- both against leaguewide Role × Level Overall benchmarks, not a scouted recommendation. ✚ marks a player who won't be healthy within 7 days.
       </p>
     </div>
   );
