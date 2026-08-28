@@ -1,0 +1,53 @@
+name: Refresh DSA data
+
+# Manually triggerable (workflow_dispatch) so the league-refresh-detect Claude
+# routine can fire this via GitHub's API the moment it sees the StatsPlus Bot
+# Slack announcement (2026-08-28) -- see platform/HANDOFF.md for the full
+# design. Secrets here (SUPABASE_SERVICE_ROLE_KEY, STATSPLUS_API_TOKEN) live
+# only in this repo's Actions secrets store -- never in a file, never visible
+# to Cowork's folder access to this repo, only injected at runtime and masked
+# in logs.
+on:
+  workflow_dispatch:
+    inputs:
+      reason:
+        description: "Why this run was triggered (e.g. the game date the routine detected)"
+        required: false
+        default: "manual trigger"
+
+jobs:
+  refresh:
+    runs-on: ubuntu-latest
+    # 30 min covers a normal refresh comfortably (ratings export alone can take
+    # a few minutes per StatsPlus's own async job, plus the stats/compute
+    # steps) without letting a genuinely hung run burn hours of Actions time.
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - run: npm ci
+
+      - name: Refresh from StatsPlus
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+          STATSPLUS_BASE_URL: https://atl-02.statsplus.net/thebigleague/api
+          STATSPLUS_API_TOKEN: ${{ secrets.STATSPLUS_API_TOKEN }}
+        run: npm run refresh
+
+      - name: Compute player ratings
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+        run: npm run compute-ratings
+
+      - name: Compute team ratings
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+        run: npm run compute-team-ratings

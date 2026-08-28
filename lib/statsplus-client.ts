@@ -4,14 +4,38 @@ export interface StatsPlusConfig {
   baseUrl: string; // e.g. https://atl-02.statsplus.net/thebigleague/api
   sessionId?: string;
   csrfToken?: string;
+  // API token auth (2026-08-28) -- StatsPlus's own documented mechanism for
+  // programmatic/automated clients (wiki.statsplus.net/web-tools/statsplus-api),
+  // a `?token=` query param generated from the account Preferences page,
+  // valid ~90 days. Verified directly against both previously session-gated
+  // endpoints (ratings, gamehistory) -- works end to end with zero cookies,
+  // no browser, no CAPTCHA. Preferred over sessionId/csrfToken whenever
+  // present: it's a real, storable secret (fits a GitHub Actions secret,
+  // unlike a personal browser session), where the cookie pair required a
+  // human to copy a value out of DevTools by hand every time it expired.
+  // Cookie auth is kept as a fallback, not removed -- still useful for a
+  // quick local one-off run without setting up a token.
+  apiToken?: string;
 }
 
 /** Rows come back keyed by the CSV's original header text — untouched, unmapped. */
 export type RawRow = Record<string, string>;
 
+function hasAuth(cfg: StatsPlusConfig): boolean {
+  return Boolean(cfg.apiToken || (cfg.sessionId && cfg.csrfToken));
+}
+
 function cookieHeader(cfg: StatsPlusConfig): Record<string, string> {
-  if (!cfg.sessionId || !cfg.csrfToken) return {};
+  // Token auth doesn't need cookies at all -- only fall back to the cookie
+  // header when there's no token.
+  if (cfg.apiToken || !cfg.sessionId || !cfg.csrfToken) return {};
   return { Cookie: `sessionid=${cfg.sessionId}; csrftoken=${cfg.csrfToken}` };
+}
+
+/** Appends `?token=` (or `&token=`) to a URL when API token auth is configured. */
+function withToken(cfg: StatsPlusConfig, url: string): string {
+  if (!cfg.apiToken) return url;
+  return `${url}${url.includes("?") ? "&" : "?"}token=${cfg.apiToken}`;
 }
 
 // Throttle every outbound request through here, and back off hard on 429s —
@@ -67,13 +91,13 @@ async function fetchPublicCsv(cfg: StatsPlusConfig, endpoint: string, params: Re
   return parseCsv(text);
 }
 
-/** Session-gated endpoints (gamehistory) — needs cookies, returns CSV directly. */
+/** Session-gated endpoints (gamehistory) — needs a token or cookies, returns CSV directly. */
 async function fetchAuthedCsv(cfg: StatsPlusConfig, endpoint: string, params: Record<string, string | number> = {}): Promise<RawRow[]> {
-  if (!cfg.sessionId || !cfg.csrfToken) {
-    throw new Error(`${endpoint} requires STATSPLUS_SESSION_ID and STATSPLUS_CSRF_TOKEN — none provided, skipping.`);
+  if (!hasAuth(cfg)) {
+    throw new Error(`${endpoint} requires STATSPLUS_API_TOKEN (preferred) or STATSPLUS_SESSION_ID+STATSPLUS_CSRF_TOKEN — none provided, skipping.`);
   }
   const qs = new URLSearchParams(Object.entries(params).map(([k, v]) => [k, String(v)])).toString();
-  const url = `${cfg.baseUrl}/${endpoint}/${qs ? `?${qs}` : ""}`;
+  const url = withToken(cfg, `${cfg.baseUrl}/${endpoint}/${qs ? `?${qs}` : ""}`);
   const text = await fetchText(url, cookieHeader(cfg));
   return parseCsv(text);
 }
@@ -83,10 +107,13 @@ async function fetchAuthedCsv(cfg: StatsPlusConfig, endpoint: string, params: Re
  * Poll until the response stops being the "still in progress" placeholder text.
  */
 async function fetchRatingsCsv(cfg: StatsPlusConfig, opts: { pollIntervalMs?: number; timeoutMs?: number } = {}): Promise<RawRow[]> {
-  if (!cfg.sessionId || !cfg.csrfToken) {
-    throw new Error("ratings requires STATSPLUS_SESSION_ID and STATSPLUS_CSRF_TOKEN — none provided, skipping.");
+  if (!hasAuth(cfg)) {
+    throw new Error("ratings requires STATSPLUS_API_TOKEN (preferred) or STATSPLUS_SESSION_ID+STATSPLUS_CSRF_TOKEN — none provided, skipping.");
   }
-  const kickoff = await fetchText(`${cfg.baseUrl}/ratings/`, cookieHeader(cfg));
+  // Confirmed 2026-08-28: when the kickoff request carries the token, the poll
+  // URL StatsPlus hands back already has `&token=...` baked in -- no need to
+  // re-append it ourselves at the polling step below.
+  const kickoff = await fetchText(withToken(cfg, `${cfg.baseUrl}/ratings/`), cookieHeader(cfg));
   const match = kickoff.match(/https:\/\/\S+\/api\/mycsv\/\?request=\S+/);
   if (!match) {
     throw new Error(`Unexpected /ratings/ response, no poll URL found: ${kickoff.slice(0, 200)}`);
@@ -143,7 +170,7 @@ export function makeStatsPlusClient(cfg: StatsPlusConfig) {
     gameHistory: () => fetchAuthedCsv(cfg, "gamehistory"),
     ratings: (opts?: { pollIntervalMs?: number; timeoutMs?: number }) => fetchRatingsCsv(cfg, opts),
     currentGameDate: () => fetchCurrentGameDate(cfg),
-    hasSession: () => Boolean(cfg.sessionId && cfg.csrfToken),
+    hasSession: () => hasAuth(cfg),
   };
 }
 

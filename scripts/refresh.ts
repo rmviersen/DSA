@@ -54,6 +54,7 @@ async function main() {
   const supabase = makeSupabaseClient();
   const sp = makeStatsPlusClient({
     baseUrl: process.env.STATSPLUS_BASE_URL!,
+    apiToken: process.env.STATSPLUS_API_TOKEN,
     sessionId: process.env.STATSPLUS_SESSION_ID,
     csrfToken: process.env.STATSPLUS_CSRF_TOKEN,
   });
@@ -70,20 +71,23 @@ async function main() {
   if (wantsRatings) {
     if (!sp.hasSession()) {
       console.error(
-        "Refresh aborted before writing anything: STATSPLUS_SESSION_ID/STATSPLUS_CSRF_TOKEN are missing from .env. " +
-          "Ask Rees for fresh session cookies, or pass --skip-ratings for a public-data-only refresh."
+        "Refresh aborted before writing anything: no auth configured (STATSPLUS_API_TOKEN, or the older " +
+          "STATSPLUS_SESSION_ID/STATSPLUS_CSRF_TOKEN pair, are missing from .env). " +
+          "Pass --skip-ratings for a public-data-only refresh."
       );
       process.exitCode = 1;
       return;
     }
-    console.log("Validating session cookies (all-or-nothing: won't write anything unless this succeeds)...");
+    console.log("Validating StatsPlus auth (all-or-nothing: won't write anything unless this succeeds)...");
     try {
       gameHistoryRows = await sp.gameHistory();
-      console.log(`Session cookies valid — game history pull returned ${gameHistoryRows.length} rows.`);
+      console.log(`Auth valid — game history pull returned ${gameHistoryRows.length} rows.`);
     } catch (err) {
       console.error(
-        `Refresh aborted before writing anything: session cookie validation failed (${err}). ` +
-          "Ask Rees for fresh STATSPLUS_SESSION_ID/STATSPLUS_CSRF_TOKEN, or pass --skip-ratings for a public-data-only refresh."
+        `Refresh aborted before writing anything: StatsPlus auth validation failed (${err}). ` +
+          "If using STATSPLUS_API_TOKEN, it may have expired (~90 days) and needs regenerating from the account " +
+          "Preferences page; if using session cookies, ask Rees for a fresh one, or pass --skip-ratings for a " +
+          "public-data-only refresh."
       );
       process.exitCode = 1;
       return;
