@@ -171,7 +171,7 @@ const INTERNATIONAL_LEVEL = 7; // matches queries.ts's effectiveLevel() remap
 const ROLE_HEALTH_ROWS: { label: string; roles: string[]; min: number; topN: number; forcePct?: number }[] = [
   { label: "SP", roles: ["SP"], min: 5, topN: 5 },
   { label: "RP", roles: ["RP"], min: 0, topN: 5 },
-  { label: "Pitching (Total)", roles: ["SP", "RP"], min: 13, topN: 10 },
+  { label: "P Tot", roles: ["SP", "RP"], min: 13, topN: 10 }, // "Pitching (Total)", shortened 2026-08-28 -- was too wide for the role-health cards
   { label: "C", roles: ["C"], min: 2, topN: 1 },
   { label: "1B", roles: ["1B"], min: 0, topN: 1, forcePct: 82 },
   { label: "INF", roles: ["INF"], min: 3, topN: 3 },
@@ -181,7 +181,7 @@ const ROLE_HEALTH_ROWS: { label: string; roles: string[]; min: number; topN: num
   { label: "DH", roles: ["DH"], min: 0, topN: 1, forcePct: 82 },
   // New (2026-08-28): a combined-hitter row, same idea as Pitching (Total)
   // but for every non-pitching role. 14 is Rees's stated minimum.
-  { label: "Hitting (Total)", roles: ["C", "1B", "INF", "SS", "CF", "COF", "DH"], min: 14, topN: 10 },
+  { label: "H Tot", roles: ["C", "1B", "INF", "SS", "CF", "COF", "DH"], min: 14, topN: 10 }, // "Hitting (Total)", shortened 2026-08-28
 ];
 
 // Staffing-count percentile (2026-08-28, replaces the old 3-bucket

@@ -188,7 +188,7 @@ export default function MinorsTable({ rows, teamCounts, roleHealth }: { rows: Mi
               <tbody>
                 {card.byRole.map(({ label, cell }) => (
                   <tr key={label}>
-                    <td style={{ padding: "3px 6px", borderBottom: "1px solid var(--color-border)", fontWeight: label.includes("Total") ? 600 : 400, whiteSpace: "nowrap" }}>{label}</td>
+                    <td style={{ padding: "3px 6px", borderBottom: "1px solid var(--color-border)", fontWeight: label.startsWith("P Tot") || label.startsWith("H Tot") ? 600 : 400, whiteSpace: "nowrap" }}>{label}</td>
                     <td style={{ padding: "3px 6px", textAlign: "right", borderBottom: "1px solid var(--color-border)", ...percentileStyle(cell.countPct) }} title={cell.min > 0 ? `Minimum ${cell.min}` : undefined}>
                       {cell.count}
                       {/* Injured count in parens -- players in this role/level
