@@ -88,9 +88,7 @@ const GRADIENT_STOPS: { at: number; rgb: [number, number, number] }[] = [
   { at: 80, rgb: [56, 189, 248] },  // light blue
 ];
 
-export function gradeStyle(v: number | null): { color: string; fontWeight: number } | undefined {
-  if (v === null) return undefined;
-  const stops = GRADIENT_STOPS;
+function interpolateStops(v: number, stops: { at: number; rgb: [number, number, number] }[]): string {
   let rgb: [number, number, number];
   if (v <= stops[0].at) rgb = stops[0].rgb;
   else if (v >= stops[stops.length - 1].at) rgb = stops[stops.length - 1].rgb;
@@ -106,5 +104,31 @@ export function gradeStyle(v: number | null): { color: string; fontWeight: numbe
     ];
   }
   const [r, g, b] = rgb.map(Math.round);
-  return { color: `rgb(${r},${g},${b})`, fontWeight: 700 };
+  return `rgb(${r},${g},${b})`;
+}
+
+export function gradeStyle(v: number | null): { color: string; fontWeight: number } | undefined {
+  if (v === null) return undefined;
+  return { color: interpolateStops(v, GRADIENT_STOPS), fontWeight: 700 };
+}
+
+// Same 5-color red/orange/yellow/green/light-blue gradient as gradeStyle,
+// but re-anchored to a 0-100 PERCENTILE scale instead of the raw 20-80
+// Overall grade scale (2026-08-28, for the Role Health table's RAG
+// comparisons -- count vs. staffing minimum, org vs. league average, and
+// league rank -- none of which are Overall grades themselves, but all want
+// the same "how good is this, relatively" visual language: 0 = worst, 50 =
+// right at the boundary/neutral, 100 = best). Callers normalize their own
+// metric (a ratio, a diff, a rank) onto this 0-100 scale before calling.
+const PERCENTILE_STOPS: { at: number; rgb: [number, number, number] }[] = [
+  { at: 0, rgb: [220, 38, 38] },    // red
+  { at: 25, rgb: [249, 115, 22] },  // orange
+  { at: 50, rgb: [234, 179, 8] },   // yellow
+  { at: 75, rgb: [34, 197, 94] },   // green
+  { at: 100, rgb: [56, 189, 248] }, // light blue
+];
+
+export function percentileStyle(pct: number | null): { color: string; fontWeight: number } | undefined {
+  if (pct === null) return undefined;
+  return { color: interpolateStops(Math.max(0, Math.min(100, pct)), PERCENTILE_STOPS), fontWeight: 700 };
 }

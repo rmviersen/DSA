@@ -94,22 +94,35 @@ export interface MinorsPlayerRow {
   levelFlag: "promote" | "demote" | null;
 }
 
+// 2026-08-28: all three RAG signals below are now 0-100 PERCENTILES (null =
+// no grade), fed straight into display-helpers.ts's percentileStyle -- the
+// same 5-stop red/orange/yellow/green/blue gradient used for Overall grades
+// elsewhere on the site, instead of a discrete 3-bucket red/amber/green.
+// Each percentile is this cell's own metric normalized onto that 0-100
+// scale by the functions below (countPercentile/avgDiffPercentile/
+// rankPercentile) -- see those for the actual calibration.
 export interface RoleHealthCell {
   level: number;
   levelLabel: string;
   count: number;
   injuredCount: number; // players in this role/level excluded from `count` for not being back within 7 days
   min: number; // 0 = no minimum, not scored
-  status: "red" | "amber" | "green" | "none";
+  countPct: number | null; // staffing count vs. `min`
   // Talent-vs-league comparison (2026-08-28, Rees's ask) -- separate from
-  // the staffing-count RAG above. leagueAvg/orgAvg are both plain Overall
-  // averages (all rostered players at that role/level, regardless of
-  // health -- injury doesn't change a player's talent grade, unlike the
-  // count above). null when nobody exists at that role/level on either
-  // side to average.
+  // the staffing-count RAG above. leagueAvg/orgAvg are both top-N-per-team
+  // Overall averages (see topN below), regardless of health -- injury
+  // doesn't change a player's talent grade, unlike the count above. null
+  // when nobody exists at that role/level on either side to average.
   leagueAvg: number | null;
   orgAvg: number | null;
-  avgStatus: "red" | "amber" | "green" | "none";
+  avgPct: number | null; // org vs. league average diff
+  // League rank (2026-08-28, new) -- where Oklahoma City's own top-N average
+  // ranks among every team with at least one player at this role/level (1 =
+  // best). totalTeams is how many teams had a rank to compare against, so
+  // e.g. "5th of 28" can be shown, not just a bare number.
+  rank: number | null;
+  totalTeams: number | null;
+  rankPct: number | null;
 }
 export interface RoleHealthRow {
   label: string;
@@ -150,27 +163,61 @@ const INTERNATIONAL_LEVEL = 7; // matches queries.ts's effectiveLevel() remap
 // minimum. The two Total rows use a flat top-10 over their pooled combined
 // roles (not each sub-role's own top-N re-combined) per Rees's explicit
 // "top 10 pitchers and top 10 hitters."
-const ROLE_HEALTH_ROWS: { label: string; roles: string[]; min: number; topN: number; forceStatus?: RoleHealthCell["status"] }[] = [
+// forcePct: fixed percentile override for 1B/DH's staffing-count grade
+// (Rees's call, 2026-08-28: those two roles are never actually a staffing
+// risk regardless of count, so they shouldn't render as an ungraded "no
+// color" the way RP -- also min:0 -- still does). 82 lands solidly in the
+// green band without claiming to be leaguewide-elite (100/blue).
+const ROLE_HEALTH_ROWS: { label: string; roles: string[]; min: number; topN: number; forcePct?: number }[] = [
   { label: "SP", roles: ["SP"], min: 5, topN: 5 },
   { label: "RP", roles: ["RP"], min: 0, topN: 5 },
   { label: "Pitching (Total)", roles: ["SP", "RP"], min: 13, topN: 10 },
   { label: "C", roles: ["C"], min: 2, topN: 1 },
-  { label: "1B", roles: ["1B"], min: 0, topN: 1, forceStatus: "green" },
+  { label: "1B", roles: ["1B"], min: 0, topN: 1, forcePct: 82 },
   { label: "INF", roles: ["INF"], min: 3, topN: 3 },
   { label: "SS", roles: ["SS"], min: 1, topN: 1 },
   { label: "CF", roles: ["CF"], min: 1, topN: 1 },
   { label: "COF", roles: ["COF"], min: 3, topN: 2 },
-  { label: "DH", roles: ["DH"], min: 0, topN: 1, forceStatus: "green" },
+  { label: "DH", roles: ["DH"], min: 0, topN: 1, forcePct: 82 },
   // New (2026-08-28): a combined-hitter row, same idea as Pitching (Total)
   // but for every non-pitching role. 14 is Rees's stated minimum.
   { label: "Hitting (Total)", roles: ["C", "1B", "INF", "SS", "CF", "COF", "DH"], min: 14, topN: 10 },
 ];
 
-function rowStatus(count: number, min: number): RoleHealthCell["status"] {
-  if (min <= 0) return "none";
-  if (count < min) return "red";
-  if (count === min) return "amber"; // technically compliant, no depth margin
-  return "green";
+// Staffing-count percentile (2026-08-28, replaces the old 3-bucket
+// red/amber/green): 0 healthy players = 0 (red), exactly at the minimum =
+// 50 (yellow -- technically compliant, no depth margin), double the
+// minimum or more = 100 (blue). Linear between those anchors, clamped.
+// min<=0 means "not scored" -- null, same as before.
+function countPercentile(count: number, min: number): number | null {
+  if (min <= 0) return null;
+  const ratio = count / min;
+  if (ratio <= 1) return ratio * 50;
+  return Math.min(100, 50 + (ratio - 1) * 50);
+}
+
+// Org-vs-league-average percentile (2026-08-28): a 0-point gap is dead
+// center (50, yellow); +/-5 points (roughly a full "grade band" on the
+// site's existing 20/40/50/65/80 Overall gradient) reaches the ends of the
+// scale (100/blue, 0/red). Not something Rees specified a number for --
+// worth revisiting against how it actually renders, same as the original
+// +/-3 first pass before he set the discrete-threshold version this
+// replaces.
+const AVG_PCT_SPREAD = 5;
+function avgDiffPercentile(orgAvg: number | null, leagueAvg: number | null): number | null {
+  if (orgAvg === null || leagueAvg === null) return null;
+  const diff = orgAvg - leagueAvg;
+  return Math.max(0, Math.min(100, 50 + (diff / AVG_PCT_SPREAD) * 50));
+}
+
+// League-rank percentile (2026-08-28, new): 1st of N teams = 100 (blue),
+// last of N = 0 (red), linear in between. A single-team "league" (should
+// never happen in practice) falls back to neutral (50) rather than
+// dividing by zero.
+function rankPercentile(rank: number | null, totalTeams: number | null): number | null {
+  if (rank === null || totalTeams === null) return null;
+  if (totalTeams <= 1) return 50;
+  return ((totalTeams - rank) / (totalTeams - 1)) * 100;
 }
 
 // Average of the top `n` values (by Overall) in a pool -- powers the Org
@@ -178,21 +225,6 @@ function rowStatus(count: number, min: number): RoleHealthCell["status"] {
 function topNAvg(values: number[], n: number): number | null {
   const top = [...values].sort((a, b) => b - a).slice(0, n);
   return top.length > 0 ? top.reduce((a, b) => a + b, 0) / top.length : null;
-}
-
-// Talent-vs-league RAG (2026-08-28) -- separate scale from rowStatus above,
-// which grades a headcount against a fixed minimum. This grades the org's
-// top-N average Overall at a role/level against the leaguewide average for
-// that same role/level. Thresholds are Rees's exact spec: +1 or above is
-// green, less than -1 is red, everything between is amber. (Note: the
-// league side is still a full-pool average, not top-N -- see the "How to
-// apply" note where this function is used.)
-function avgStatus(orgAvg: number | null, leagueAvg: number | null): RoleHealthCell["avgStatus"] {
-  if (orgAvg === null || leagueAvg === null) return "none";
-  const diff = orgAvg - leagueAvg;
-  if (diff >= 1) return "green";
-  if (diff < -1) return "red";
-  return "amber";
 }
 
 export async function getOrgMinorsPlayers(orgId: number): Promise<{ rows: MinorsPlayerRow[]; teamCounts: TeamPositionCounts[]; roleHealth: RoleHealthRow[] }> {
@@ -328,11 +360,13 @@ export async function getOrgMinorsPlayers(orgId: number): Promise<{ rows: Minors
     byTeam.set(p.team_id, arr);
     leagueByTeamLevelRole.set(key, byTeam);
   }
-  // Average, across every team that has at least one player there, of that
-  // team's OWN top-`topN` average -- "roster strength" per Rees's framing,
-  // one data point per team (not one per player, which would let a few
-  // stacked orgs skew the number the way a flat pool average can).
-  function leagueTopNPerTeamAvg(roles: string[], level: number, topN: number): number | null {
+  // Every team's own top-`topN` average at a role/level, one entry per team
+  // that has at least one player there -- "roster strength" per Rees's
+  // framing, one data point per team (not one per player, which would let a
+  // few stacked orgs skew a flat pool average). Powers both the league
+  // average (mean of these) and Oklahoma City's rank (its position in this
+  // list, sorted best-first) below.
+  function leagueTeamTopNAverages(roles: string[], level: number, topN: number): { teamId: number; avg: number }[] {
     const perTeam = new Map<number, number[]>();
     for (const role of roles) {
       const byTeam = leagueByTeamLevelRole.get(`${level}|${role}`);
@@ -343,8 +377,12 @@ export async function getOrgMinorsPlayers(orgId: number): Promise<{ rows: Minors
         perTeam.set(teamId, arr);
       }
     }
-    const teamAvgs = [...perTeam.values()].map((vals) => topNAvg(vals, topN)).filter((v): v is number => v !== null);
-    return teamAvgs.length > 0 ? teamAvgs.reduce((a, b) => a + b, 0) / teamAvgs.length : null;
+    const out: { teamId: number; avg: number }[] = [];
+    for (const [teamId, vals] of perTeam) {
+      const avg = topNAvg(vals, topN);
+      if (avg !== null) out.push({ teamId, avg });
+    }
+    return out;
   }
 
   const rows: MinorsPlayerRow[] = players.map((p) => {
@@ -405,10 +443,24 @@ export async function getOrgMinorsPlayers(orgId: number): Promise<{ rows: Minors
   const orderKey = (t: TeamPositionCounts) => (t.team_id === internationalTeamId ? 99 : (t.level ?? 98));
   const teamCounts = [...countsByTeam.values()].sort((a, b) => orderKey(a) - orderKey(b));
 
+  // Oklahoma City's own real team_id AT EACH LEVEL (2026-08-28) -- needed to
+  // find "us" inside leagueTeamTopNAverages' per-team list for the rank
+  // column. NOT the same as orgId itself except at level 1 (MLB): each
+  // minor-league level is a distinct affiliate with its own team_id (e.g.
+  // the Bulls at AAA), and every org has exactly one affiliate per level, so
+  // this 1:1 lookup is safe. Built from `rows` (already computed above)
+  // rather than re-querying.
+  const okcTeamIdByLevel = new Map<number, number>();
+  for (const r of rows) {
+    if (r.level !== null && r.levelLabel !== "Int'l" && r.team_id !== null && !okcTeamIdByLevel.has(r.level)) {
+      okcTeamIdByLevel.set(r.level, r.team_id);
+    }
+  }
+
   // Role-health RAG table (2026-08-28) -- healthy-only counts by role, per
   // level (MLB through Rookie; international excluded, it's not a real
   // competitive roster with staffing minimums the way an affiliate is).
-  const roleHealth: RoleHealthRow[] = ROLE_HEALTH_ROWS.map(({ label, roles, min, topN, forceStatus }) => ({
+  const roleHealth: RoleHealthRow[] = ROLE_HEALTH_ROWS.map(({ label, roles, min, topN, forcePct }) => ({
     label,
     byLevel: Object.entries(LEVEL_LABELS).map(([lvlStr, lvlLabel]) => {
       const level = Number(lvlStr);
@@ -429,18 +481,27 @@ export async function getOrgMinorsPlayers(orgId: number): Promise<{ rows: Minors
       // Health status doesn't factor in here (unlike `count` above) -- a
       // talent grade doesn't change because someone's hurt.
       const orgAvg = topNAvg(inRole.filter((r) => r.overall !== null).map((r) => r.overall as number), topN);
-      // League side (2026-08-28) -- now matches orgAvg's methodology: the
-      // average, across every team with at least one player there, of that
-      // team's own top-`topN` average. Explicitly NOT the same benchmark
-      // Glossary/promote-demote use (that one stays a flat leaguewide pool
-      // average) -- Rees's call to keep "typical team's roster strength"
-      // and "typical individual player" as two separate numbers.
-      const leagueAvg = leagueTopNPerTeamAvg(roles, level, topN);
+
+      // League side (2026-08-28) -- every team's own top-`topN` average at
+      // this role/level, sorted best-first. Powers both leagueAvg (the
+      // mean) and rank (Oklahoma City's position in the list) below.
+      // Explicitly NOT the same benchmark Glossary/promote-demote use (that
+      // one stays a flat leaguewide pool average) -- Rees's call to keep
+      // "typical team's roster strength" and "typical individual player"
+      // as two separate numbers.
+      const teamAverages = leagueTeamTopNAverages(roles, level, topN);
+      const leagueAvg = teamAverages.length > 0 ? teamAverages.reduce((a, b) => a + b.avg, 0) / teamAverages.length : null;
+      const sortedTeams = [...teamAverages].sort((a, b) => b.avg - a.avg);
+      const okcTeamId = okcTeamIdByLevel.get(level) ?? null;
+      const okcIdx = okcTeamId !== null ? sortedTeams.findIndex((t) => t.teamId === okcTeamId) : -1;
+      const rank = okcIdx >= 0 ? okcIdx + 1 : null;
+      const totalTeams = sortedTeams.length > 0 ? sortedTeams.length : null;
 
       return {
         level, levelLabel: lvlLabel, count, injuredCount, min,
-        status: forceStatus ?? rowStatus(count, min),
-        leagueAvg, orgAvg, avgStatus: avgStatus(orgAvg, leagueAvg),
+        countPct: forcePct ?? countPercentile(count, min),
+        leagueAvg, orgAvg, avgPct: avgDiffPercentile(orgAvg, leagueAvg),
+        rank, totalTeams, rankPct: rankPercentile(rank, totalTeams),
       };
     }),
   }));
