@@ -196,6 +196,13 @@ export interface PlayerRow extends RatingsSlice {
   prospect_role_rank: number | null; // leaguewide rank within role bucket, by prospect_potential (2026-08-27)
   role: string | null; // projected defensive role grouping (SP/RP/INF/OF/C/UTIL) -- distinct from `pos` (raw current position)
   ph: "H" | "P" | null; // hitter/pitcher, from player_computed -- added 2026-08-27 for /players and /draft's H/P filter
+  // Current-season, current-LEVEL only (2026-08-27) -- same convention
+  // ProspectRow's seasonTotals already uses (see getTopProspectsDetailed).
+  // war applies to both hitters and pitchers; ab is hitters-only, ip is
+  // pitchers-only -- whichever doesn't apply to this player's ph is null.
+  war: number | null;
+  ab: number | null;
+  ip: number | null;
   draft_year: number | null;
   draft_round: number | null;
   draft_overall_pick: number | null;
@@ -253,9 +260,9 @@ async function fetchComputedPlayers(opts: { orgId?: number; prospectsOnly?: bool
 
   // Now scoped to just the (at most opts.limit + 50) winning IDs -- fits in
   // one page/chunk in every realistic case, no more per-500 looping needed.
-  const players = await fetchAll<{ id: number; first_name: string; last_name: string; age: number | null; organization_id: number | null; team_id: number | null; draft_year: number | null; draft_round: number | null; draft_overall_pick: number | null }>(
+  const players = await fetchAll<{ id: number; first_name: string; last_name: string; age: number | null; organization_id: number | null; team_id: number | null; level: number | null; draft_year: number | null; draft_round: number | null; draft_overall_pick: number | null }>(
     (from, to) =>
-      supabase.from("players").select("id,first_name,last_name,age,organization_id,team_id,draft_year,draft_round,draft_overall_pick").in("id", relevantIds).order("id").range(from, to) as never
+      supabase.from("players").select("id,first_name,last_name,age,organization_id,team_id,level,draft_year,draft_round,draft_overall_pick").in("id", relevantIds).order("id").range(from, to) as never
   );
   const playerById = new Map(players.map((p) => [p.id, p]));
 
@@ -273,12 +280,79 @@ async function fetchComputedPlayers(opts: { orgId?: number; prospectsOnly?: bool
   if (ratingsErr) throw ratingsErr;
   (ratingsData as never as ({ player_id: number } & RatingsSlice)[]).forEach((r) => ratingsById.set(r.player_id, r));
 
+  // WAR/AB/IP (2026-08-27, Rees's spec) -- current season, current LEVEL
+  // only, same convention getTopProspectsDetailed's seasonTotals already
+  // uses. relevantIds is at most opts.limit+50 (a few hundred at most), so
+  // this is one direct query per stat table, not the chunked-by-500 pattern
+  // getTopProspectsDetailed needs for its up-to-200-ID case plus historical
+  // baseline lookups -- no real need for that here.
+  const { data: statYearRow } = await supabase
+    .from("player_batting_stats_snapshots").select("year")
+    .eq("refresh_run_id", refreshRunId).order("year", { ascending: false }).limit(1).maybeSingle();
+  const statSeasonYear = (statYearRow as { year: number } | null)?.year ?? null;
+
+  const warAbIpById = new Map<number, { war: number | null; ab: number | null; ip: number | null }>();
+  if (statSeasonYear !== null) {
+    const { data: batData, error: batErr } = await supabase
+      .from("player_batting_stats_snapshots")
+      .select("player_id,level_id,ab,war")
+      .eq("refresh_run_id", refreshRunId).eq("year", statSeasonYear).eq("split_id", 1).in("player_id", relevantIds);
+    if (batErr) throw batErr;
+    const { data: pitData, error: pitErr } = await supabase
+      .from("player_pitching_stats_snapshots")
+      .select("player_id,level_id,ip,war")
+      .eq("refresh_run_id", refreshRunId).eq("year", statSeasonYear).eq("split_id", 1).in("player_id", relevantIds);
+    if (pitErr) throw pitErr;
+
+    const batByPlayer = new Map<number, { level_id: number; ab: number; war: number | null }[]>();
+    (batData as never as { player_id: number; level_id: number; ab: number; war: number | null }[]).forEach((r) => {
+      const arr = batByPlayer.get(r.player_id) ?? [];
+      arr.push(r);
+      batByPlayer.set(r.player_id, arr);
+    });
+    const pitByPlayer = new Map<number, { level_id: number; ip: number; war: number | null }[]>();
+    (pitData as never as { player_id: number; level_id: number; ip: number; war: number | null }[]).forEach((r) => {
+      const arr = pitByPlayer.get(r.player_id) ?? [];
+      arr.push(r);
+      pitByPlayer.set(r.player_id, arr);
+    });
+
+    const sumStat = (arr: number[]) => arr.reduce((a, b) => a + b, 0);
+    for (const c of computed) {
+      const p = playerById.get(c.player_id);
+      if (!p || p.level === null) continue;
+      // A player can have more than one stint AT their current level in a
+      // season (optioned/recalled, etc.) -- sum across matching stints
+      // rather than taking the first, same fix as HANDOFF gotcha 15.
+      if (c.ph === "H") {
+        const stints = (batByPlayer.get(c.player_id) ?? []).filter((x) => x.level_id === p.level);
+        if (stints.length > 0) {
+          warAbIpById.set(c.player_id, {
+            war: stints.some((x) => x.war !== null) ? sumStat(stints.map((x) => x.war ?? 0)) : null,
+            ab: sumStat(stints.map((x) => x.ab)),
+            ip: null,
+          });
+        }
+      } else if (c.ph === "P") {
+        const stints = (pitByPlayer.get(c.player_id) ?? []).filter((x) => x.level_id === p.level);
+        if (stints.length > 0) {
+          warAbIpById.set(c.player_id, {
+            war: stints.some((x) => x.war !== null) ? sumStat(stints.map((x) => x.war ?? 0)) : null,
+            ab: null,
+            ip: sumStat(stints.map((x) => x.ip)),
+          });
+        }
+      }
+    }
+  }
+
   const sortKey = opts.prospectsOnly ? "prospect_potential" : "overall";
   const rows: PlayerRow[] = computed
     .map((c) => {
       const p = playerById.get(c.player_id);
       const rt = ratingsById.get(c.player_id);
       const team = p?.team_id ? teamById.get(p.team_id) : undefined;
+      const wai = warAbIpById.get(c.player_id);
       if (!p || !rt) return null;
       return {
         player_id: c.player_id,
@@ -287,6 +361,7 @@ async function fetchComputedPlayers(opts: { orgId?: number; prospectsOnly?: bool
         overall: c.overall, potential: c.potential, prospect_potential: c.prospect_potential,
         prospect_rank: c.prospect_rank, org_rank: c.org_rank, prospect_org_rank: c.prospect_org_rank,
         prospect_role_rank: c.prospect_role_rank, role: c.role, ph: c.ph,
+        war: wai?.war ?? null, ab: wai?.ab ?? null, ip: wai?.ip ?? null,
         // StatsPlus returns literal 0, not null, for players who were never
         // drafted (international signees, etc.) -- confirmed 2026-08-19.
         // Normalize to null here so every consumer of PlayerRow gets a
@@ -408,6 +483,8 @@ export interface ActiveWeightSet {
   sp_rp_stamina_threshold: number; sp_rp_min_pitches: number;
   catcher_batting_multiplier: number; ss_batting_multiplier: number; cf_batting_multiplier: number;
   catcher_fielding_bonus: number; infield_fielding_bonus: number; outfield_fielding_bonus: number;
+  contact_gate_threshold: number; contact_gate_floor: number;
+  control_gate_threshold: number; control_gate_floor: number;
   notes: string | null;
 }
 

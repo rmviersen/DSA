@@ -66,6 +66,8 @@ export interface WeightSet {
   sp_rp_stamina_threshold: number; sp_rp_min_pitches: number;
   catcher_batting_multiplier: number; ss_batting_multiplier: number; cf_batting_multiplier: number;
   catcher_fielding_bonus: number; infield_fielding_bonus: number; outfield_fielding_bonus: number;
+  contact_gate_threshold: number; contact_gate_floor: number;
+  control_gate_threshold: number; control_gate_floor: number;
 }
 
 // Real league-wide handedness exposure, computed fresh every refresh from
@@ -132,6 +134,26 @@ const ROLE_BUCKET_THRESHOLDS = {
 };
 
 const zero = (v: number | null) => v ?? 0;
+
+// "Floor gate" for a make-or-break tool (Rees 2026-08-27): a player with an
+// elite secondary skill set (e.g. Power/Eye, or Stuff/Movement) but a genuinely
+// unplayable primary tool (Contact for hitters, Control for pitchers) was
+// scoring far too high under the plain weighted sum below -- e.g. a real SP
+// with Control 30 ranked as the league's #13 prospect purely off Stuff. Below
+// `threshold`, this multiplies the whole Batting/Pitching number down, ramping
+// linearly to `floor` as the grade approaches 0; at/above threshold it's a
+// no-op (returns 1). Deliberately keyed on Contact/Control ALONE, not blended
+// with avoid_ks -- Contact is already StatsPlus's own internal composite of
+// Avoid-Ks and BABIP, so averaging it with the separate `ks` field would
+// double-count the same underlying weakness. Control, by contrast, is
+// confirmed a standalone raw grade (Movement is the one that's a composite,
+// of PBABIP and HRA -- not gated here). Threshold intentionally sits at a
+// real grade-scale rung (40) rather than above it, so a player sitting
+// exactly at a "playable" grade (e.g. a proven real performer with Contact
+// 40) sees zero penalty -- only grades genuinely below that line are touched.
+const gate = (grade: number, threshold: number, floor: number) =>
+  grade >= threshold ? 1 : floor + (1 - floor) * (grade / threshold);
+
 const countAtLeast = (threshold: number, ...grades: (number | null)[]) =>
   // Explicit <number> on reduce (2026-08-24): without it, TS infers the
   // accumulator's type ambiguously enough to widen it to `number | null`,
@@ -206,15 +228,21 @@ export function computeRatings(r: RatingsInput, w: WeightSet, splits: Handedness
     : isCFRole ? w.cf_batting_multiplier
     : 1;
 
+  // Contact floor gate -- current uses the same handedness-blended Contact
+  // value that already feeds battingRaw; Potential uses the flat pot_cntct
+  // field, matching how Potential is computed everywhere else in this file.
+  const contactGate = gate(cntctBlend, w.contact_gate_threshold, w.contact_gate_floor);
+  const contactGateP = gate(zero(r.pot_cntct), w.contact_gate_threshold, w.contact_gate_floor);
+
   const battingRaw =
     cntctBlend * w.contact + ksBlend * w.avoid_ks + powBlend * w.power +
     gapBlend * w.gap + eyeBlend * w.eye + zero(r.speed) * w.speed;
-  const batting = battingRaw * battingMultiplier;
+  const batting = battingRaw * battingMultiplier * contactGate;
 
   const battingPRaw =
     zero(r.pot_cntct) * w.contact + zero(r.pot_ks) * w.avoid_ks + zero(r.pot_pow) * w.power +
     zero(r.pot_gap) * w.gap + zero(r.pot_eye) * w.eye + zero(r.speed) * w.speed;
-  const battingP = battingPRaw * battingMultiplier;
+  const battingP = battingPRaw * battingMultiplier * contactGateP;
 
   // Flat per-position bonuses -- previously hardcoded (+15/+5/+0), now
   // tunable via rating_weights (Rees 2026-08-24, testing what happens to
@@ -240,15 +268,22 @@ export function computeRatings(r: RatingsInput, w: WeightSet, splits: Handedness
   const pbabipBlend = zero(r.pbabip_l) * splits.pitchingPctVsL + zero(r.pbabip_r) * splits.pitchingPctVsR;
   const ctrlBlend = zero(r.ctrl_l) * splits.pitchingPctVsL + zero(r.ctrl_r) * splits.pitchingPctVsR;
 
-  const pitching =
+  // Control floor gate -- same mechanism as the Contact gate above. Control
+  // is confirmed a standalone raw grade (unlike Movement, which is itself a
+  // composite of PBABIP and HRA), so it's gated directly with no blending.
+  const controlGate = gate(ctrlBlend, w.control_gate_threshold, w.control_gate_floor);
+  const controlGateP = gate(zero(r.pot_ctrl), w.control_gate_threshold, w.control_gate_floor);
+
+  const pitchingRaw =
     (isSP ? stfBlend + 5 : stfBlend) * w.stuff +
     movBlend * w.movement + pbabipBlend * w.pbabip + ctrlBlend * w.control +
     zero(r.stm) * w.stamina + qp * w.qp_multiplier;
+  const pitching = pitchingRaw * controlGate;
 
   const pitchingPRaw =
-    (isSP ? zero(r.pot_stf) + 5 : zero(r.pot_stf)) * w.stuff +
+    ((isSP ? zero(r.pot_stf) + 5 : zero(r.pot_stf)) * w.stuff +
     zero(r.pot_mov) * w.movement + zero(r.pot_pbabip) * w.pbabip + zero(r.pot_ctrl) * w.control +
-    zero(r.stm) * w.stamina + qpp * w.qp_multiplier;
+    zero(r.stm) * w.stamina + qpp * w.qp_multiplier) * controlGateP;
   const pitchingP = Math.max(pitching, pitchingPRaw - 3);
 
   const overall = Math.max(batting + fielding * w.fielding, pitching);

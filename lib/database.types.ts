@@ -2488,7 +2488,11 @@ export type Database = {
           catcher_fielding_bonus: number
           cf_batting_multiplier: number
           contact: number
+          contact_gate_floor: number
+          contact_gate_threshold: number
           control: number
+          control_gate_floor: number
+          control_gate_threshold: number
           created_at: string
           eye: number
           fielding: number
@@ -2518,7 +2522,11 @@ export type Database = {
           catcher_fielding_bonus?: number
           cf_batting_multiplier?: number
           contact: number
+          contact_gate_floor?: number
+          contact_gate_threshold?: number
           control: number
+          control_gate_floor?: number
+          control_gate_threshold?: number
           created_at?: string
           eye: number
           fielding: number
@@ -2548,7 +2556,11 @@ export type Database = {
           catcher_fielding_bonus?: number
           cf_batting_multiplier?: number
           contact?: number
+          contact_gate_floor?: number
+          contact_gate_threshold?: number
           control?: number
+          control_gate_floor?: number
+          control_gate_threshold?: number
           created_at?: string
           eye?: number
           fielding?: number

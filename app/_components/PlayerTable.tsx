@@ -24,7 +24,7 @@ const ROLE_ORDER = ["SP", "RP", "C", "1B", "INF", "SS", "COF", "CF", "DH"];
 type SortKey =
   | "name" | "pos" | "team" | "age"
   | "cntct" | "pow" | "eye" | "speed" | "stf" | "mov" | "ctrl" | "stm"
-  | "overall" | "potential" | "prospect_potential" | "prospect_rank";
+  | "overall" | "potential" | "ab" | "ip" | "war" | "prospect_potential" | "prospect_rank";
 
 export function PlayerTable({ rows, showTeam, showProspectCols }: { rows: PlayerRow[]; showTeam: boolean; showProspectCols: boolean }) {
   const [phFilter, setPhFilter] = useState<"all" | "H" | "P">("all");
@@ -92,6 +92,9 @@ export function PlayerTable({ rows, showTeam, showProspectCols }: { rows: Player
         case "stm": av = a.stm ?? -1; bv = b.stm ?? -1; break;
         case "overall": av = a.overall ?? -1; bv = b.overall ?? -1; break;
         case "potential": av = a.potential ?? -1; bv = b.potential ?? -1; break;
+        case "ab": av = a.ab ?? -1; bv = b.ab ?? -1; break;
+        case "ip": av = a.ip ?? -1; bv = b.ip ?? -1; break;
+        case "war": av = a.war ?? -999; bv = b.war ?? -999; break; // WAR can be genuinely negative, unlike the other -1-sentinel columns above
         // Missing prospect_potential/prospect_rank sort to the bottom
         // regardless of direction intent for rank (999999, not -1 -- a
         // smaller rank is "better", so an absent one shouldn't sort first
@@ -111,7 +114,7 @@ export function PlayerTable({ rows, showTeam, showProspectCols }: { rows: Player
     </th>
   );
 
-  const colCount = 11 + (showTeam ? 1 : 0) + (showProspectCols ? 2 : 0);
+  const colCount = 14 + (showTeam ? 1 : 0) + (showProspectCols ? 2 : 0);
 
   return (
     <div>
@@ -185,6 +188,9 @@ export function PlayerTable({ rows, showTeam, showProspectCols }: { rows: Player
               {th("Stm", "stm")}
               {th("Overall", "overall")}
               {th("Potential", "potential")}
+              {th("AB", "ab")}
+              {th("IP", "ip")}
+              {th("WAR", "war")}
               {showProspectCols && (
                 <>
                   {th("Prospect Pot.", "prospect_potential")}
@@ -210,6 +216,9 @@ export function PlayerTable({ rows, showTeam, showProspectCols }: { rows: Player
                 <td style={gradeStyle(r.stm)}>{fmtInt(r.stm)}</td>
                 <td style={gradeStyle(r.overall)}>{fmt1(r.overall)}</td>
                 <td style={gradeStyle(r.potential)}>{fmt1(r.potential)}</td>
+                <td>{fmtInt(r.ab)}</td>
+                <td>{fmt1(r.ip)}</td>
+                <td>{fmt1(r.war)}</td>
                 {showProspectCols && (
                   <>
                     <td style={gradeStyle(r.prospect_potential)}>{fmt1(r.prospect_potential)}</td>
