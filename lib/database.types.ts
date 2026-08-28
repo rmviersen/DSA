@@ -2715,28 +2715,46 @@ export type Database = {
       refresh_runs: {
         Row: {
           completed_at: string | null
+          draft_pool_count: number | null
+          free_agent_count: number | null
           game_date: string | null
           id: number
+          international_count: number | null
+          minor_league_count: number | null
+          mlb_count: number | null
           notes: string | null
           ratings_included: boolean
+          retired_count: number | null
           started_at: string
           status: string
         }
         Insert: {
           completed_at?: string | null
+          draft_pool_count?: number | null
+          free_agent_count?: number | null
           game_date?: string | null
           id?: never
+          international_count?: number | null
+          minor_league_count?: number | null
+          mlb_count?: number | null
           notes?: string | null
           ratings_included?: boolean
+          retired_count?: number | null
           started_at?: string
           status: string
         }
         Update: {
           completed_at?: string | null
+          draft_pool_count?: number | null
+          free_agent_count?: number | null
           game_date?: string | null
           id?: never
+          international_count?: number | null
+          minor_league_count?: number | null
+          mlb_count?: number | null
           notes?: string | null
           ratings_included?: boolean
+          retired_count?: number | null
           started_at?: string
           status?: string
         }

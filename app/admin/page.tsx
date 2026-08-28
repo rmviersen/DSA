@@ -112,6 +112,7 @@ export default async function AdminPage() {
                 <th>Ratings included</th>
                 <th>Players</th>
                 <th>Teams</th>
+                <th>By category</th>
               </tr>
             </thead>
             <tbody>
@@ -123,7 +124,16 @@ export default async function AdminPage() {
                   repeatedly this session) -- a real, permanent number worth
                   flagging against directly, unlike the player count, which
                   drifts run to run (call-ups, retirements) and is better
-                  judged by eye against the other rows than a fixed target. */}
+                  judged by eye against the other rows than a fixed target.
+
+                  By category (2026-08-28, follow-up ask): a compact single
+                  column rather than 6 more separate ones -- matches the
+                  site's existing "· "-joined compact-list convention (e.g.
+                  TeamRankingsTable's top-3 prospects). Sourced from
+                  refresh_runs' own snapshot columns (written once per run by
+                  refresh.ts), not re-derived here -- players itself has no
+                  history to query per past run. Null on any run from before
+                  these columns existed, shown as "—", not a false "0". */}
               {runs.map((r) => (
                 <tr key={r.id}>
                   <td>{r.id}</td>
@@ -140,6 +150,16 @@ export default async function AdminPage() {
                   </td>
                   <td style={{ color: r.teamCount !== 32 && r.status !== "running" ? "#c0392b" : undefined, fontWeight: r.teamCount !== 32 && r.status !== "running" ? 700 : undefined }}>
                     {r.teamCount}
+                  </td>
+                  <td style={{ fontSize: "0.8125rem", color: "var(--color-text-muted, #888)", whiteSpace: "nowrap" }}>
+                    {r.mlb_count == null ? "—" : [
+                      `MLB ${r.mlb_count.toLocaleString()}`,
+                      `Minors ${r.minor_league_count!.toLocaleString()}`,
+                      `Int'l ${r.international_count!.toLocaleString()}`,
+                      `Draft ${r.draft_pool_count!.toLocaleString()}`,
+                      `FA ${r.free_agent_count!.toLocaleString()}`,
+                      `Ret ${r.retired_count!.toLocaleString()}`,
+                    ].join(" · ")}
                   </td>
                 </tr>
               ))}

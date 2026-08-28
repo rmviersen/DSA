@@ -174,7 +174,39 @@ async function main() {
       console.log("Skipping ratings/game history — --skip-ratings passed.");
     }
 
-    await supabase.from("refresh_runs").update({ status: "succeeded", completed_at: new Date().toISOString() }).eq("id", refreshRunId);
+    // Player category snapshot (2026-08-28, Admin Dashboard) -- players is
+    // current-state only (upserted, not versioned per run), so this is taken
+    // right at the end of this refresh, against the just-upserted data, and
+    // stored directly on refresh_runs -- the only way to see this breakdown
+    // historically later. Verified against real data before this was wired
+    // in: these 6 buckets are a clean, non-overlapping partition of every
+    // row in `players` (summed to the exact total player count with nothing
+    // left over). draft_pool_count is the broad, multi-year draft_eligible
+    // flag, NOT one class's exact membership -- see the migration comment.
+    console.log("Computing player category snapshot...");
+    async function playerCount(build: (q: ReturnType<typeof supabase.from<"players">>) => PromiseLike<{ count: number | null; error: unknown }>): Promise<number> {
+      const { count, error } = await build(supabase.from("players"));
+      if (error) throw error;
+      return count ?? 0;
+    }
+    const mlbCount = await playerCount((q) => q.select("*", { count: "exact", head: true }).eq("level", 1).gte("league_id", 0).neq("retired", true).neq("free_agent", true));
+    const minorLeagueCount = await playerCount((q) => q.select("*", { count: "exact", head: true }).gte("level", 2).lte("level", 6).neq("retired", true).neq("free_agent", true));
+    const internationalCount = await playerCount((q) => q.select("*", { count: "exact", head: true }).eq("level", 1).lt("league_id", 0).neq("retired", true).neq("free_agent", true));
+    const draftPoolCount = await playerCount((q) => q.select("*", { count: "exact", head: true }).eq("free_agent", true).eq("draft_eligible", true));
+    const freeAgentCount = await playerCount((q) => q.select("*", { count: "exact", head: true }).eq("free_agent", true).eq("draft_eligible", false));
+    const retiredCount = await playerCount((q) => q.select("*", { count: "exact", head: true }).eq("retired", true));
+    console.log(`  MLB ${mlbCount}, Minors ${minorLeagueCount}, Int'l ${internationalCount}, Draft pool ${draftPoolCount}, Free agents ${freeAgentCount}, Retired ${retiredCount}`);
+
+    await supabase.from("refresh_runs").update({
+      status: "succeeded",
+      completed_at: new Date().toISOString(),
+      mlb_count: mlbCount,
+      minor_league_count: minorLeagueCount,
+      international_count: internationalCount,
+      draft_pool_count: draftPoolCount,
+      free_agent_count: freeAgentCount,
+      retired_count: retiredCount,
+    }).eq("id", refreshRunId);
     console.log(`Refresh run ${refreshRunId} succeeded.`);
 
     // Every refresh should leave behind a dated player_computed/team_computed

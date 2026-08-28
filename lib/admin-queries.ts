@@ -16,6 +16,17 @@ export interface RefreshRunSummary {
   ratings_included: boolean | null;
   playerCount: number;
   teamCount: number;
+  // Player-category snapshot (2026-08-28) -- straight off refresh_runs
+  // itself, written by scripts/refresh.ts at the end of each run. players
+  // is current-state only (not versioned per run), so a run from before
+  // this column existed has these as null -- shown as "—", not 0, so an old
+  // run doesn't look like it captured nobody.
+  mlb_count: number | null;
+  minor_league_count: number | null;
+  international_count: number | null;
+  draft_pool_count: number | null;
+  free_agent_count: number | null;
+  retired_count: number | null;
 }
 
 // player_computed/team_computed have no FK to refresh_runs (gotcha 1 -- no
@@ -35,7 +46,7 @@ async function countFor(table: "player_computed" | "team_computed", refreshRunId
 export async function getRecentRefreshRuns(limit = 5): Promise<RefreshRunSummary[]> {
   const { data, error } = await supabase
     .from("refresh_runs")
-    .select("id, started_at, completed_at, status, game_date, ratings_included")
+    .select("id, started_at, completed_at, status, game_date, ratings_included, mlb_count, minor_league_count, international_count, draft_pool_count, free_agent_count, retired_count")
     .order("id", { ascending: false })
     .limit(limit);
   if (error) throw error;
