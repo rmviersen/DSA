@@ -127,20 +127,32 @@ const INTERNATIONAL_LEVEL = 7; // matches queries.ts's effectiveLevel() remap
 // (min:0); 1B/DH additionally get forceStatus:"green" on the count RAG
 // specifically -- Rees's call that those two roles are "always fine" and
 // shouldn't render as an untinted/neutral "none" like RP does.
-const ROLE_HEALTH_ROWS: { label: string; roles: string[]; min: number; forceStatus?: RoleHealthCell["status"] }[] = [
-  { label: "SP", roles: ["SP"], min: 5 },
-  { label: "RP", roles: ["RP"], min: 0 },
-  { label: "Pitching (Total)", roles: ["SP", "RP"], min: 13 },
-  { label: "C", roles: ["C"], min: 2 },
-  { label: "1B", roles: ["1B"], min: 0, forceStatus: "green" },
-  { label: "INF", roles: ["INF"], min: 3 },
-  { label: "SS", roles: ["SS"], min: 1 },
-  { label: "CF", roles: ["CF"], min: 1 },
-  { label: "COF", roles: ["COF"], min: 3 },
-  { label: "DH", roles: ["DH"], min: 0, forceStatus: "green" },
+//
+// `topN` (2026-08-28, separate from `min`) is how many of an org's own best
+// players at that role/level get averaged for the Org talent column -- "only
+// a certain number of players on a roster can even play, so roster strength
+// should be limited to expected players" (Rees's wording), rather than
+// diluting the average with bench/depth players who won't actually see the
+// field. Deliberately its own number, not reusing `min`: e.g. RP has no
+// staffing minimum (min:0) but still gets a real top-5 for the talent
+// average, and C's talent slot (top 1) is narrower than its 2-deep staffing
+// minimum. The two Total rows use a flat top-10 over their pooled combined
+// roles (not each sub-role's own top-N re-combined) per Rees's explicit
+// "top 10 pitchers and top 10 hitters."
+const ROLE_HEALTH_ROWS: { label: string; roles: string[]; min: number; topN: number; forceStatus?: RoleHealthCell["status"] }[] = [
+  { label: "SP", roles: ["SP"], min: 5, topN: 5 },
+  { label: "RP", roles: ["RP"], min: 0, topN: 5 },
+  { label: "Pitching (Total)", roles: ["SP", "RP"], min: 13, topN: 10 },
+  { label: "C", roles: ["C"], min: 2, topN: 1 },
+  { label: "1B", roles: ["1B"], min: 0, topN: 1, forceStatus: "green" },
+  { label: "INF", roles: ["INF"], min: 3, topN: 3 },
+  { label: "SS", roles: ["SS"], min: 1, topN: 1 },
+  { label: "CF", roles: ["CF"], min: 1, topN: 1 },
+  { label: "COF", roles: ["COF"], min: 3, topN: 2 },
+  { label: "DH", roles: ["DH"], min: 0, topN: 1, forceStatus: "green" },
   // New (2026-08-28): a combined-hitter row, same idea as Pitching (Total)
   // but for every non-pitching role. 14 is Rees's stated minimum.
-  { label: "Hitting (Total)", roles: ["C", "1B", "INF", "SS", "CF", "COF", "DH"], min: 14 },
+  { label: "Hitting (Total)", roles: ["C", "1B", "INF", "SS", "CF", "COF", "DH"], min: 14, topN: 10 },
 ];
 
 function rowStatus(count: number, min: number): RoleHealthCell["status"] {
@@ -150,19 +162,25 @@ function rowStatus(count: number, min: number): RoleHealthCell["status"] {
   return "green";
 }
 
+// Average of the top `n` values (by Overall) in a pool -- powers the Org
+// talent column's "expected/playable roster strength" average above.
+function topNAvg(values: number[], n: number): number | null {
+  const top = [...values].sort((a, b) => b - a).slice(0, n);
+  return top.length > 0 ? top.reduce((a, b) => a + b, 0) / top.length : null;
+}
+
 // Talent-vs-league RAG (2026-08-28) -- separate scale from rowStatus above,
 // which grades a headcount against a fixed minimum. This grades the org's
-// average Overall at a role/level against the leaguewide average for that
-// same role/level. +/-3 (roughly one "grade band" on the app's existing
-// 20/40/50/65/80 Overall color-gradient stops -- see display-helpers.ts's
-// GRADIENT_STOPS) is a first-pass threshold, not something Rees specified a
-// number for -- worth revisiting against how it actually renders.
-const AVG_STATUS_THRESHOLD = 3;
+// top-N average Overall at a role/level against the leaguewide average for
+// that same role/level. Thresholds are Rees's exact spec: +1 or above is
+// green, less than -1 is red, everything between is amber. (Note: the
+// league side is still a full-pool average, not top-N -- see the "How to
+// apply" note where this function is used.)
 function avgStatus(orgAvg: number | null, leagueAvg: number | null): RoleHealthCell["avgStatus"] {
   if (orgAvg === null || leagueAvg === null) return "none";
   const diff = orgAvg - leagueAvg;
-  if (diff < -AVG_STATUS_THRESHOLD) return "red";
-  if (diff > AVG_STATUS_THRESHOLD) return "green";
+  if (diff >= 1) return "green";
+  if (diff < -1) return "red";
   return "amber";
 }
 
@@ -339,7 +357,7 @@ export async function getOrgMinorsPlayers(orgId: number): Promise<{ rows: Minors
   // Role-health RAG table (2026-08-28) -- healthy-only counts by role, per
   // level (MLB through Rookie; international excluded, it's not a real
   // competitive roster with staffing minimums the way an affiliate is).
-  const roleHealth: RoleHealthRow[] = ROLE_HEALTH_ROWS.map(({ label, roles, min, forceStatus }) => ({
+  const roleHealth: RoleHealthRow[] = ROLE_HEALTH_ROWS.map(({ label, roles, min, topN, forceStatus }) => ({
     label,
     byLevel: Object.entries(LEVEL_LABELS).map(([lvlStr, lvlLabel]) => {
       const level = Number(lvlStr);
@@ -352,11 +370,20 @@ export async function getOrgMinorsPlayers(orgId: number): Promise<{ rows: Minors
       // counted with it.
       const injuredCount = inRole.length - count;
 
-      // Talent averages (2026-08-28) -- ALL rostered players at this
-      // role/level count here, healthy or not (a talent grade doesn't
-      // change because someone's hurt, unlike the staffing count above).
-      const withOverall = inRole.filter((r) => r.overall !== null);
-      const orgAvg = withOverall.length > 0 ? withOverall.reduce((a, r) => a + (r.overall as number), 0) / withOverall.length : null;
+      // Org talent average (2026-08-28) -- top `topN` by Overall, not every
+      // rostered player at this role/level: "only a certain number of
+      // players on a roster can even play, so roster strength should be
+      // limited to expected players" (Rees's wording) -- a 6-deep bench at
+      // SP shouldn't drag the number below what actually takes the mound.
+      // Health status doesn't factor in here (unlike `count` above) -- a
+      // talent grade doesn't change because someone's hurt.
+      const orgAvg = topNAvg(inRole.filter((r) => r.overall !== null).map((r) => r.overall as number), topN);
+      // League side is still a full-pool average (2026-08-28) -- NOT the
+      // same top-N treatment as orgAvg. Matching it would mean top-N *per
+      // team* across the whole league (a materially bigger query, since
+      // getRoleLevelBenchmarks's leaguewide average has no per-team
+      // grouping today), which Rees hasn't asked for -- flagged to him as
+      // an open asymmetry rather than assumed either way.
       const leagueAvg = combinedLeagueAvg(roles, level);
 
       return {
