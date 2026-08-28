@@ -90,6 +90,15 @@ export interface RoleHealthCell {
   injuredCount: number; // players in this role/level excluded from `count` for not being back within 7 days
   min: number; // 0 = no minimum, not scored
   status: "red" | "amber" | "green" | "none";
+  // Talent-vs-league comparison (2026-08-28, Rees's ask) -- separate from
+  // the staffing-count RAG above. leagueAvg/orgAvg are both plain Overall
+  // averages (all rostered players at that role/level, regardless of
+  // health -- injury doesn't change a player's talent grade, unlike the
+  // count above). null when nobody exists at that role/level on either
+  // side to average.
+  leagueAvg: number | null;
+  orgAvg: number | null;
+  avgStatus: "red" | "amber" | "green" | "none";
 }
 export interface RoleHealthRow {
   label: string;
@@ -108,22 +117,30 @@ export interface TeamPositionCounts {
 const INTERNATIONAL_TEAM_ID_OFFSET = -1_000_000; // keeps synthetic ids well clear of any real team id
 const INTERNATIONAL_LEVEL = 7; // matches queries.ts's effectiveLevel() remap
 
-// Row order and per-level minimums, exactly as specified 2026-08-28. Two
-// separate pitching rows (Total, then SP alone) rather than one combined
-// row with two numbers -- keeps every row a single, sortable count. RP has
-// no explicit minimum of its own (it's implied by Total-13 minus however
-// many SPs exist), 1B/DH have none at all -- min:0 means "don't score it."
-const ROLE_HEALTH_ROWS: { label: string; roles: string[]; min: number }[] = [
-  { label: "Pitching (Total)", roles: ["SP", "RP"], min: 13 },
+// Row order updated 2026-08-28: SP, RP, C, 1B, INF, SS, CF, COF, DH is now
+// the one canonical role order used everywhere on this page (also
+// ROLE_FILTER_ORDER in MinorsTable.tsx). The two aggregate rows (Pitching
+// Total, Hitting Total) sit directly below the specific roles they sum --
+// Pitching Total right after RP, Hitting Total right after DH -- rather
+// than at the very top, "so it reads as totals below the specific role
+// counts" (Rees's wording). RP/1B/DH have no staffing minimum of their own
+// (min:0); 1B/DH additionally get forceStatus:"green" on the count RAG
+// specifically -- Rees's call that those two roles are "always fine" and
+// shouldn't render as an untinted/neutral "none" like RP does.
+const ROLE_HEALTH_ROWS: { label: string; roles: string[]; min: number; forceStatus?: RoleHealthCell["status"] }[] = [
   { label: "SP", roles: ["SP"], min: 5 },
   { label: "RP", roles: ["RP"], min: 0 },
+  { label: "Pitching (Total)", roles: ["SP", "RP"], min: 13 },
   { label: "C", roles: ["C"], min: 2 },
+  { label: "1B", roles: ["1B"], min: 0, forceStatus: "green" },
+  { label: "INF", roles: ["INF"], min: 3 },
   { label: "SS", roles: ["SS"], min: 1 },
   { label: "CF", roles: ["CF"], min: 1 },
-  { label: "INF", roles: ["INF"], min: 3 },
   { label: "COF", roles: ["COF"], min: 3 },
-  { label: "1B", roles: ["1B"], min: 0 },
-  { label: "DH", roles: ["DH"], min: 0 },
+  { label: "DH", roles: ["DH"], min: 0, forceStatus: "green" },
+  // New (2026-08-28): a combined-hitter row, same idea as Pitching (Total)
+  // but for every non-pitching role. 14 is Rees's stated minimum.
+  { label: "Hitting (Total)", roles: ["C", "1B", "INF", "SS", "CF", "COF", "DH"], min: 14 },
 ];
 
 function rowStatus(count: number, min: number): RoleHealthCell["status"] {
@@ -131,6 +148,22 @@ function rowStatus(count: number, min: number): RoleHealthCell["status"] {
   if (count < min) return "red";
   if (count === min) return "amber"; // technically compliant, no depth margin
   return "green";
+}
+
+// Talent-vs-league RAG (2026-08-28) -- separate scale from rowStatus above,
+// which grades a headcount against a fixed minimum. This grades the org's
+// average Overall at a role/level against the leaguewide average for that
+// same role/level. +/-3 (roughly one "grade band" on the app's existing
+// 20/40/50/65/80 Overall color-gradient stops -- see display-helpers.ts's
+// GRADIENT_STOPS) is a first-pass threshold, not something Rees specified a
+// number for -- worth revisiting against how it actually renders.
+const AVG_STATUS_THRESHOLD = 3;
+function avgStatus(orgAvg: number | null, leagueAvg: number | null): RoleHealthCell["avgStatus"] {
+  if (orgAvg === null || leagueAvg === null) return "none";
+  const diff = orgAvg - leagueAvg;
+  if (diff < -AVG_STATUS_THRESHOLD) return "red";
+  if (diff > AVG_STATUS_THRESHOLD) return "green";
+  return "amber";
 }
 
 export async function getOrgMinorsPlayers(orgId: number): Promise<{ rows: MinorsPlayerRow[]; teamCounts: TeamPositionCounts[]; roleHealth: RoleHealthRow[] }> {
@@ -232,6 +265,10 @@ export async function getOrgMinorsPlayers(orgId: number): Promise<{ rows: Minors
   // Glossary-page aggregation, reused as-is rather than re-derived here).
   const benchmarks = await getRoleLevelBenchmarks("overall");
   const benchByRole = new Map(benchmarks.map((b) => [b.role, new Map(b.byLevel.map((c) => [c.level, c.avgValue]))]));
+  // Same benchmarks, but keeping `n` too (2026-08-28) -- needed to combine
+  // multiple roles' leaguewide averages into one weighted average for the
+  // "(Total)" rows below, which benchByRole's plain avgValue can't do.
+  const benchCellByRole = new Map(benchmarks.map((b) => [b.role, new Map(b.byLevel.map((c) => [c.level, c]))]));
 
   const rows: MinorsPlayerRow[] = players.map((p) => {
     const c = computedById.get(p.id);
@@ -286,10 +323,23 @@ export async function getOrgMinorsPlayers(orgId: number): Promise<{ rows: Minors
   const orderKey = (t: TeamPositionCounts) => (t.team_id === internationalTeamId ? 99 : (t.level ?? 98));
   const teamCounts = [...countsByTeam.values()].sort((a, b) => orderKey(a) - orderKey(b));
 
+  // Leaguewide combined average for a set of roles at one level -- weighted
+  // by each role's own leaguewide sample size, so e.g. Pitching (Total)'s
+  // league average isn't just a naive 50/50 blend of the SP and RP averages
+  // when the league actually has far more RPs than SPs (or vice versa).
+  function combinedLeagueAvg(roles: string[], level: number): number | null {
+    let sum = 0, n = 0;
+    for (const role of roles) {
+      const cell = benchCellByRole.get(role)?.get(level);
+      if (cell && cell.avgValue !== null && cell.n > 0) { sum += cell.avgValue * cell.n; n += cell.n; }
+    }
+    return n > 0 ? sum / n : null;
+  }
+
   // Role-health RAG table (2026-08-28) -- healthy-only counts by role, per
   // level (MLB through Rookie; international excluded, it's not a real
   // competitive roster with staffing minimums the way an affiliate is).
-  const roleHealth: RoleHealthRow[] = ROLE_HEALTH_ROWS.map(({ label, roles, min }) => ({
+  const roleHealth: RoleHealthRow[] = ROLE_HEALTH_ROWS.map(({ label, roles, min, forceStatus }) => ({
     label,
     byLevel: Object.entries(LEVEL_LABELS).map(([lvlStr, lvlLabel]) => {
       const level = Number(lvlStr);
@@ -301,7 +351,19 @@ export async function getOrgMinorsPlayers(orgId: number): Promise<{ rows: Minors
       // isAvailable() excludes them (not back within 7 days), not double-
       // counted with it.
       const injuredCount = inRole.length - count;
-      return { level, levelLabel: lvlLabel, count, injuredCount, min, status: rowStatus(count, min) };
+
+      // Talent averages (2026-08-28) -- ALL rostered players at this
+      // role/level count here, healthy or not (a talent grade doesn't
+      // change because someone's hurt, unlike the staffing count above).
+      const withOverall = inRole.filter((r) => r.overall !== null);
+      const orgAvg = withOverall.length > 0 ? withOverall.reduce((a, r) => a + (r.overall as number), 0) / withOverall.length : null;
+      const leagueAvg = combinedLeagueAvg(roles, level);
+
+      return {
+        level, levelLabel: lvlLabel, count, injuredCount, min,
+        status: forceStatus ?? rowStatus(count, min),
+        leagueAvg, orgAvg, avgStatus: avgStatus(orgAvg, leagueAvg),
+      };
     }),
   }));
 

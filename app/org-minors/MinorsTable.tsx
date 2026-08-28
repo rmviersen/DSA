@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { Fragment, useMemo, useState } from "react";
 import type { MinorsPlayerRow, TeamPositionCounts, RoleHealthRow } from "@/lib/org-minors-query";
 // gradeStyle/statsPlusPlayerUrl: pure, no-Supabase-dependency helpers, live
 // in display-helpers.ts specifically so a "use client" component can safely
@@ -12,9 +12,11 @@ type SortKey = "name" | "team" | "level" | "age" | "pos" | "role" | "overall" | 
 
 const LEVEL_ORDER: Record<string, number> = { MLB: 0, AAA: 1, AA: 2, "A+": 3, "A-": 4, Rookie: 5 };
 
-// All roles that can appear, in the same order as the RAG table above it --
-// used for both the role filter's option order and (loosely) sort tie-break.
-const ROLE_FILTER_ORDER = ["SP", "RP", "C", "SS", "CF", "INF", "COF", "1B", "DH"];
+// Canonical role order (2026-08-28, Rees's spec) -- used for the role
+// filter buttons, the roster tables' Role column sort, AND the RAG table's
+// row order below (the RAG table interleaves its two aggregate rows into
+// this same sequence -- see ROLE_HEALTH_ROWS in org-minors-query.ts).
+const ROLE_FILTER_ORDER = ["SP", "RP", "C", "1B", "INF", "SS", "CF", "COF", "DH"];
 
 const RAG_COLOR: Record<RoleHealthRow["byLevel"][number]["status"], string> = {
   red: "#c0392b",
@@ -146,46 +148,80 @@ export default function MinorsTable({ rows, teamCounts, roleHealth }: { rows: Mi
           minimum, amber = exactly at it (compliant but no depth), green =
           above it. */}
       <h2 style={{ fontSize: 14, marginBottom: 6 }}>Role health by level</h2>
+      <p style={{ color: "var(--color-text-muted, #888)", marginTop: 0, marginBottom: 6, fontSize: 11 }}>
+        Cnt = healthy headcount (injured-not-back-within-7-days shown in parens), graded against the role's staffing minimum.
+        Lg/Org = leaguewide vs. Oklahoma City average Overall at that role/level -- Org is graded against Lg.
+      </p>
       <div style={{ overflowX: "auto", marginBottom: 16 }}>
         <table style={{ borderCollapse: "collapse", fontSize: 12, minWidth: 600 }}>
           <thead>
             <tr>
-              <th style={{ padding: "3px 8px", textAlign: "left", borderBottom: "2px solid var(--color-tan)", background: "var(--color-navy)", color: "var(--color-text-on-navy)" }}>Role</th>
+              <th rowSpan={2} style={{ padding: "3px 8px", textAlign: "left", borderBottom: "2px solid var(--color-tan)", background: "var(--color-navy)", color: "var(--color-text-on-navy)", verticalAlign: "bottom" }}>Role</th>
               {roleHealth[0]?.byLevel.map((c) => (
-                <th key={c.level} style={{ padding: "3px 8px", textAlign: "right", borderBottom: "2px solid var(--color-tan)", background: "var(--color-navy)", color: "var(--color-text-on-navy)" }}>{c.levelLabel}</th>
+                <th key={c.level} colSpan={3} style={{ padding: "3px 8px", textAlign: "center", borderBottom: "1px solid var(--color-border)", borderLeft: "2px solid var(--color-tan)", background: "var(--color-navy)", color: "var(--color-text-on-navy)" }}>{c.levelLabel}</th>
+              ))}
+            </tr>
+            <tr>
+              {roleHealth[0]?.byLevel.map((c) => (
+                <Fragment key={c.level}>
+                  <th style={{ padding: "2px 6px", textAlign: "right", borderBottom: "2px solid var(--color-tan)", borderLeft: "2px solid var(--color-tan)", background: "var(--color-navy)", color: "var(--color-text-on-navy-muted)", fontWeight: 500 }}>Cnt</th>
+                  <th style={{ padding: "2px 6px", textAlign: "right", borderBottom: "2px solid var(--color-tan)", background: "var(--color-navy)", color: "var(--color-text-on-navy-muted)", fontWeight: 500 }}>Lg</th>
+                  <th style={{ padding: "2px 6px", textAlign: "right", borderBottom: "2px solid var(--color-tan)", background: "var(--color-navy)", color: "var(--color-text-on-navy-muted)", fontWeight: 500 }}>Org</th>
+                </Fragment>
               ))}
             </tr>
           </thead>
           <tbody>
             {roleHealth.map((row) => (
               <tr key={row.label}>
-                <td style={{ padding: "3px 8px", borderBottom: "1px solid var(--color-border)" }}>{row.label}</td>
+                <td style={{ padding: "3px 8px", borderBottom: "1px solid var(--color-border)", fontWeight: row.label.includes("Total") ? 600 : 400 }}>{row.label}</td>
                 {row.byLevel.map((c) => (
-                  <td
-                    key={c.level}
-                    style={{
-                      padding: "3px 8px",
-                      textAlign: "right",
-                      borderBottom: "1px solid var(--color-border)",
-                      fontWeight: c.status === "none" ? 400 : 700,
-                      // Font color carries the RAG signal (2026-08-28, Rees's
-                      // ask) -- a background fill looked bad against the
-                      // table's existing striping/borders. No color at all
-                      // for "none" rows (RP/1B/DH -- no minimum to grade).
-                      color: c.status === "none" ? undefined : RAG_COLOR[c.status],
-                    }}
-                    title={c.min > 0 ? `Minimum ${c.min}` : undefined}
-                  >
-                    {c.count}
-                    {/* Injured count in parens (2026-08-28) -- players in
-                        this role/level who exist but aren't counted above
-                        (hurt, not back within 7 days), so a red/amber cell
-                        reads as "actually short" vs. "fine on paper, just
-                        hurt right now." Omitted entirely at 0, not "(0)". */}
-                    {c.injuredCount > 0 && (
-                      <span style={{ fontWeight: 400, color: "var(--color-text-muted, #888)" }}> ({c.injuredCount})</span>
-                    )}
-                  </td>
+                  <Fragment key={c.level}>
+                    <td
+                      style={{
+                        padding: "3px 6px",
+                        textAlign: "right",
+                        borderBottom: "1px solid var(--color-border)",
+                        borderLeft: "2px solid var(--color-tan)",
+                        fontWeight: c.status === "none" ? 400 : 700,
+                        // Font color carries the RAG signal (2026-08-28,
+                        // Rees's ask) -- a background fill looked bad against
+                        // the table's existing striping/borders. No color at
+                        // all for "none" rows (RP -- no minimum to grade).
+                        color: c.status === "none" ? undefined : RAG_COLOR[c.status],
+                      }}
+                      title={c.min > 0 ? `Minimum ${c.min}` : undefined}
+                    >
+                      {c.count}
+                      {/* Injured count in parens (2026-08-28) -- players in
+                          this role/level who exist but aren't counted above
+                          (hurt, not back within 7 days), so a red/amber cell
+                          reads as "actually short" vs. "fine on paper, just
+                          hurt right now." Omitted entirely at 0, not "(0)". */}
+                      {c.injuredCount > 0 && (
+                        <span style={{ fontWeight: 400, color: "var(--color-text-muted, #888)" }}> ({c.injuredCount})</span>
+                      )}
+                    </td>
+                    {/* Leaguewide average -- plain reference number, not
+                        RAG-colored itself (2026-08-28) -- there's nothing to
+                        grade about the league's own number, it's the
+                        yardstick the Org column gets graded against. */}
+                    <td style={{ padding: "3px 6px", textAlign: "right", borderBottom: "1px solid var(--color-border)", color: "var(--color-text-muted, #888)" }}>
+                      {fmt1(c.leagueAvg)}
+                    </td>
+                    <td
+                      style={{
+                        padding: "3px 6px",
+                        textAlign: "right",
+                        borderBottom: "1px solid var(--color-border)",
+                        fontWeight: c.avgStatus === "none" ? 400 : 700,
+                        color: c.avgStatus === "none" ? undefined : RAG_COLOR[c.avgStatus],
+                      }}
+                      title={c.leagueAvg !== null ? `League average: ${fmt1(c.leagueAvg)}` : undefined}
+                    >
+                      {fmt1(c.orgAvg)}
+                    </td>
+                  </Fragment>
                 ))}
               </tr>
             ))}
