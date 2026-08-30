@@ -8,10 +8,13 @@ const PUBLIC_NAV_ITEMS = [
   { href: "/TBL/prospects/farms", label: "System Rankings" },
 ] as const;
 
-const loginButtonClass = cn(
-  buttonVariants({ variant: "ghost", size: "sm" }),
-  "border border-primary-foreground/25 text-primary-foreground no-underline hover:bg-primary-foreground/10 hover:text-primary-foreground"
-);
+// Colors come from .report-header-action in globals.css, not Tailwind's
+// text-primary-foreground utility (2026-08-30 fix) -- that token flips to
+// near-black in dark mode while this header's navy background never
+// changes with the theme, which made the button unreadable once guest
+// pages started forcing dark mode. See that class's comment for the full
+// story.
+const loginButtonClass = cn(buttonVariants({ variant: "ghost", size: "sm" }), "report-header-action border no-underline");
 
 // The slim public-facing header for the /TBL/prospects pages -- Step 3 of
 // the visual refresh (2026-08-25), the first change guests actually see.
@@ -28,11 +31,13 @@ const loginButtonClass = cn(
 // buttonVariants).
 //
 // Three states on the right, not two, as of the same day's "Preview as
-// Guest" toggle: a real guest gets "Owner Login"; the owner browsing
-// normally gets "Full Site →"; the owner currently previewing gets "Exit
-// Guest Preview" instead of either -- they don't need to log in again,
-// just to clear the preview cookie, and they shouldn't see "Full Site"
-// while the whole point is that they're seeing the restricted view.
+// Guest" toggle: a real guest gets "Login" (shortened from "Owner Login"
+// 2026-08-30, Rees's ask -- the destination page still says "Owner Login"
+// as its own heading, this is just the nav button label); the owner
+// browsing normally gets "Full Site →"; the owner currently previewing
+// gets "Exit Guest Preview" instead of either -- they don't need to log in
+// again, just to clear the preview cookie, and they shouldn't see "Full
+// Site" while the whole point is that they're seeing the restricted view.
 export function ReportHeader({ isRealOwner, isPreviewingGuest }: { isRealOwner: boolean; isPreviewingGuest: boolean }) {
   return (
     <header className="site-header">
@@ -71,7 +76,7 @@ export function ReportHeader({ isRealOwner, isPreviewingGuest }: { isRealOwner: 
             </Link>
           ) : (
             <Link href="/login" className={loginButtonClass}>
-              Owner Login
+              Login
             </Link>
           )}
         </div>

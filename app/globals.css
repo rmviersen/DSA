@@ -249,6 +249,31 @@ body {
   background: rgba(255, 255, 255, 0.08);
 }
 
+/* Login/preview button on the guest-facing header (2026-08-30 fix) -- it
+   was using shadcn's `text-primary-foreground` Tailwind utility, which is
+   THEME-REACTIVE (light: #f6f3ec, cream -- fine; dark: #0a1620, near-black
+   -- see the dark :root block). .site-header's navy background, by
+   contrast, is a fixed brand color that deliberately does NOT change with
+   the theme (--color-navy/--color-text-on-navy are untouched in dark
+   mode, see the comment near that media query). Once guest pages started
+   forcing dark mode the same day, that mismatch put near-black text on
+   navy -- unreadable. Uses the same fixed on-navy tokens as every other
+   piece of header text instead (.site-nav-links a above), so it's correct
+   in both themes; muted by default per Rees's "something subtle" ask,
+   brightening on hover exactly like the nav links do. !important because
+   the button's `ghost` variant (buttonVariants) ships its own
+   hover:text-foreground/hover:bg-muted utilities at equal CSS specificity
+   -- without it, cascade order (not intent) would decide which wins. */
+.report-header-action {
+  color: var(--color-text-on-navy-muted) !important;
+  border-color: rgba(201, 185, 143, 0.35) !important;
+}
+
+.report-header-action:hover {
+  color: var(--color-text-on-navy) !important;
+  background: rgba(255, 255, 255, 0.08) !important;
+}
+
 /* "My Team" hover dropdown (2026-08-28) -- first nav item with subpages
    (Minor League System now, Team Rankings/Trade Tracker later). Hover-only
    by design, no click-to-open state: the trigger itself has no page of its
@@ -633,9 +658,10 @@ tbody tr:last-child td {
   /* Tighter vertical padding than the first pass (2026-08-26, Rees's spec)
      -- combined with moving the meta line up onto the name's row below,
      this is what actually shortens each card. Cut again 2026-08-30 (0.625
-     -> 0.5rem) for slightly shorter rows -- horizontal unchanged, this is
-     purely a row-height trim. */
-  padding: 0.5rem 1.125rem;
+     -> 0.5rem), then again the same day (0.5 -> 0.1875rem) after Rees
+     flagged there was still too much air above/below the values --
+     horizontal unchanged throughout, this is purely a row-height trim. */
+  padding: 0.1875rem 1.125rem;
   display: flex;
   flex-direction: column;
   gap: 0.625rem;
