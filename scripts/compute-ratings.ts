@@ -30,15 +30,29 @@ async function main() {
   console.log("Finding latest succeeded refresh run with ratings...");
   const { data: runRow, error: runErr } = await supabase
     .from("refresh_runs")
-    .select("id")
+    .select("id, game_date")
     .eq("status", "succeeded")
     .eq("ratings_included", true)
     .order("id", { ascending: false })
     .limit(1)
     .single();
   if (runErr || !runRow) throw new Error(`No succeeded refresh run with ratings found: ${runErr?.message}`);
-  const refreshRunId = (runRow as { id: number }).id;
+  const refreshRunId = (runRow as { id: number; game_date: string | null }).id;
   console.log(`Computing against refresh_run_id ${refreshRunId}`);
+
+  // ETA "is the season over" check (2026-08-31, Rees's spec) -- game_date is
+  // "YYYY-MM-DD", sliced not Date-parsed to stay timezone-safe. Once the
+  // in-game calendar is into October, the real regular season has ended and
+  // the league's in its playoffs (confirmed against the actual current run:
+  // game_date 2031-10-31) -- there is no more real chance of a call-up
+  // "this year," so a same-year ETA stops meaning "could happen any day now"
+  // and starts reading as "should already have happened," which is
+  // backwards. See estimateEta below for where this is applied.
+  const gameDateMonth = (runRow as { game_date: string | null }).game_date
+    ? Number((runRow as { game_date: string | null }).game_date!.slice(5, 7))
+    : null;
+  const isOffseason = gameDateMonth !== null && gameDateMonth >= 10;
+  console.log(`game_date=${(runRow as { game_date: string | null }).game_date}, isOffseason=${isOffseason}`);
 
   console.log("Loading ratings snapshot...");
   const ratings = await fetchAll<RatingsInput & { player_id: number }>((from, to) =>
@@ -287,8 +301,29 @@ async function main() {
     const suggestedLevel = estimateSuggestedLevel(role, overall);
     const levelsToClimb = Math.max(0, suggestedLevel - 1); // 0 if current Overall already clears the MLB bar
     const margin = potential - mlbBar;
-    const years = Math.round(levelsToClimb * paceYearsPerLevel(margin));
-    return currentYear + years;
+    // Math.ceil, not Math.round (2026-08-31, Rees's spec -- "too many
+    // players with [current-year] ETAs... add a little more of a buffer
+    // between guys nearing the bubble and actually being MLB ready").
+    // Round-to-nearest let any player whose suggested level interpolated to
+    // as little as ~1.4 above MLB collapse straight to zero added years
+    // ("ready now") -- exactly the "just clears the bar" fringe case
+    // paceYearsPerLevel's own comment says needs the FULL runway, not a
+    // rounded-away one. Ceiling means any real, nonzero distance left to
+    // climb always costs at least one full year; only a player whose
+    // CURRENT Overall already fully clears the bar (levelsToClimb computes
+    // to exactly 0) still gets "now" here.
+    const years = Math.ceil(levelsToClimb * paceYearsPerLevel(margin));
+    // Once the real season is over there's no "now" left to be ready for
+    // (2026-08-31, Rees's second complaint the same day: with the league in
+    // its playoffs, a same-year ETA reads as "should already be up," not as
+    // a live possibility). Floors at next year during the offseason/
+    // playoffs window -- see isOffseason above -- uniformly for everyone,
+    // including a player who's already had real MLB time this season; this
+    // function has deliberately never used roster/playing-time shortcuts
+    // (see the comment above it), and a same-season "ETA" is a contradiction
+    // in terms once that season has actually finished playing out.
+    const flooredYears = isOffseason ? Math.max(years, 1) : years;
+    return currentYear + flooredYears;
   }
 
   // --- ranks ---------------------------------------------------------
