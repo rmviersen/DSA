@@ -144,7 +144,24 @@ async function main() {
     await upsertBatched(supabase, "contract_extensions", (await sp.contractExtensions()).map(map.mapContractExtension), "player_id");
 
     console.log("Pulling draft results...");
-    await upsertBatched(supabase, "draft_picks", (await sp.draft()).map(map.mapDraftPick), "player_id");
+    {
+      const draftRows = await sp.draft();
+      // draft_year resolved from players.draft_year (2026-08-30 fix) --
+      // NOT derived from the pick's own "Time (UTC)" field, which is a
+      // real-world capture timestamp, not the in-game draft year (see
+      // mapDraftPick's comment). players was just upserted above in this
+      // same run, so this reads back the fresh values, not stale ones.
+      const draftPlayerIds = draftRows.map((r) => Number(r["ID"])).filter((id) => Number.isFinite(id));
+      const draftYearByPlayerId = new Map<number, number | null>();
+      for (let i = 0; i < draftPlayerIds.length; i += BATCH_SIZE) {
+        const chunk = draftPlayerIds.slice(i, i + BATCH_SIZE);
+        const { data, error } = await supabase.from("players").select("id,draft_year").in("id", chunk);
+        if (error) throw new Error(`players lookup for draft_picks failed: ${error.message}`);
+        (data as { id: number; draft_year: number | null }[]).forEach((p) => draftYearByPlayerId.set(p.id, p.draft_year));
+      }
+      const mapped = draftRows.map((r) => map.mapDraftPick(r, draftYearByPlayerId.get(Number(r["ID"])) ?? null));
+      await upsertBatched(supabase, "draft_picks", mapped, "player_id");
+    }
 
     for (const year of years) {
       for (const lid of LEAGUE_IDS) {

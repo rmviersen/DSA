@@ -119,9 +119,18 @@ export function mapContractExtension(r: RawRow) {
   return { player_id: int(r["player_id"]), ...contractFields(r) };
 }
 
-export function mapDraftPick(r: RawRow) {
-  const pickedAt = str(r["Time (UTC)"]);
-  const draftYear = pickedAt ? parseInt(pickedAt.slice(0, 4), 10) : null; // derived from the pick timestamp, not a field the endpoint provides
+// draftYear is resolved by the caller from players.draft_year (2026-08-30
+// fix), NOT derived from "Time (UTC)" the way this used to work -- that
+// field is the real-world wall-clock moment StatsPlus logged the pick, not
+// the in-game draft year, so every row was coming out labeled with
+// whatever the real calendar year happened to be at capture time (e.g. the
+// entire completed 2031 draft was showing as "2026"). players.draft_year
+// is already correct for every drafted player, confirmed 2026-08-30 by
+// cross-referencing all 896 rows in draft_picks against it -- a perfect
+// 1:1 match once compared, so it's the right source to resolve from
+// instead of guessing off a timestamp.
+export function mapDraftPick(r: RawRow, draftYear: number | null) {
+  const pickedAt = str(r["Time (UTC)"]); // real-world capture timestamp -- legitimate for picked_at below, just not for draft_year (see comment above)
   return {
     player_id: int(r["ID"]),
     draft_year: draftYear,
