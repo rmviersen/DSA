@@ -105,3 +105,43 @@ Infrastructure: `prospect_bios` table (`player_id` primary key — upserted, lat
 **No fallback text for uncovered players (changed 2026-08-20).** Originally, anyone without a stored bio fell back to an auto-generated `gradeWord()`/`prospectSummary()` one-liner — that function has been deleted entirely. This mattered in practice: `/prospects` scoped to one org (`?team=`) re-ranks *within that org*, pulling in players who never made the leaguewide top 100 and so never got a written bio — those rows now show only the stat line, nothing after it. Don't reintroduce an auto-generated substitute without checking with Rees first; showing *no* bio for an uncovered player is the deliberate, current design, not a gap to quietly patch over.
 
 **Regenerating a full batch, practically:** pull rich per-player data (potential grades, individual pitches, injury signal, *and* current-level stats per rule 6 above) in one query for everyone with `prospect_rank <= 100` against the latest `player_computed` snapshot, draft against §5's calibration, run the length/grammar checks from the character-count lesson above, then upsert. Took roughly 2 SQL batches of 50 rows each on the one time this has been done at full scale (2026-08-20) — a single `insert ... on conflict` easily handles 50 rows without hitting response-size limits; 100 in one shot may not fit depending on average bio length.
+
+## 8. Coverage tracking & monthly cadence (2026-08-30)
+
+Rankings reshuffle on every refresh, so "top 100" is a moving target — a
+prospect can enter the top 100 with zero bio coverage at any time, and a
+covered prospect's bio can simply age without anyone noticing. Two pieces
+now exist to manage this, deliberately kept separate (finding gaps is
+automatable; writing bios is not — see the grounding-discipline note in
+§7a, and the two real factual errors from the 2026-08-30 batch pass that
+only a human catch caught):
+
+- **`prospect-bio-monthly-check`** (claude.ai routine, `trigger_id
+  trig_011Y6HNW6tMcg9m8nWnN1yzB`) runs on the 1st of each month, reads
+  Supabase directly (current top-100 by `prospect_rank` on the latest
+  succeeded `refresh_run`, left-joined against `prospect_bios`), and DMs
+  Rees on Slack **only if** something needs attention: any top-100 player
+  with no bio row at all, or whose `generated_at` is more than 28 days
+  old. Silent if nothing qualifies. **Read-only** — it never writes a bio
+  or touches the database beyond `SELECT`.
+- **The actual writing pass stays manual**, done in a live Claude Code
+  session against this file's rules (same process as the 2026-08-30
+  batch and the 3-player top-up that followed it): pull real per-player
+  data, draft, verify against the grounding-discipline rule, upsert.
+
+To run the same coverage check yourself ahead of the monthly ping, or to
+verify how many of the current top 100 are covered right now:
+
+```sql
+with latest as (select max(id) as id from refresh_runs where status = 'succeeded'),
+top100 as (
+  select pc.player_id, pc.prospect_rank from player_computed pc, latest
+  where pc.refresh_run_id = latest.id and pc.prospect_rank is not null and pc.prospect_rank <= 100
+)
+select t.prospect_rank, p.first_name, p.last_name, b.generated_at
+from top100 t
+join players p on p.id = t.player_id
+left join prospect_bios b on b.player_id = t.player_id
+where b.player_id is null or b.generated_at < now() - interval '28 days'
+order by t.prospect_rank;
+```
