@@ -33,21 +33,26 @@ function fmtStaleDate(iso: string): string {
 // mid-season promotion was silently truncating a real full-season workload
 // down to whatever the new level alone showed). Pitchers: IP/FIP/ERA/K-9/
 // WAR. Batters: AB, the standard AVG/OBP/SLG slash line, HR, SB, ZR (Zone
-// Rating, a real raw fielding stat), WAR. When the season spans more than
-// one level, "... across AA & AAA" is appended so the number doesn't read
-// as if it came from a single level.
+// Rating, a real raw fielding stat), WAR. Levels played this season are
+// their own trailing "· LEVEL" or "· LEVEL/LEVEL" segment now (2026-08-30,
+// Rees's spec: "552 AB · .301/.349/.505 · 27 HR · 2 SB · -0.1 ZR · 1.9 WAR
+// · AA/AAA") -- shown even for a single level now, not just multi-level
+// ("across AA & AAA" before this), so every row states where its stats
+// came from, not just the split ones. Order still best-level-first (see
+// t.levels' own ascending-by-level-number sort in lib/queries.ts) --
+// unchanged by this rewrite, just the punctuation/wording around it.
 // "value LABEL" throughout (2026-08-20 decision), e.g. "26 AB" not "AB 26" --
 // matches how the slash line already reads (no leading label at all).
 function statLine(r: ProspectRow): string {
   const t = r.seasonTotals;
-  const acrossSuffix = t.levels.length > 1 ? ` across ${t.levels.join(" & ")}` : "";
+  const levelsSuffix = t.levels.length > 0 ? ` · ${t.levels.join("/")}` : "";
   if (r.ph === "P") {
     if (t.ip === null) return "No Stats";
-    return `${fmt1(t.ip)} IP · ${fmt2(t.fip)} FIP · ${fmt2(t.era)} ERA · ${fmt1(t.k9)} K/9 · ${fmt1(t.war)} WAR${acrossSuffix}`;
+    return `${fmt1(t.ip)} IP · ${fmt2(t.fip)} FIP · ${fmt2(t.era)} ERA · ${fmt1(t.k9)} K/9 · ${fmt1(t.war)} WAR${levelsSuffix}`;
   }
   if (r.ph === "H") {
     if (t.ab === null) return "No Stats";
-    return `${fmtInt(t.ab)} AB · ${rate(t.avg)}/${rate(t.obp)}/${rate(t.slg)} · ${fmtInt(t.hr)} HR · ${fmtInt(t.sb)} SB · ${fmt1(t.zr)} ZR · ${fmt1(t.war)} WAR${acrossSuffix}`;
+    return `${fmtInt(t.ab)} AB · ${rate(t.avg)}/${rate(t.obp)}/${rate(t.slg)} · ${fmtInt(t.hr)} HR · ${fmtInt(t.sb)} SB · ${fmt1(t.zr)} ZR · ${fmt1(t.war)} WAR${levelsSuffix}`;
   }
   return "No Stats";
 }
