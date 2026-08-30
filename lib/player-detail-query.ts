@@ -201,16 +201,41 @@ export async function getPlayerDetail(playerId: number): Promise<PlayerDetail | 
     injury_is_injured: boolean | null; is_on_dl: boolean | null; is_on_dl60: boolean | null; injury_left: number | null;
   };
 
-  // Stats history -- full career, latest refresh run's backfill (2001-2031),
-  // split_id=1 (overall, not a handedness split). Fetched here (before the
-  // teams lookup below) so a career season played for a since-left team --
-  // before a trade, or an old minor-league affiliate -- resolves its own
-  // team name too, not just the player's CURRENT team_id/draft_team_id.
-  const { data: batData, error: batErr } = await supabase
+  // Stats history -- full career, NOT scoped to the latest refresh_run_id
+  // (fixed 2026-08-30, caught while pulling real data for a bio rewrite: a
+  // player's early-career years only got captured once, during the one-time
+  // 2001-2031 backfill under an OLD refresh run -- normal day-to-day
+  // refreshes only ever re-pull the CURRENT season going forward, so
+  // filtering to the latest run silently showed only this season for
+  // anyone with a real career before it, contradicting this section's own
+  // "full career" claim. Confirmed concretely on R.J. Blum: his 2026-2030
+  // rows (Rookie through A+, a real developmental climb) only exist under
+  // refresh_run_id 9 -- every run since (10 through 23) only touched 2031.
+  // Fix: fetch every row across every run, then keep only the highest
+  // refresh_run_id per (year, level_id, stint) before summing -- the
+  // current season's total still comes from the freshest data (it keeps
+  // growing run to run), while a closed-out past season just falls back to
+  // whichever run last had it, which is however far back it takes.
+  // Fetched here (before the teams lookup below) so a career season played
+  // for a since-left team -- before a trade, or an old minor-league
+  // affiliate -- resolves its own team name too, not just the player's
+  // CURRENT team_id/draft_team_id.
+  function latestPerStint<T extends { year: number; level_id: number | null; stint: number | null; refresh_run_id: number }>(rows: T[]): T[] {
+    const byKey = new Map<string, T>();
+    for (const row of rows) {
+      const key = `${row.year}|${row.level_id}|${row.stint}`;
+      const existing = byKey.get(key);
+      if (!existing || row.refresh_run_id > existing.refresh_run_id) byKey.set(key, row);
+    }
+    return [...byKey.values()];
+  }
+
+  const { data: batDataAll, error: batErr } = await supabase
     .from("player_batting_stats_snapshots")
-    .select("year,level_id,team_id,g,ab,h,d,t,hr,r,rbi,bb,k,sb,cs,war,stint")
-    .eq("player_id", playerId).eq("refresh_run_id", refreshRunId).eq("split_id", 1).order("year", { ascending: false });
+    .select("year,level_id,team_id,g,ab,h,d,t,hr,r,rbi,bb,k,sb,cs,war,stint,refresh_run_id")
+    .eq("player_id", playerId).eq("split_id", 1);
   if (batErr) throw batErr;
+  const batData = latestPerStint((batDataAll ?? []) as { year: number; level_id: number | null; team_id: number | null; stint: number | null; refresh_run_id: number; g: number | null; ab: number | null; h: number | null; d: number | null; t: number | null; hr: number | null; r: number | null; rbi: number | null; bb: number | null; k: number | null; sb: number | null; cs: number | null; war: number | null }[]);
   // Column names here are the pitching table's OWN convention, not the
   // batting table's -- confirmed against database.types.ts 2026-08-29 after
   // this query silently returned nothing (its error was being swallowed):
@@ -218,11 +243,12 @@ export async function getPlayerDetail(playerId: number): Promise<PlayerDetail | 
   // `hra` here means the literal stat, unlike player_ratings_snapshots'
   // `hra`, which is a 20-80 grade -- same field name, different table,
   // different meaning).
-  const { data: pitData, error: pitErr } = await supabase
+  const { data: pitDataAll, error: pitErr } = await supabase
     .from("player_pitching_stats_snapshots")
-    .select("year,level_id,team_id,g,gs,ip,er,w,l,s,k,bb,ha,hra,war,stint")
-    .eq("player_id", playerId).eq("refresh_run_id", refreshRunId).eq("split_id", 1).order("year", { ascending: false });
+    .select("year,level_id,team_id,g,gs,ip,er,w,l,s,k,bb,ha,hra,war,stint,refresh_run_id")
+    .eq("player_id", playerId).eq("split_id", 1);
   if (pitErr) throw pitErr;
+  const pitData = latestPerStint((pitDataAll ?? []) as { year: number; level_id: number | null; team_id: number | null; stint: number | null; refresh_run_id: number; g: number | null; gs: number | null; ip: number | null; er: number | null; w: number | null; l: number | null; s: number | null; k: number | null; bb: number | null; ha: number | null; hra: number | null; war: number | null }[]);
 
   const historyTeamIds = [...(batData ?? []), ...(pitData ?? [])].map((r) => (r as { team_id: number | null }).team_id);
   const teamIds = [...new Set([p.team_id, p.draft_team_id, ...historyTeamIds])].filter((x): x is number => x !== null);
@@ -317,7 +343,10 @@ export async function getPlayerDetail(playerId: number): Promise<PlayerDetail | 
       existing.count += 1;
       for (const k of Object.keys(row) as (keyof T)[]) {
         const v = row[k];
-        if (typeof v === "number" && k !== "year" && k !== "level_id" && k !== "stint") {
+        // refresh_run_id excluded 2026-08-30 alongside year/level_id/stint --
+        // now present on every row (see latestPerStint above) and is
+        // definitely not a stat to sum across stints.
+        if (typeof v === "number" && k !== "year" && k !== "level_id" && k !== "stint" && k !== "refresh_run_id") {
           (existing[k] as unknown as number) = ((existing[k] as unknown as number) ?? 0) + v;
         }
       }
