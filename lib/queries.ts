@@ -655,10 +655,11 @@ export { roundGrade, levelLabel, teamLogoUrl };
 // normalization work happens.
 const FIP_CONSTANT = 3.10;
 
-// Stats at the prospect's CURRENT level only (2026-08-19 decision) -- no
-// more summing/breaking down across every level played this season. If a
-// player has no stat row at their current level yet (just promoted, or a
-// pitcher/DH with no fielding inning logged), the relevant fields are null.
+// Full-season totals, summed across EVERY level a player played at this
+// season (reversed 2026-08-30 back from a 2026-08-19 "current level only"
+// decision -- see the comment above where this is computed). If a player
+// has no stat row anywhere this season yet (just signed, or a pitcher/DH
+// with no fielding inning logged), the relevant fields are null.
 export interface SeasonTotals {
   war: number | null;
   // batters
@@ -674,6 +675,10 @@ export interface SeasonTotals {
   era: number | null;
   fip: number | null;
   k9: number | null;
+  // Every level the player accrued these stats at this season, best level
+  // first (e.g. ["AAA", "AA"]) -- empty if no stats at all. Length > 1 is
+  // what triggers the "... across AA & AAA" suffix on the card's stat line.
+  levels: string[];
 }
 
 // Change-since-a-baseline-snapshot support. Composite grades + ranks only
@@ -908,10 +913,15 @@ export async function getTopProspectsDetailed(orgId?: number, baselineRefreshRun
 
   // A player can have one row PER LEVEL they played at this season
   // (promotions/demotions mid-year each get their own stint row) — collect
-  // all of them per player_id (split_id=1, overall not vL/vR), then below we
-  // pick out just the one matching the player's CURRENT level (2026-08-19
-  // decision: stats shown are current-level only, no more per-level
-  // breakdown or summing across levels).
+  // all of them per player_id (split_id=1, overall not vL/vR). Reversed
+  // 2026-08-30 (Rees's call) back to summing across every level played this
+  // season, not just the current one: a mid-season promotion was silently
+  // truncating a real full-season workload down to whatever the new level
+  // alone showed (caught while writing an expanded bio for a pitcher who
+  // legitimately threw 150+ innings combined across AA and AAA this year,
+  // but whose card read as a 43-inning season). The stat line now reads
+  // "... across AA & AAA" when more than one level contributed -- see
+  // seasonLevels below and ProspectTable.tsx's statLine().
   const battingByPlayer = new Map<number, { level_id: number; ab: number; h: number; d: number; t: number; hr: number; bb: number; hp: number; sf: number; sb: number; war: number | null }[]>();
   const pitchingByPlayer = new Map<number, { level_id: number; ip: number; er: number; k: number; bb: number; hp: number; hra: number; war: number | null }[]>();
   const fieldingByPlayer = new Map<number, { level_id: number; zr: number | null }[]>();
@@ -950,18 +960,26 @@ export async function getTopProspectsDetailed(orgId?: number, baselineRefreshRun
 
   return base.map((r) => {
     const ph = phById.get(r.player_id) ?? null;
-    const currentLevel = levelById.get(r.player_id) ?? null;
 
-    // A player can have more than one stint AT THE SAME level in a season
-    // (optioned down and recalled to the same level, etc.) -- each stint is
-    // its own row. Sum every stint at the current level rather than taking
-    // the first match, or a player's season total at their level was
-    // silently undercounted. Bug found 2026-08-20 while pulling data for
-    // the prospect bios; fixed here per Rees's request. ZR is a rate stat,
-    // not a counting stat, so it's averaged across stints, not summed.
-    const batStints = battingByPlayer.get(r.player_id)?.filter((x) => x.level_id === currentLevel) ?? [];
-    const pitStints = pitchingByPlayer.get(r.player_id)?.filter((x) => x.level_id === currentLevel) ?? [];
-    const fieldStints = fieldingByPlayer.get(r.player_id)?.filter((x) => x.level_id === currentLevel) ?? [];
+    // A player can have more than one stint at the SAME level in a season
+    // (optioned down and recalled, etc.) -- each stint is its own row, and
+    // (as of 2026-08-30) a player can also have stints at MULTIPLE DIFFERENT
+    // levels in one season (a mid-season promotion). Sum every stint the
+    // player has this season, any level, rather than just the current one
+    // -- see the field-declaration comment above for why. ZR is a rate
+    // stat, not a counting stat, so it's averaged across stints, not summed.
+    const batStints = battingByPlayer.get(r.player_id) ?? [];
+    const pitStints = pitchingByPlayer.get(r.player_id) ?? [];
+    const fieldStints = fieldingByPlayer.get(r.player_id) ?? [];
+    // Distinct levels these stints span, best level first (ascending level
+    // number -- 1=MLB is the best rung, matching every other level-sort in
+    // this codebase). Whichever of bat/pit actually has rows is the
+    // relevant one for a given player; a hitter's fieldStints don't get
+    // their own separate level list, they're assumed to match batStints'.
+    const relevantStints = phById.get(r.player_id) === "P" ? pitStints : batStints;
+    const seasonLevels = [...new Set(relevantStints.map((x) => x.level_id))]
+      .sort((a, b) => a - b)
+      .map((lvl) => levelLabel(lvl));
 
     const bat = batStints.length > 0 ? {
       ab: sum(batStints.map((x) => x.ab)), h: sum(batStints.map((x) => x.h)), d: sum(batStints.map((x) => x.d)),
@@ -979,7 +997,7 @@ export async function getTopProspectsDetailed(orgId?: number, baselineRefreshRun
 
     let seasonTotals: SeasonTotals = {
       war: null, ab: null, avg: null, obp: null, slg: null, hr: null, sb: null, zr: null,
-      ip: null, era: null, fip: null, k9: null,
+      ip: null, era: null, fip: null, k9: null, levels: seasonLevels,
     };
     if (ph === "H" && bat) {
       const obpDenom = bat.ab + bat.bb + bat.hp + bat.sf;
