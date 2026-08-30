@@ -1,29 +1,15 @@
 import { Fraunces, Inter } from "next/font/google";
-import { cookies } from "next/headers";
 import { ConditionalNav } from "./_components/ConditionalNav";
 import { getLatestGameDate } from "../lib/queries";
-import { OWNER_COOKIE_NAME, PREVIEW_GUEST_COOKIE_NAME, expectedOwnerCookieValue } from "../lib/owner-cookie";
+import { checkOwnerState } from "../lib/owner-cookie";
 import "./globals.css";
 import { cn } from "@/lib/utils";
 
-// Same check middleware.ts does to gate access -- this one's for display
-// only (which header/nav state to render), not enforcement, so a
-// stale/missing cookie here just means the UI shows the guest-facing
-// header instead of the full one -- middleware.ts remains the only thing
-// that actually blocks a route. Returns isRealOwner separately from
-// isPreviewingGuest (2026-08-25's "Preview as Guest" toggle) because the
-// two need different UI: a genuine owner currently previewing still needs
-// an "Exit Guest Preview" affordance a real guest never sees, even though
-// both see the same restricted set of pages.
-async function checkOwnerState(): Promise<{ isRealOwner: boolean; isPreviewingGuest: boolean }> {
-  const secret = process.env.OWNER_COOKIE_SECRET;
-  const cookieStore = cookies();
-  const cookieVal = cookieStore.get(OWNER_COOKIE_NAME)?.value;
-  const isPreviewingGuest = cookieStore.get(PREVIEW_GUEST_COOKIE_NAME)?.value === "1";
-  if (!secret || !cookieVal) return { isRealOwner: false, isPreviewingGuest: false };
-  const expected = await expectedOwnerCookieValue(secret);
-  return { isRealOwner: cookieVal === expected, isPreviewingGuest };
-}
+// checkOwnerState moved to lib/owner-cookie.ts (2026-08-30) so /prospects
+// and /TBL/prospects's page.tsx files can reuse the exact same check
+// (needed there now too, to decide whether to show internal player-detail
+// links) instead of a third copy of this cookie-reading logic. Still
+// display-only, not enforcement -- see that function's own comment.
 
 // Step 4 of the visual refresh (2026-08-25): Fraunces + Inter, the pairing
 // from the approved "DSA Visual Refresh" plan -- a characterful serif for
@@ -57,7 +43,15 @@ export const metadata = {
 // on load. Wrapped in try/catch since localStorage can throw (private
 // browsing, storage blocked) -- worst case it silently falls back to
 // light, never a broken page.
-const THEME_INIT_SCRIPT = `(function(){try{if(localStorage.getItem("dsa-theme")==="dark"){document.documentElement.classList.add("dark");}}catch(e){}})();`;
+//
+// Guest pages (/TBL/prospects*) are forced dark unconditionally as of
+// 2026-08-30 (Rees's call: this is now the permanent guest-facing look,
+// not a per-visitor preference) -- checked by raw location.pathname since
+// this plain script runs before React/ConditionalNav ever mounts. The
+// admin side is unaffected: it still reads the localStorage toggle exactly
+// as before. Checked by prefix, matching ConditionalNav.tsx's own
+// startsWith("/TBL/prospects") test for which header renders where.
+const THEME_INIT_SCRIPT = `(function(){try{if(location.pathname.indexOf("/TBL/prospects")===0){document.documentElement.classList.add("dark");}else if(localStorage.getItem("dsa-theme")==="dark"){document.documentElement.classList.add("dark");}}catch(e){}})();`;
 
 // Matches every page under app/** -- without this the game-date badge below
 // could get cached from an earlier render and go stale across refreshes.

@@ -739,11 +739,11 @@ export async function getProspectSnapshotOptions(): Promise<ProspectSnapshotOpti
   // runs 13 and 14 came back status="succeeded" with identical player_
   // computed counts (13870 each), started 9 minutes apart. That's the
   // automated pipeline firing twice for a game date that hadn't actually
-  // advanced in-game -- a duplicate/redundant run, not a broken one. Fixed
-  // below by deduping on game_date (keep the highest-id -- i.e. most
-  // recent -- run per date) in addition to the status filter, so a genuine
-  // duplicate run doesn't produce two selectable entries for one date
-  // either, regardless of why the duplicate happened.
+  // advanced in-game -- a duplicate/redundant run, not a broken one. That
+  // fix deduped on exact game_date; superseded 2026-08-30 by deduping on
+  // calendar MONTH instead (see below) at Rees's request -- a season sims
+  // through many distinct dates per month, and one-per-exact-date was still
+  // showing a long list of options nobody needed to choose between.
   const { data: runsData, error: runsErr } = await supabase
     .from("refresh_runs")
     .select("id,game_date,started_at")
@@ -764,15 +764,21 @@ export async function getProspectSnapshotOptions(): Promise<ProspectSnapshotOpti
   );
   const validIds = new Set(hasSnapshot.filter((r) => r.has).map((r) => r.id));
 
-  const seenDates = new Set<string>();
+  // One option per CALENDAR MONTH now (2026-08-30, Rees's ask), not one per
+  // exact game_date -- a season can sim through a dozen distinct game
+  // dates in a single month, and nobody needs to pick between all of them
+  // for a "change from" baseline. Sorted by game_date itself (not just by
+  // id, which the exact-date version above relied on) so "the latest game
+  // date in that month" is exactly what gets kept, independent of whether
+  // id order and date order ever drift apart.
+  const seenMonths = new Set<string>();
   return candidates
     .filter((r) => validIds.has(r.id))
-    // `candidates` is already ordered id-descending, so the first candidate
-    // seen for a given game_date is the most recent one -- keep that, drop
-    // any older duplicate runs for the same date.
+    .sort((a, b) => (a.game_date < b.game_date ? 1 : a.game_date > b.game_date ? -1 : 0))
     .filter((r) => {
-      if (seenDates.has(r.game_date)) return false;
-      seenDates.add(r.game_date);
+      const month = r.game_date.slice(0, 7); // "YYYY-MM"
+      if (seenMonths.has(month)) return false;
+      seenMonths.add(month);
       return true;
     })
     .map((r) => ({ refreshRunId: r.id, gameDate: r.game_date, startedAt: r.started_at }));

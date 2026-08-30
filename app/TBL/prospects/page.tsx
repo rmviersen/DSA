@@ -1,4 +1,5 @@
 import { FarmSystemReportBody } from "@/app/_components/FarmSystemReportBody";
+import { checkOwnerState } from "@/lib/owner-cookie";
 
 export const dynamic = "force-dynamic";
 
@@ -12,6 +13,15 @@ export const dynamic = "force-dynamic";
 export default async function TblProspectsPage({ searchParams }: { searchParams: { team?: string; since?: string } }) {
   const orgId = searchParams.team ? Number(searchParams.team) : undefined;
   const baselineRefreshRunId = searchParams.since ? Number(searchParams.since) : undefined;
+  // Player names link to our internal /players/[id] pages only for a real
+  // owner who ISN'T currently previewing as a guest (2026-08-30, Rees's
+  // ask) -- a real guest, and an owner previewing what a guest sees,
+  // should only ever get the external StatsPlus link. This is a display
+  // choice, not the actual access boundary: /players/[id] is already
+  // owner-only at the middleware level regardless of what any page links
+  // to, so a guest typing the URL directly still gets redirected.
+  const { isRealOwner, isPreviewingGuest } = await checkOwnerState();
+  const showInternalLinks = isRealOwner && !isPreviewingGuest;
   return (
     <FarmSystemReportBody
       title="Top Prospects"
@@ -19,6 +29,7 @@ export default async function TblProspectsPage({ searchParams }: { searchParams:
       orgId={orgId}
       baselineRefreshRunId={baselineRefreshRunId}
       showRankings={false}
+      showInternalLinks={showInternalLinks}
     />
   );
 }

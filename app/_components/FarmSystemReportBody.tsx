@@ -24,6 +24,7 @@ export async function FarmSystemReportBody({
   orgId,
   baselineRefreshRunId,
   showRankings = true,
+  showInternalLinks,
 }: {
   title: string;
   // "/prospects" or "/TBL/prospects" -- both ProspectFilters' form action
@@ -34,6 +35,12 @@ export async function FarmSystemReportBody({
   orgId?: number;
   baselineRefreshRunId?: number;
   showRankings?: boolean;
+  // Whether ProspectTable's player names link to our internal /players/[id]
+  // pages (2026-08-30) -- true for /prospects (always a real owner, hardcoded
+  // there) and for a real, non-previewing owner on /TBL/prospects (computed
+  // there via checkOwnerState()); false for a real guest or an owner
+  // currently previewing as one, who only get the external StatsPlus link.
+  showInternalLinks: boolean;
 }) {
   const [teams, allSnapshots, rows, teamRankings] = await Promise.all([
     getOrgTeams(),
@@ -46,7 +53,13 @@ export async function FarmSystemReportBody({
   const snapshots = allSnapshots.length > 1 ? allSnapshots.slice(1) : [];
 
   return (
-    <>
+    // "prospects-report-page" marker class (2026-08-30, Rees's ask) --
+    // picked up by a `.site-main:has(...)` rule in globals.css that
+    // narrows just this shared component's pages (both /prospects and
+    // /TBL/prospects) from the site's normal 1200px content width. No
+    // effect on any other page, same pattern already used to WIDEN
+    // /org-minors -- this is the same mechanism in the other direction.
+    <div className="prospects-report-page">
       <header className="page-header">
         <h1>{title}</h1>
         <p>{orgId ? "Organization rankings by Prospect Potential" : `League-wide top ${TOP_PROSPECTS_LIMIT} by Prospect Potential`}</p>
@@ -66,7 +79,7 @@ export async function FarmSystemReportBody({
         <div style={{ display: "flex", gap: 24, alignItems: "flex-start" }}>
           <div>
             <h2 style={sectionTitleStyle}>Top Prospects</h2>
-            <ProspectTable rows={rows} />
+            <ProspectTable rows={rows} showInternalLinks={showInternalLinks} />
           </div>
           <div>
             <h2 style={sectionTitleStyle}>System Rankings</h2>
@@ -82,8 +95,8 @@ export async function FarmSystemReportBody({
           </div>
         </div>
       ) : (
-        <ProspectTable rows={rows} />
+        <ProspectTable rows={rows} showInternalLinks={showInternalLinks} />
       )}
-    </>
+    </div>
   );
 }

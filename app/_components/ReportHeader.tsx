@@ -2,7 +2,6 @@ import Image from "next/image";
 import Link from "next/link";
 import { buttonVariants } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
-import { ThemeToggle } from "./ThemeToggle";
 
 const PUBLIC_NAV_ITEMS = [
   { href: "/TBL/prospects", label: "Top Prospects" },
@@ -52,9 +51,12 @@ export function ReportHeader({ isRealOwner, isPreviewingGuest }: { isRealOwner: 
             </Link>
           ))}
         </div>
-        {/* Right-side action cluster -- login/preview link plus the
-            dark-mode toggle, grouped into one flex child for the same
-            reason SiteNav.tsx groups its equivalent items. */}
+        {/* Right-side action cluster -- just the login/preview link now.
+            No dark-mode toggle here (2026-08-30): guest pages are forced
+            dark unconditionally (see THEME_INIT_SCRIPT in layout.tsx), so
+            there's nothing for a toggle to do on this header. Still a div
+            wrapper (not a bare Link) to match SiteNav.tsx's structure and
+            leave room if this cluster grows a second item again later. */}
         <div className="site-nav-actions">
           {isRealOwner && isPreviewingGuest ? (
             // Plain <a>, not <Link> -- this is a state-changing GET, and
@@ -72,7 +74,6 @@ export function ReportHeader({ isRealOwner, isPreviewingGuest }: { isRealOwner: 
               Owner Login
             </Link>
           )}
-          <ThemeToggle className={loginButtonClass} />
         </div>
       </nav>
     </header>

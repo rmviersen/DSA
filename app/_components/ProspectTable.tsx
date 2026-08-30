@@ -96,7 +96,15 @@ const ROLE_CLASS: Record<string, string> = {
 };
 const roleClass = (role: string | null) => (role && ROLE_CLASS[role]) || "";
 
-export function ProspectTable({ rows }: { rows: ProspectRow[] }) {
+// showInternalLinks (2026-08-30): true shows both the internal
+// /players/[id] link (as the name itself) and a small external StatsPlus
+// "↗" icon after it -- the admin/real-owner experience. false shows only
+// the name linking straight to StatsPlus, no icon, no internal link at
+// all -- what a real guest (or an owner previewing as one) gets. Computed
+// by the caller (FarmSystemReportBody, via each page's own owner check),
+// not read from a cookie here -- this component has no access-control
+// role, it just draws whichever mode it's told to.
+export function ProspectTable({ rows, showInternalLinks }: { rows: ProspectRow[]; showInternalLinks: boolean }) {
   const [phFilter, setPhFilter] = useState<"all" | "H" | "P">("all");
   const [roleFilter, setRoleFilter] = useState<Set<string>>(new Set());
   const [search, setSearch] = useState("");
@@ -332,23 +340,37 @@ export function ProspectTable({ rows }: { rows: ProspectRow[] }) {
                         .prospect-details in globals.css. */}
                     <div className="prospect-namerow">
                       <span className={`prospect-role ${roleClass(r.role)}`}>{r.role || "—"}</span>
-                      {/* Name now links to our own player detail page
-                          (2026-08-29, Rees's spec) -- StatsPlus moved to its
-                          own small "↗" link right after, rather than being
-                          the name's own destination. Both excluded from the
-                          card's own click-to-expand via closest("a") above. */}
-                      <Link href={`/players/${r.player_id}`} className="prospect-name">
-                        {r.first_name} {r.last_name}
-                      </Link>
-                      <a
-                        href={statsPlusPlayerUrl(r.player_id)}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        title="View on StatsPlus"
-                        style={{ marginLeft: 4, fontSize: 11, opacity: 0.7 }}
-                      >
-                        ↗
-                      </a>
+                      {/* Name links to our own player detail page
+                          (2026-08-29, Rees's spec) plus a small external
+                          StatsPlus "↗" icon after it -- but ONLY for a real,
+                          non-previewing owner (2026-08-30). A guest (or an
+                          owner previewing as one) gets just the name
+                          linking straight to StatsPlus, no icon, no
+                          internal link at all -- /players/[id] is
+                          owner-only regardless, this is purely about not
+                          advertising a link a guest can't use. Excluded
+                          from the card's own click-to-expand via
+                          closest("a") above either way. */}
+                      {showInternalLinks ? (
+                        <>
+                          <Link href={`/players/${r.player_id}`} className="prospect-name">
+                            {r.first_name} {r.last_name}
+                          </Link>
+                          <a
+                            href={statsPlusPlayerUrl(r.player_id)}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            title="View on StatsPlus"
+                            style={{ marginLeft: 4, fontSize: 11, opacity: 0.7 }}
+                          >
+                            ↗
+                          </a>
+                        </>
+                      ) : (
+                        <a href={statsPlusPlayerUrl(r.player_id)} target="_blank" rel="noopener noreferrer" className="prospect-name">
+                          {r.first_name} {r.last_name}
+                        </a>
+                      )}
                     </div>
                     <div className="prospect-details">
                       {/* Each callout is its own flex child now (2026-08-27,
