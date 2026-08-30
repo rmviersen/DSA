@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState, type CSSProperties } from "react";
+import { useMemo, useState } from "react";
 import Link from "next/link";
 import type { ProspectRow } from "../../lib/queries";
 // Import from display-helpers directly, NOT queries.ts -- queries.ts also
@@ -9,17 +9,6 @@ import type { ProspectRow } from "../../lib/queries";
 // pulls in even one unrelated value export from that file. See
 // display-helpers.ts's top comment.
 import { levelLabel, statsPlusPlayerUrl, teamLogoUrl } from "../../lib/display-helpers";
-
-// Bio length cap (2026-08-20) -- a long unbroken write-up was inflating the
-// table's auto column widths back when this was a <table>; kept as a
-// backstop now that it's cards too, since a very long bio still shouldn't
-// blow out a card's height unbounded. The real target is writing to this
-// limit in the first place, per prospect-bio-style-guide.md.
-const BIO_MAX_CHARS = 140;
-function capBio(text: string): string {
-  if (text.length <= BIO_MAX_CHARS) return text;
-  return text.slice(0, BIO_MAX_CHARS - 1).trimEnd() + "…";
-}
 
 const fmtInt = (n: number | null) => (n === null || n === undefined ? "—" : Math.round(n));
 const fmt1 = (n: number | null) => (n === null || n === undefined ? "—" : n.toFixed(1));
@@ -76,23 +65,6 @@ function Delta({ value, lowerIsBetter = false }: { value: number | null | undefi
 function NewBadge() {
   return <span style={{ color: "#38bdf8", fontSize: 10, marginLeft: 4, fontWeight: 700 }}>NEW</span>;
 }
-
-// Inline text-flow trigger (not a boxed button, to match the surrounding
-// stat-line/bio text rather than reading as a toolbar control) -- sits right
-// after the stat line, same line, bio text only rendered once expanded (see
-// expandedBios state) so it wraps naturally onto new lines when it appears.
-const bioToggle: CSSProperties = {
-  background: "none",
-  border: "none",
-  padding: 0,
-  marginLeft: 14, // more breathing room from the stat line (2026-08-24, Rees's spec -- was 6)
-  color: "var(--color-link, #406020)",
-  fontWeight: 700,
-  fontSize: 11,
-  letterSpacing: "0.03em",
-  cursor: "pointer",
-  fontFamily: "inherit",
-};
 
 // Fixed display order (2026-08-20, Rees's spec) -- not alphabetical.
 // Roughly pitchers first, then hitter roles by defensive spectrum.
@@ -285,122 +257,155 @@ export function ProspectTable({ rows }: { rows: ProspectRow[] }) {
             const logo = teamLogoUrl(r.orgName, r.orgNickname);
             const undrafted = r.draft_year == null && r.draft_round == null && r.draft_overall_pick == null;
             const isOpen = expandedBios.has(r.player_id);
+            const hasBio = !!r.bio;
+
+            // Whole-card click-to-expand (2026-08-30, Rees's spec) -- but
+            // not when the click landed on a real link (player name,
+            // StatsPlus icon): checking closest("a") here means any link
+            // added inside a card later is automatically excluded too,
+            // without having to remember to stopPropagation on each one.
+            function handleCardClick(e: React.MouseEvent<HTMLDivElement>) {
+              if (!hasBio) return;
+              if ((e.target as HTMLElement).closest("a")) return;
+              toggleBio(r.player_id);
+            }
+            function handleCardKeyDown(e: React.KeyboardEvent<HTMLDivElement>) {
+              if (!hasBio) return;
+              if (e.key === "Enter" || e.key === " ") {
+                e.preventDefault();
+                toggleBio(r.player_id);
+              }
+            }
+
             return (
-              <div className="prospect-card" key={r.player_id}>
-                <div className="prospect-card-rank">
-                  <span className="num">{rankLabel(r.prospect_rank)}</span>
-                  {r.delta?.isNew ? <NewBadge /> : <Delta value={r.delta?.prospectRank} lowerIsBetter />}
-                </div>
-                {/* Logo + org abbreviation grouped as one "team" unit
-                    (2026-08-26, Rees's spec -- org used to sit at the far
-                    right of the name row, disconnected from the logo it
-                    identifies). Team-color-matched text is a follow-up --
-                    no team color data exists anywhere in the schema yet
-                    (`teams` is just id/name/nickname/parent_team_id), so
-                    this is plain muted text for now pending that. */}
-                <div className="prospect-team">
-                  <div className="prospect-logo">
-                    {logo ? (
-                      // eslint-disable-next-line @next/next/no-img-element
-                      <img src={logo} alt="" />
-                    ) : (
-                      r.orgAbbr?.slice(0, 3) ?? ""
-                    )}
+              <div
+                className={`prospect-card${hasBio ? " prospect-card--clickable" : ""}`}
+                key={r.player_id}
+                onClick={handleCardClick}
+                onKeyDown={hasBio ? handleCardKeyDown : undefined}
+                role={hasBio ? "button" : undefined}
+                tabIndex={hasBio ? 0 : undefined}
+                aria-expanded={hasBio ? isOpen : undefined}
+              >
+                {/* Header row: rank/logo/name/meta/stats -- restructured
+                    2026-08-30 into its own row (was the card's direct
+                    flex children before) specifically so its height never
+                    changes when the bio below expands, which is what keeps
+                    the logo/rank/name centering stable either way. See
+                    .prospect-card's comment in globals.css. */}
+                <div className="prospect-card-header">
+                  <div className="prospect-card-rank">
+                    <span className="num">{rankLabel(r.prospect_rank)}</span>
+                    {r.delta?.isNew ? <NewBadge /> : <Delta value={r.delta?.prospectRank} lowerIsBetter />}
                   </div>
-                  <span className="prospect-org">{r.orgAbbr ?? "—"}</span>
-                </div>
-                <div className="prospect-card-body">
-                  {/* Role + Name group (2026-08-27, Rees's spec) -- its own
-                      block now, vertically centered by .prospect-card-body
-                      against .prospect-details next to it (which is taller,
-                      two lines: meta + stats). Used to be one row together
-                      with meta; splitting them out is what let Stats start
-                      at the same x as Meta regardless of name length -- see
-                      .prospect-details in globals.css. */}
-                  <div className="prospect-namerow">
-                    <span className={`prospect-role ${roleClass(r.role)}`}>{r.role || "—"}</span>
-                    {/* Name now links to our own player detail page
-                        (2026-08-29, Rees's spec) -- StatsPlus moved to its
-                        own small "↗" link right after, rather than being
-                        the name's own destination. */}
-                    <Link href={`/players/${r.player_id}`} className="prospect-name">
-                      {r.first_name} {r.last_name}
-                    </Link>
-                    <a
-                      href={statsPlusPlayerUrl(r.player_id)}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      title="View on StatsPlus"
-                      style={{ marginLeft: 4, fontSize: 11, opacity: 0.7 }}
-                    >
-                      ↗
-                    </a>
-                  </div>
-                  <div className="prospect-details">
-                    {/* Each callout is its own flex child now (2026-08-27,
-                        Rees's spec) -- was one text blob with word-spacing
-                        stretching every space, which also wrongly widened
-                        the space INSIDE "Org Rank" itself. A real `gap`
-                        between callouts (globals.css) fixes that: spacing
-                        lives between callouts, never inside one. */}
-                    <div className="prospect-meta">
-                      <span className="prospect-meta-item">Age <b>{r.age ?? "—"}</b></span>
-                      <span className="prospect-meta-item">{levelLabel(r.level)}{r.teamAbbr ? ` (${r.teamAbbr})` : ""}</span>
-                      <span className="prospect-meta-item">ETA <b>{r.eta ?? "—"}</b></span>
-                      <span className="prospect-meta-item">
-                        Org Rank <b>{rankLabel(r.prospect_org_rank)}</b>
-                        {r.delta?.isNew ? <NewBadge /> : <Delta value={r.delta?.prospectOrgRank} lowerIsBetter />}
-                      </span>
-                      {/* Role Rank (2026-08-27, new): leaguewide rank within
-                          this player's role bucket (SP/RP/C/1B/INF/SS/COF/
-                          CF/DH) by prospect potential -- computed server-side
-                          in scripts/compute-ratings.ts (player_computed.
-                          prospect_role_rank), not derived here. Placed right
-                          after Org Rank per spec. */}
-                      <span className="prospect-meta-item">
-                        Role Rank <b>{rankLabel(r.prospect_role_rank)}</b>
-                        {r.delta?.isNew ? <NewBadge /> : <Delta value={r.delta?.prospectRoleRank} lowerIsBetter />}
-                      </span>
-                      <span className="prospect-meta-item">
-                        {undrafted ? (
-                          <span style={{ fontStyle: "italic" }}>INT</span>
-                        ) : (
-                          <span style={r.isRecentDraftPick ? { color: "#38bdf8", fontWeight: 700 } : undefined}>
-                            {r.draft_year ?? "—"} R{r.draft_round ?? "—"} Pk{r.draft_overall_pick ?? "—"}
-                          </span>
-                        )}
-                      </span>
-                    </div>
-                    <div className="prospect-stats">
-                      {statLine(r)}
-                      {r.bio && (
-                        <>
-                          <button
-                            type="button"
-                            onClick={() => toggleBio(r.player_id)}
-                            aria-expanded={isOpen}
-                            style={bioToggle}
-                          >
-                            BIO {isOpen ? "▲" : "▼"}
-                          </button>
-                          {isOpen && (
-                            <div style={{ fontSize: 12, color: "var(--color-text-muted, #888)", marginTop: 4 }}>
-                              {capBio(r.bio)}
-                              {r.bioStale && r.bioDate && (
-                                <span
-                                  title="This bio was written against an earlier snapshot -- ratings/rank have moved since."
-                                  style={{ marginLeft: 4, fontStyle: "italic" }}
-                                >
-                                  (stale since {fmtStaleDate(r.bioDate)})
-                                </span>
-                              )}
-                            </div>
-                          )}
-                        </>
+                  {/* Logo + org abbreviation grouped as one "team" unit
+                      (2026-08-26, Rees's spec -- org used to sit at the far
+                      right of the name row, disconnected from the logo it
+                      identifies). Team-color-matched text is a follow-up --
+                      no team color data exists anywhere in the schema yet
+                      (`teams` is just id/name/nickname/parent_team_id), so
+                      this is plain muted text for now pending that. */}
+                  <div className="prospect-team">
+                    <div className="prospect-logo">
+                      {logo ? (
+                        // eslint-disable-next-line @next/next/no-img-element
+                        <img src={logo} alt="" />
+                      ) : (
+                        r.orgAbbr?.slice(0, 3) ?? ""
                       )}
                     </div>
+                    <span className="prospect-org">{r.orgAbbr ?? "—"}</span>
+                  </div>
+                  <div className="prospect-card-body">
+                    {/* Role + Name group (2026-08-27, Rees's spec) -- its own
+                        block now, vertically centered by .prospect-card-body
+                        against .prospect-details next to it (which is taller,
+                        two lines: meta + stats). Used to be one row together
+                        with meta; splitting them out is what let Stats start
+                        at the same x as Meta regardless of name length -- see
+                        .prospect-details in globals.css. */}
+                    <div className="prospect-namerow">
+                      <span className={`prospect-role ${roleClass(r.role)}`}>{r.role || "—"}</span>
+                      {/* Name now links to our own player detail page
+                          (2026-08-29, Rees's spec) -- StatsPlus moved to its
+                          own small "↗" link right after, rather than being
+                          the name's own destination. Both excluded from the
+                          card's own click-to-expand via closest("a") above. */}
+                      <Link href={`/players/${r.player_id}`} className="prospect-name">
+                        {r.first_name} {r.last_name}
+                      </Link>
+                      <a
+                        href={statsPlusPlayerUrl(r.player_id)}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        title="View on StatsPlus"
+                        style={{ marginLeft: 4, fontSize: 11, opacity: 0.7 }}
+                      >
+                        ↗
+                      </a>
+                    </div>
+                    <div className="prospect-details">
+                      {/* Each callout is its own flex child now (2026-08-27,
+                          Rees's spec) -- was one text blob with word-spacing
+                          stretching every space, which also wrongly widened
+                          the space INSIDE "Org Rank" itself. A real `gap`
+                          between callouts (globals.css) fixes that: spacing
+                          lives between callouts, never inside one. */}
+                      <div className="prospect-meta">
+                        <span className="prospect-meta-item">Age <b>{r.age ?? "—"}</b></span>
+                        <span className="prospect-meta-item">{levelLabel(r.level)}{r.teamAbbr ? ` (${r.teamAbbr})` : ""}</span>
+                        <span className="prospect-meta-item">ETA <b>{r.eta ?? "—"}</b></span>
+                        <span className="prospect-meta-item">
+                          Org Rank <b>{rankLabel(r.prospect_org_rank)}</b>
+                          {r.delta?.isNew ? <NewBadge /> : <Delta value={r.delta?.prospectOrgRank} lowerIsBetter />}
+                        </span>
+                        {/* Role Rank (2026-08-27, new): leaguewide rank within
+                            this player's role bucket (SP/RP/C/1B/INF/SS/COF/
+                            CF/DH) by prospect potential -- computed server-side
+                            in scripts/compute-ratings.ts (player_computed.
+                            prospect_role_rank), not derived here. Placed right
+                            after Org Rank per spec. */}
+                        <span className="prospect-meta-item">
+                          Role Rank <b>{rankLabel(r.prospect_role_rank)}</b>
+                          {r.delta?.isNew ? <NewBadge /> : <Delta value={r.delta?.prospectRoleRank} lowerIsBetter />}
+                        </span>
+                        <span className="prospect-meta-item">
+                          {undrafted ? (
+                            <span style={{ fontStyle: "italic" }}>INT</span>
+                          ) : (
+                            <span style={r.isRecentDraftPick ? { color: "#38bdf8", fontWeight: 700 } : undefined}>
+                              {r.draft_year ?? "—"} R{r.draft_round ?? "—"} Pk{r.draft_overall_pick ?? "—"}
+                            </span>
+                          )}
+                        </span>
+                      </div>
+                      <div className="prospect-stats">
+                        {statLine(r)}
+                        {hasBio && <span className="prospect-bio-indicator">BIO {isOpen ? "▲" : "▼"}</span>}
+                      </div>
+                    </div>
                   </div>
                 </div>
+                {/* Expanded bio -- full card width, own block below the
+                    header row (2026-08-30), not squeezed into the narrow
+                    .prospect-details column the old one-line bio fit in.
+                    No longer capBio()-truncated: the longer, more developed
+                    format (draft background, development trajectory,
+                    profile analysis) is the point now that this isn't
+                    always-visible screen space. */}
+                {isOpen && r.bio && (
+                  <div className="prospect-bio-expanded">
+                    {r.bio}
+                    {r.bioStale && r.bioDate && (
+                      <span
+                        title="This bio was written against an earlier snapshot -- ratings/rank have moved since."
+                        style={{ marginLeft: 6, fontStyle: "italic", color: "var(--color-text-muted, #888)" }}
+                      >
+                        (stale since {fmtStaleDate(r.bioDate)})
+                      </span>
+                    )}
+                  </div>
+                )}
               </div>
             );
           })}

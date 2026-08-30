@@ -603,6 +603,18 @@ tbody tr:last-child td {
   }
 }
 
+/* Restructured 2026-08-30 (Rees's spec, expanded bios): .prospect-card is
+   now a column -- .prospect-card-header (rank/logo/name/meta/stats, one
+   row) on top, the expanded bio (.prospect-bio-expanded, full width) below
+   it as a sibling, not nested inside the row. This is what makes "logo
+   stays vertically centered same as rank/role/name when the bio expands"
+   true structurally: the header row's own height never changes when the
+   bio opens (the bio isn't one of its children), so align-items: center on
+   .prospect-card-header keeps centering against the same short row either
+   way, instead of re-centering against a card that's grown much taller.
+   Before this, .prospect-card itself was the row and the bio lived inside
+   .prospect-details -> .prospect-stats, several levels deep on the "grows
+   tall" side of the layout -- structurally the same bug this fixes. */
 .prospect-card {
   background: var(--color-card-bg);
   border: 1px solid var(--color-border);
@@ -613,8 +625,8 @@ tbody tr:last-child td {
      this is what actually shortens each card. */
   padding: 0.625rem 1.125rem;
   display: flex;
-  align-items: flex-start;
-  gap: 0.875rem;
+  flex-direction: column;
+  gap: 0.625rem;
   /* Hover "lift" (2026-08-26, Rees's ask for a movement effect): slightly
      larger + a stronger shadow. transform, not width/height, so it doesn't
      reflow neighboring cards -- position+z-index lets the scaled-up card
@@ -630,16 +642,25 @@ tbody tr:last-child td {
   z-index: 1;
 }
 
+/* The whole card is the click target to expand a bio (2026-08-30) -- shown
+   only on cards that actually have one (ProspectTable.tsx only sets this
+   class when r.bio exists), so a bio-less card doesn't look interactive. */
+.prospect-card--clickable {
+  cursor: pointer;
+}
+
+.prospect-card-header {
+  display: flex;
+  align-items: center;
+  gap: 0.875rem;
+}
+
 .prospect-card-rank {
   display: flex;
   flex-direction: column;
   align-items: center;
   min-width: 2.5rem;
   flex-shrink: 0;
-  /* Vertically centered in the card (2026-08-27, Rees's spec) -- .prospect-card
-     itself stays align-items: flex-start (the logo/org group still anchors
-     to the top), this is the one child overridden. */
-  align-self: center;
 }
 
 .prospect-card-rank .num {
@@ -797,6 +818,32 @@ tbody tr:last-child td {
   font-size: 0.9375rem;
   font-weight: 400;
   color: var(--color-text-muted);
+}
+
+/* Expanded bio (2026-08-30) -- full card width, its own block below the
+   header row (see .prospect-card's restructure comment above), not
+   squeezed into the narrow .prospect-details column the old one-line-max
+   bio used to fit in. A top border + padding-top reads as "detail panel
+   opening below," not just more text appended to the stat line. */
+.prospect-bio-expanded {
+  border-top: 1px solid var(--color-border);
+  padding-top: 0.625rem;
+  font-size: 0.875rem;
+  line-height: 1.5;
+  color: var(--color-text);
+}
+
+/* Plain text indicator now, not a real interactive element (2026-08-30) --
+   the whole card is the click target (see .prospect-card--clickable), so a
+   second, separately-clickable control here would double-toggle on a
+   bubbled click. Kept purely for discoverability: without it, nothing on
+   a bio-bearing card visually suggests it's clickable. */
+.prospect-bio-indicator {
+  margin-left: 14px;
+  color: var(--color-link, #406020);
+  font-weight: 700;
+  font-size: 11px;
+  letter-spacing: 0.03em;
 }
 
 /* ── Role color-coding (2026-08-26) ──
