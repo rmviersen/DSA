@@ -229,18 +229,18 @@ body {
      fight for that space, .site-nav (above) now wraps -- this row takes
      `flex-basis: 100%`, forcing it onto its own dedicated full-width line
      below the brand+actions row, where it comfortably has the whole
-     container's width for one line. overflow-x/scrollbar-hiding kept only
-     as a last-resort safety net for a genuinely narrow custom window
-     between this and the 640px mobile breakpoint (which has its own
-     explicit column layout further down, unaffected by this). */
+     container's width for one line (confirmed 0 overflow at 1280px).
+
+     Deliberately NO overflow-x here -- an `overflow-x: auto` safety net was
+     tried and reverted same day: per the CSS overflow spec, setting only
+     overflow-x forces overflow-y to also compute as 'auto', which clipped
+     the dropdown menus below (position: absolute, extending outside this
+     row's own box) right out of visibility -- they looked completely
+     broken, not just slow to open. The "own full-width row" fix above
+     already solves the space problem structurally; the safety net was
+     unnecessary belt-and-suspenders that actively broke something else. */
   flex: 1 1 100%;
   order: 3;
-  overflow-x: auto;
-  scrollbar-width: none;
-}
-
-.site-nav-links::-webkit-scrollbar {
-  display: none;
 }
 
 /* Groups the right-side header items (Preview as Guest / login link, the
