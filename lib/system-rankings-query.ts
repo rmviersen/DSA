@@ -40,33 +40,27 @@ const TOP_N_PER_SPLIT = 5;
 // invented pseudo-grade conversion. Same 5-word vocabulary and the same
 // color gradient (via percentileStyle in display-helpers.ts) as everywhere
 // else on the site, though -- just a different scale underneath the words.
+//
+// Balance Index uses this SAME percentile treatment as Blue-Chip/Depth --
+// NOT the absolute fixed-threshold version tried the same day and reverted
+// hours later (Rees's explicit call): an absolute scale made Steam's
+// balance grade "Plus" despite a #27 (of ~32) pitching rank next to a #3
+// batting rank -- a real, competitively-lopsided system by any relative
+// measure, just one whose raw ratio (0.85) still looked fine in isolation
+// because ~nobody in this particular league happens to be badly imbalanced
+// this season. Rees's call: balance should read as bad when a system is
+// relatively lopsided vs. its peers, even if the whole league's actual
+// spread is tight -- consistent with Blue-Chip/Depth already being
+// league-relative, not absolute. If a future season ever produces a wide,
+// varied spread of balance indices, this will naturally look more
+// differentiated again; it's the SAME mechanism as Blue-Chip/Depth, not a
+// special case.
 function percentileToGrade(percentile: number): string {
   if (percentile >= 90) return "Elite";
   if (percentile >= 70) return "Plus";
   if (percentile >= 30) return "Average";
   if (percentile >= 10) return "Below Average";
   return "Well Below Average";
-}
-
-// Balance Index gets an ABSOLUTE grade instead, deliberately NOT the
-// percentile-among-orgs treatment above -- caught live 2026-08-31 checking
-// this against real data: the whole league currently clusters tightly at
-// 0.85-0.98 (every org this season genuinely has a well-rounded system, no
-// truly lopsided ones at all), which meant a real 0.91 -- an objectively
-// strong, honestly-balanced number -- was grading as "Below Average" purely
-// because a few other orgs happened to sit even higher. Unlike Blue-Chip/
-// Depth (arbitrary-unit sums with no meaning outside league context, where
-// relative standing IS the only sensible frame), Balance Index is already a
-// self-explanatory 0-1 ratio (1 = perfectly balanced) with real absolute
-// meaning on its own, so it's graded against fixed thresholds instead of
-// wherever the league happens to sit this run. `percentile` on the returned
-// grade is still a 0-100 value for percentileStyle()'s color, just derived
-// from the absolute scale (index * 100) rather than a real percentile, so
-// the color always agrees with the word instead of the two telling
-// different stories.
-function balanceIndexToGrade(index: number): SystemRankingGrade {
-  const word = index >= 0.90 ? "Elite" : index >= 0.75 ? "Plus" : index >= 0.55 ? "Average" : index >= 0.35 ? "Below Average" : "Well Below Average";
-  return { word, percentile: Math.max(0, Math.min(100, index * 100)) };
 }
 
 // Rank (1 = best) among `total` orgs -> a 0-100 percentile, 100 = best, for
@@ -137,7 +131,7 @@ export async function getSystemRankingsDetailed(): Promise<SystemRankingCardRow[
   // Percentile ranks for Blue-Chip/Depth/Balance -- these three are raw
   // values, not stored ranks, so they're ranked here in JS (cheap, ~30 orgs)
   // the same way scripts/compute-team-ratings.ts ranks everything else.
-  function percentileRank<K extends "blue_chip_score" | "depth_score">(key: K): Map<number, number> {
+  function percentileRank<K extends "blue_chip_score" | "depth_score" | "balance_index">(key: K): Map<number, number> {
     const withValue = [...tcByTeam.entries()].filter(([, r]) => r[key] !== null) as [number, TeamComputedRow][];
     withValue.sort((a, b) => (b[1][key] as number) - (a[1][key] as number));
     const out = new Map<number, number>();
@@ -149,6 +143,7 @@ export async function getSystemRankingsDetailed(): Promise<SystemRankingCardRow[
   }
   const blueChipPercentileByTeam = percentileRank("blue_chip_score");
   const depthPercentileByTeam = percentileRank("depth_score");
+  const balancePercentileByTeam = percentileRank("balance_index");
 
   // Prospect pool for the top-5-hitters/top-5-pitchers columns -- fetched
   // separately from `players` (not an embedded players(...) join off
@@ -232,7 +227,7 @@ export async function getSystemRankingsDetailed(): Promise<SystemRankingCardRow[
         readinessRankPercentile: rankToPercentile(tc?.tbl_readiness_rank ?? null, teamsWithScore),
         blueChip: grade(blueChipPercentileByTeam.get(t.id)),
         depth: grade(depthPercentileByTeam.get(t.id)),
-        balance: tc?.balance_index != null ? balanceIndexToGrade(tc.balance_index) : null,
+        balance: grade(balancePercentileByTeam.get(t.id)),
         topHitters: hittersByOrg.get(t.id) ?? [],
         topPitchers: pitchersByOrg.get(t.id) ?? [],
         bio: bio?.bio_text ?? null,
