@@ -22,6 +22,12 @@ const NAV_ITEMS: NavItem[] = [
   // hover-dropdown-only entry (no href) until it exists. First module:
   // Minor League System (moved here from its own top-level nav slot).
   { label: "My Team", children: [{ href: "/org-minors", label: "Minor League System" }] },
+  // "Reports" (2026-08-31) -- same dropdown-only-until-a-hub-page-exists
+  // pattern as "My Team" above: no href of its own yet, just a home for
+  // internal analysis pages as they ship. First entry: the market-rate
+  // curve tuning view. Add more report pages here as they're built -- no
+  // other nav code needs to change.
+  { label: "Reports", children: [{ href: "/admin/market-rates", label: "Market Rates" }] },
   { href: "/players", label: "Top Players" },
   // Points at the guest-facing /TBL/prospects (cards, no side-by-side
   // System Rankings table) instead of the internal /prospects combined
