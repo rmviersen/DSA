@@ -628,8 +628,9 @@ export default async function GlossaryPage() {
       <section style={{ marginBottom: "2.5rem" }}>
         <h2 style={sectionTitleStyle}>Minor League System &amp; Team Rankings</h2>
         <p style={bodyTextStyle}>
-          Org-level metrics, computed by <code>scripts/compute-team-ratings.ts</code> and shown on the System Rankings
-          table next to Top Prospects. <strong>Rewritten 2026-08-31</strong> (Rees&apos;s methodology, replacing the
+          Org-level metrics, computed by <code>scripts/compute-team-ratings.ts</code> and shown on the Farm Rankings
+          page (renamed from &quot;System Rankings&quot; 2026-08-31, same page/data) next to Top Prospects.{" "}
+          <strong>Rewritten 2026-08-31</strong> (Rees&apos;s methodology, replacing the
           original Power BI &quot;RLB&quot; flat-average approach) to explicitly reward three things: a strong top-end
           (&quot;blue-chip&quot; talent), real organizational depth beyond the headliners, and having BOTH a strong
           batting and a strong pitching pipeline rather than being one-sided. Full write-up:{" "}

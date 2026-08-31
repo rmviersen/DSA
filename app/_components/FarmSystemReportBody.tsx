@@ -82,7 +82,12 @@ export async function FarmSystemReportBody({
             <ProspectTable rows={rows} showInternalLinks={showInternalLinks} />
           </div>
           <div>
-            <h2 style={sectionTitleStyle}>System Rankings</h2>
+            {/* Renamed "Farm Rankings" 2026-08-31 (Rees's ask) -- this
+                compact side-by-side column still reads from
+                getTeamRankings()/TeamRankingsTable.tsx, unchanged; only the
+                label changed, same as the dedicated /TBL/prospects/farms
+                page's heading. */}
+            <h2 style={sectionTitleStyle}>Farm Rankings</h2>
             {/* Spacer matching the height of ProspectTable's own internal
                 filter bar (H/P + Role buttons), which pushes its <table>
                 down but has no equivalent on this side -- without this the

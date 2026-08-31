@@ -29,7 +29,11 @@ export default async function SystemRankingsPage() {
   return (
     <>
       <header className="page-header">
-        <h1>System Rankings</h1>
+        {/* Renamed "Farm Rankings" 2026-08-31 (Rees's ask, after the card
+            rebuild) -- route/URL, function/component names, and the
+            database stay "system rank"/"System Rankings" throughout; this
+            is a display-label-only rename. */}
+        <h1>Farm Rankings</h1>
         <p>Minor league system strength, org by org</p>
       </header>
       <SystemRankingsCards rows={rankings} showInternalLinks={showInternalLinks} />

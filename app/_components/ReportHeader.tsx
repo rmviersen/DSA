@@ -3,9 +3,17 @@ import Link from "next/link";
 import { buttonVariants } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 
+// "System Rankings" renamed to "Farm Rankings" 2026-08-31 (Rees's ask,
+// after the card rebuild -- "which is what I want to rebrand it as") --
+// URL/route (/TBL/prospects/farms) and every internal name (getTeamRankings,
+// TeamRankingRow, SystemRankingsCards, system_rank_weights, etc.) are
+// UNCHANGED, this is a display-label-only rename. Historical comments
+// elsewhere that describe past events using the old name are left as-is --
+// that's accurately what it was called at the time, not something to
+// retroactively rewrite.
 const PUBLIC_NAV_ITEMS = [
   { href: "/TBL/prospects", label: "Top Prospects" },
-  { href: "/TBL/prospects/farms", label: "System Rankings" },
+  { href: "/TBL/prospects/farms", label: "Farm Rankings" },
 ] as const;
 
 // Colors come from .report-header-action in globals.css, not Tailwind's
