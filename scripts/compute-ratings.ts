@@ -591,21 +591,28 @@ async function main() {
   // -- most pitchers throw curveball/slider instead), which let raw pitch-
   // mix agreement outweigh the fact that his aggregate ability is a full
   // ceiling-tier below Blum's. Since the whole point of a comp is "who does
-  // this prospect's FUTURE look like," value alignment has to come first.
-  // Implemented as an extra weighted dimension (not a hard pre-filter,
-  // which would have risked zero candidates left in the thinner role
-  // buckets for an unusually high- or low-Potential prospect) comparing the
-  // prospect's own computed Potential against each candidate's computed
-  // Overall, weighted to DOMINATE every raw tool-grade dimension combined --
-  // its weight is set to `COMP_VALUE_GAP_DOMINANCE` times the sum of every
-  // other dimension's weight for that specific comparison, so tool-shape
-  // can still break a near-tie between two similarly-value-aligned
-  // candidates, but can never again outweigh a real value mismatch. `10`
-  // was chosen by solving, from the real Blum numbers above, the crossover
-  // point past which Reyes actually beats Kilby (~8x) and rounding up for a
-  // safety margin -- verified empirically after implementing (see the
-  // commit this landed in for the confirmed real before/after result).
-  const COMP_VALUE_GAP_DOMINANCE = 10;
+  // this prospect's FUTURE look like," value alignment has to matter, but
+  // it shouldn't be the ONLY thing that matters. Implemented as an extra
+  // weighted dimension (not a hard pre-filter, which would have risked zero
+  // candidates left in the thinner role buckets for an unusually high- or
+  // low-Potential prospect) comparing the prospect's own computed Potential
+  // against each candidate's computed Overall -- its weight is set to
+  // `COMP_VALUE_GAP_DOMINANCE` times the sum of every other dimension's
+  // weight for that specific comparison.
+  //
+  // Lowered from `10` to `1` the SAME DAY (2026-08-31), Rees's immediate
+  // follow-up: at 10, value alignment so thoroughly swamped tool-shape that
+  // multiple different prospects in a thin role bucket (all 3 top-10 CF
+  // prospects) were landing on the exact same comp, just because that one
+  // established player's Overall happened to sit in the "sweet spot" of a
+  // sparse Overall distribution -- tool-shape had essentially no say left
+  // to differentiate genuinely different skill profiles that all happened
+  // to project to a similar ceiling. `1` means the value-gap term now
+  // carries exactly as much weight as the ENTIRE rest of the tool-grade
+  // vector combined (50/50), not ten times it -- still enough to keep a
+  // real Blum-vs-Kilby-style value howler from winning outright, but tool
+  // profile is a genuine co-equal factor again, not just a tie-breaker.
+  const COMP_VALUE_GAP_DOMINANCE = 1;
 
   // For every prospect, the nearest established player in the SAME role
   // bucket by weighted distance across both raw tool grades (see
