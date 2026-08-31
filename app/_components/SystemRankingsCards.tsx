@@ -145,10 +145,14 @@ export function SystemRankingsCards({ rows, showInternalLinks }: { rows: SystemR
               <ProspectColumn title="Top Pitchers" prospects={r.topPitchers} showInternalLinks={showInternalLinks} />
             </div>
 
+            {/* Balance removed from display 2026-08-31 (Rees's ask -- "a
+                bit misleading") -- the balance PENALTY is still very much
+                part of minor_league_rating/minors_rank's actual math (see
+                system-rank-methodology.md), this only drops the standalone
+                word-grade badge for it. Blue-Chip/Depth stay. */}
             <div className="system-grade-breakdown">
               <span>Blue-Chip <b style={r.blueChip ? percentileStyle(r.blueChip.percentile) : undefined}>{r.blueChip?.word ?? "—"}</b></span>
               <span>Depth <b style={r.depth ? percentileStyle(r.depth.percentile) : undefined}>{r.depth?.word ?? "—"}</b></span>
-              <span>Balance <b style={r.balance ? percentileStyle(r.balance.percentile) : undefined}>{r.balance?.word ?? "—"}</b></span>
               {hasBio && (
                 <span className="prospect-bio-indicator" style={{ marginLeft: "auto" }}>
                   ANALYSIS {isOpen ? "▲" : "▼"}
