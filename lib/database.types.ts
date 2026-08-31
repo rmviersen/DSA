@@ -2773,6 +2773,36 @@ export type Database = {
         }
         Relationships: []
       }
+      system_rank_weights: {
+        Row: {
+          balance_penalty: number
+          blue_chip_cutoff: number
+          created_at: string
+          id: number
+          is_active: boolean
+          label: string
+          notes: string | null
+        }
+        Insert: {
+          balance_penalty?: number
+          blue_chip_cutoff?: number
+          created_at?: string
+          id?: never
+          is_active?: boolean
+          label: string
+          notes?: string | null
+        }
+        Update: {
+          balance_penalty?: number
+          blue_chip_cutoff?: number
+          created_at?: string
+          id?: never
+          is_active?: boolean
+          label?: string
+          notes?: string | null
+        }
+        Relationships: []
+      }
       team_batting_stats_snapshots: {
         Row: {
           ab: number | null
@@ -2910,6 +2940,7 @@ export type Database = {
       }
       team_computed: {
         Row: {
+          balance_index: number | null
           batting: number | null
           batting_prospect_rank: number | null
           batting_rank: number | null
@@ -2931,6 +2962,7 @@ export type Database = {
           rank_rank: number | null
           refresh_run_id: number
           roster_rank: number | null
+          system_rank_weights_id: number | null
           tbl_readiness_rank: number | null
           team_id: number
           team_ovr: number | null
@@ -2940,6 +2972,7 @@ export type Database = {
           weights_id: number | null
         }
         Insert: {
+          balance_index?: number | null
           batting?: number | null
           batting_prospect_rank?: number | null
           batting_rank?: number | null
@@ -2961,6 +2994,7 @@ export type Database = {
           rank_rank?: number | null
           refresh_run_id: number
           roster_rank?: number | null
+          system_rank_weights_id?: number | null
           tbl_readiness_rank?: number | null
           team_id: number
           team_ovr?: number | null
@@ -2970,6 +3004,7 @@ export type Database = {
           weights_id?: number | null
         }
         Update: {
+          balance_index?: number | null
           batting?: number | null
           batting_prospect_rank?: number | null
           batting_rank?: number | null
@@ -2991,6 +3026,7 @@ export type Database = {
           rank_rank?: number | null
           refresh_run_id?: number
           roster_rank?: number | null
+          system_rank_weights_id?: number | null
           tbl_readiness_rank?: number | null
           team_id?: number
           team_ovr?: number | null
@@ -3005,6 +3041,13 @@ export type Database = {
             columns: ["refresh_run_id"]
             isOneToOne: false
             referencedRelation: "refresh_runs"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "team_computed_system_rank_weights_id_fkey"
+            columns: ["system_rank_weights_id"]
+            isOneToOne: false
+            referencedRelation: "system_rank_weights"
             referencedColumns: ["id"]
           },
           {

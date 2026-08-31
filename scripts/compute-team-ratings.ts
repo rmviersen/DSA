@@ -24,6 +24,31 @@ const rankDesc = <T,>(items: T[], key: (t: T) => number | null) => {
   return new Map(withKey.map((x, i) => [x.t, i + 1]));
 };
 
+// Blue-Chip + Depth scoring (2026-08-31, Rees's approved System Rankings
+// methodology -- full write-up: system-rank-methodology.md). Takes a list
+// of prospect values for one org's one H/P split, already sorted
+// descending, and splits it into two pieces that get scored differently:
+// the top `cutoff` count at FULL value ("Blue-Chip Score", undiluted star
+// power -- a true difference-maker at #1 moves this a lot, three merely-
+// good prospects don't), everyone past that decays as 1/(rank-cutoff)
+// ("Depth Score" -- the next-best prospect counts in full, the one after
+// at half, the one after that at a third, and so on). Both are SUMMED,
+// deliberately not averaged: an average is bounded by group size and can
+// never reward an org for simply HAVING more good prospects, which is
+// exactly the gap this methodology exists to close (the old flat top-20
+// average this replaces couldn't tell "three superstars, seventeen
+// replacement-level guys" apart from "twenty solid-but-unspectacular
+// ones," and gave zero credit to a 21st-ranked prospect no matter how
+// good, even in a stacked system).
+function blueChipPlusDepth(valuesDesc: number[], cutoff: number): number {
+  let total = 0;
+  valuesDesc.forEach((v, i) => {
+    const rank = i + 1;
+    total += rank <= cutoff ? v : v / (rank - cutoff);
+  });
+  return total;
+}
+
 interface PlayerRow {
   player_id: number;
   overall: number;
@@ -43,6 +68,12 @@ async function main() {
   if (pcErr || !pcRow) throw new Error(`No player_computed rows found: ${pcErr?.message}`);
   const refreshRunId = (pcRow as { refresh_run_id: number }).refresh_run_id;
   console.log(`Computing team ratings against refresh_run_id ${refreshRunId}`);
+
+  console.log("Loading active system-rank weight set...");
+  const { data: srwRow, error: srwErr } = await supabase.from("system_rank_weights").select("*").eq("is_active", true).single();
+  if (srwErr || !srwRow) throw new Error(`No active system_rank_weights found: ${srwErr?.message}`);
+  const srw = srwRow as { id: number; label: string; blue_chip_cutoff: number; balance_penalty: number };
+  console.log(`Using system-rank weight set #${srw.id}: "${srw.label}" (blueChipCutoff=${srw.blue_chip_cutoff}, balancePenalty=${srw.balance_penalty})`);
 
   console.log("Loading player_computed + org context...");
   const raw = await fetchAll<{
@@ -84,29 +115,59 @@ async function main() {
     minor_league_batting_rating: number | null;
     minor_league_pitching_rating: number | null;
     minor_league_readiness_rating: number | null;
+    balance_index: number | null;
     team_ovr: number | null;
   }
 
   const aggs: TeamAgg[] = teams.map((t) => {
     const orgRows = byOrg.get(t.id) ?? [];
 
-    // Top 20 prospects org-wide (by prospect_org_rank, already computed) — this
-    // is RLB Teams' "Minor League Rating" / "Minor League Readiness Rating" gate.
-    const top20Prospects = orgRows.filter((r) => r.prospect_org_rank !== null && r.prospect_org_rank <= 20);
-    const minorLeagueRating = avg(top20Prospects.map((r) => r.prospect_potential));
-    const minorLeagueReadiness = avg(top20Prospects.map((r) => r.overall));
-
-    // Top 10 hitters / pitchers within the org's prospect pool, re-ranked
-    // within their own PH split (RLB's "Prospect ORG PH Rank" concept —
-    // computed fresh here rather than stored, since it's only used for this).
+    // The org's real prospect pool (same population the old flat-average
+    // methodology used -- prospect_org_rank is only ever set for players
+    // already in the leaguewide prospect pool), re-split by H/P and
+    // ranked WITHIN that split -- there's no stored "rank within org+ph"
+    // column, so it's computed fresh here, same as the old top-10-hitters/
+    // pitchers logic this replaces used to.
     const prospectsInOrg = orgRows.filter((r) => r.prospect_org_rank !== null);
-    const hitters = prospectsInOrg.filter((r) => r.ph === "H").sort((a, b) => b.prospect_potential - a.prospect_potential).slice(0, 10);
-    const pitchers = prospectsInOrg.filter((r) => r.ph === "P").sort((a, b) => b.prospect_potential - a.prospect_potential).slice(0, 10);
-    const minorLeagueBatting = avg(hitters.map((r) => r.prospect_potential));
-    const minorLeaguePitching = avg(pitchers.map((r) => r.prospect_potential));
+    const hittersDesc = prospectsInOrg.filter((r) => r.ph === "H").sort((a, b) => b.prospect_potential - a.prospect_potential);
+    const pitchersDesc = prospectsInOrg.filter((r) => r.ph === "P").sort((a, b) => b.prospect_potential - a.prospect_potential);
 
-    // Top 18 players org-wide by Overall (RLB's "Team OVR" gate). NOTE: RLB also
-    // excluded players with a "Serious Inj" flag here — that was a text-parsing
+    const battingScore = hittersDesc.length > 0 ? blueChipPlusDepth(hittersDesc.map((r) => r.prospect_potential), srw.blue_chip_cutoff) : null;
+    const pitchingScore = pitchersDesc.length > 0 ? blueChipPlusDepth(pitchersDesc.map((r) => r.prospect_potential), srw.blue_chip_cutoff) : null;
+
+    // System Score: batting + pitching, minus a penalty for the GAP between
+    // them -- a lopsided system (all bat, no arm, or vice versa) can no
+    // longer out-rank a well-rounded one with the same total value. Treats
+    // a missing split as a real 0, not null-propagation: an org with real
+    // hitting prospects and zero pitching prospects is about as lopsided as
+    // it gets, and should be scored (and penalized) accordingly rather than
+    // silently dropped from the ranking.
+    const battingForMath = battingScore ?? 0;
+    const pitchingForMath = pitchingScore ?? 0;
+    const minorLeagueRating = (battingScore !== null || pitchingScore !== null)
+      ? battingForMath + pitchingForMath - srw.balance_penalty * Math.abs(battingForMath - pitchingForMath)
+      : null;
+
+    // Balance Index (display-only context, NOT part of the ranking math
+    // above -- the penalty already is): weaker split / stronger split,
+    // 0-1, 1 = perfectly balanced. Null (not 0 or 1) when there's no real
+    // signal either way (an org with no prospects in either split at all).
+    const strongerSplit = Math.max(battingForMath, pitchingForMath);
+    const weakerSplit = Math.min(battingForMath, pitchingForMath);
+    const balanceIndex = strongerSplit > 0 ? weakerSplit / strongerSplit : null;
+
+    // Readiness: same Blue-Chip + Depth shape, using CURRENT Overall
+    // instead of Potential -- "how much of this system's value is already
+    // realized, not just projected." No balance penalty here -- that
+    // concept is about the main ceiling-based ranking above, not this one.
+    const battingReadiness = hittersDesc.length > 0 ? blueChipPlusDepth(hittersDesc.map((r) => r.overall), srw.blue_chip_cutoff) : 0;
+    const pitchingReadiness = pitchersDesc.length > 0 ? blueChipPlusDepth(pitchersDesc.map((r) => r.overall), srw.blue_chip_cutoff) : 0;
+    const minorLeagueReadiness = (hittersDesc.length > 0 || pitchersDesc.length > 0) ? battingReadiness + pitchingReadiness : null;
+
+    // Top 18 players org-wide by Overall (RLB's "Team OVR" gate) -- UNCHANGED,
+    // out of scope for this methodology rework (current MLB roster strength,
+    // a different concept from farm-system ranking). NOTE: RLB also excluded
+    // players with a "Serious Inj" flag here -- that was a text-parsing
     // heuristic on an injury description string RLB had that we don't carry
     // over from StatsPlus in the same form. Skipped for this pass; flagged below.
     const top18 = orgRows.filter((r) => r.org_rank !== null && r.org_rank <= 18);
@@ -115,9 +176,10 @@ async function main() {
     return {
       team_id: t.id,
       minor_league_rating: minorLeagueRating,
-      minor_league_batting_rating: minorLeagueBatting,
-      minor_league_pitching_rating: minorLeaguePitching,
+      minor_league_batting_rating: battingScore,
+      minor_league_pitching_rating: pitchingScore,
       minor_league_readiness_rating: minorLeagueReadiness,
+      balance_index: balanceIndex,
       team_ovr: teamOvr,
     };
   });
@@ -142,6 +204,8 @@ async function main() {
       pitching_prospect_rank: pitchingProspectRankByTeam.get(a) ?? null,
       minor_league_readiness_rating: a.minor_league_readiness_rating,
       tbl_readiness_rank: readinessRankByTeam.get(a) ?? null,
+      balance_index: a.balance_index,
+      system_rank_weights_id: srw.id,
       team_ovr: a.team_ovr,
       roster_rank: rosterRankByTeam.get(a) ?? null,
       captured_at: capturedAt,

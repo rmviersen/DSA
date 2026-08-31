@@ -628,33 +628,63 @@ export default async function GlossaryPage() {
       <section style={{ marginBottom: "2.5rem" }}>
         <h2 style={sectionTitleStyle}>Minor League System &amp; Team Rankings</h2>
         <p style={bodyTextStyle}>
-          Five org-level metrics, computed by <code>scripts/compute-team-ratings.ts</code> and shown on the System
-          Rankings table next to Top Prospects — a straight port of the original Power BI &quot;RLB&quot; system, not
-          new methodology.
+          Org-level metrics, computed by <code>scripts/compute-team-ratings.ts</code> and shown on the System Rankings
+          table next to Top Prospects. <strong>Rewritten 2026-08-31</strong> (Rees&apos;s methodology, replacing the
+          original Power BI &quot;RLB&quot; flat-average approach) to explicitly reward three things: a strong top-end
+          (&quot;blue-chip&quot; talent), real organizational depth beyond the headliners, and having BOTH a strong
+          batting and a strong pitching pipeline rather than being one-sided. Full write-up:{" "}
+          <code>system-rank-methodology.md</code>.
+        </p>
+        <p style={{ ...bodyTextStyle, fontSize: "0.8125rem", color: "var(--color-text-muted)" }}>
+          The building block for every score below is <strong>Blue-Chip + Depth</strong>: within one org&apos;s one
+          H/P split, the top 3 prospects (by Prospect Potential) count at full value (&quot;Blue-Chip&quot;); everyone
+          ranked lower is SUMMED too, but decayed as 1/(rank&minus;3) (&quot;Depth&quot;) — the 4th-best counts in
+          full, the 5th at half, the 10th at a seventh, and so on. Summing (not averaging) is deliberate: an average
+          can never reward an org for simply having more good prospects, which is exactly what Depth exists to credit.
         </p>
         <div className="table-wrap" style={{ marginTop: "0.5rem", maxWidth: "64rem" }}>
           <table>
             <thead><tr><th>Metric</th><th>Formula</th></tr></thead>
             <tbody>
               <tr>
-                <td style={{ fontWeight: 700 }}>Minors Rank</td>
-                <td>avg Prospect Potential of the org&apos;s top 20 prospects (by Prospect Org Rank), ranked against every other org</td>
-              </tr>
-              <tr>
                 <td style={{ fontWeight: 700 }}>Batting Prospect Rank</td>
-                <td>avg Prospect Potential of the org&apos;s top 10 hitters within that same prospect pool (re-ranked by PH split)</td>
+                <td>Blue-Chip + Depth score, computed on the org&apos;s hitters only, ranked against every other org</td>
               </tr>
               <tr>
                 <td style={{ fontWeight: 700 }}>Pitching Prospect Rank</td>
-                <td>avg Prospect Potential of the org&apos;s top 10 pitchers within that same prospect pool</td>
+                <td>Same, computed on the org&apos;s pitchers only</td>
+              </tr>
+              <tr>
+                <td style={{ fontWeight: 700 }}>Minors Rank</td>
+                <td>
+                  (Batting score + Pitching score) &minus; 25% of the GAP between them, ranked against every other
+                  org — a lopsided system (strong bat, weak arm, or vice versa) can no longer out-rank a well-rounded
+                  one with the same total value
+                </td>
+              </tr>
+              <tr>
+                <td style={{ fontWeight: 700 }}>Balance Index</td>
+                <td>
+                  weaker split&apos;s score &divide; stronger split&apos;s score, 0&ndash;1 (1 = perfectly balanced) —
+                  display-only context alongside Minors Rank, not itself part of the ranking math (the balance penalty
+                  above already is)
+                </td>
               </tr>
               <tr>
                 <td style={{ fontWeight: 700 }}>Readiness Rank (tbl_readiness_rank)</td>
-                <td>avg <em>current</em> Overall (not Potential) of that same top-20 prospect pool — how close the system already is, not its ceiling</td>
+                <td>
+                  Same Blue-Chip + Depth shape, batting + pitching summed, but using <em>current</em> Overall instead
+                  of Potential — how much of the system&apos;s value is already realized, not just projected. No
+                  balance penalty here.
+                </td>
               </tr>
               <tr>
                 <td style={{ fontWeight: 700 }}>Roster Rank (Team OVR)</td>
-                <td>avg Overall of the org&apos;s top 18 players league-wide (by Org Rank) — computed and stored, not currently shown on any page</td>
+                <td>
+                  avg Overall of the org&apos;s top 18 players league-wide (by Org Rank) — UNCHANGED by the 2026-08-31
+                  rework (current MLB roster strength, a different concept from farm-system ranking); computed and
+                  stored, not currently shown on any page
+                </td>
               </tr>
             </tbody>
           </table>
