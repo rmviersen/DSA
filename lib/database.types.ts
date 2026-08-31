@@ -1416,7 +1416,9 @@ export type Database = {
           max_overall_in_sample: number | null
           min_overall_in_sample: number | null
           player_type: string
+          r_squared: number
           refresh_run_id: number
+          residual_std_dev: number
           sample_size: number
           slope: number
         }
@@ -1428,7 +1430,9 @@ export type Database = {
           max_overall_in_sample?: number | null
           min_overall_in_sample?: number | null
           player_type: string
+          r_squared: number
           refresh_run_id: number
+          residual_std_dev: number
           sample_size: number
           slope: number
         }
@@ -1440,7 +1444,9 @@ export type Database = {
           max_overall_in_sample?: number | null
           min_overall_in_sample?: number | null
           player_type?: string
+          r_squared?: number
           refresh_run_id?: number
+          residual_std_dev?: number
           sample_size?: number
           slope?: number
         }

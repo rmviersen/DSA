@@ -38,8 +38,12 @@ async function fetchAll<T>(query: (from: number, to: number) => Promise<{ data: 
   return all;
 }
 
-// Ordinary least squares, y = intercept + slope * x.
-function fitLine(points: { x: number; y: number }[]): { intercept: number; slope: number } {
+// Ordinary least squares, y = intercept + slope * x -- plus R² and the
+// residual standard deviation (both in log-AAV space, the space the fit
+// actually happens in), surfaced on /admin/market-rates for Rees to judge
+// how much to trust a given curve at a glance rather than just seeing the
+// coefficients.
+function fitLine(points: { x: number; y: number }[]): { intercept: number; slope: number; rSquared: number; residualStdDev: number } {
   const n = points.length;
   const meanX = points.reduce((s, p) => s + p.x, 0) / n;
   const meanY = points.reduce((s, p) => s + p.y, 0) / n;
@@ -50,7 +54,15 @@ function fitLine(points: { x: number; y: number }[]): { intercept: number; slope
   }
   const slope = den === 0 ? 0 : num / den;
   const intercept = meanY - slope * meanX;
-  return { intercept, slope };
+  let ssRes = 0, ssTot = 0;
+  for (const p of points) {
+    const predicted = intercept + slope * p.x;
+    ssRes += (p.y - predicted) ** 2;
+    ssTot += (p.y - meanY) ** 2;
+  }
+  const rSquared = ssTot === 0 ? 0 : 1 - ssRes / ssTot;
+  const residualStdDev = n > 2 ? Math.sqrt(ssRes / (n - 2)) : 0;
+  return { intercept, slope, rSquared, residualStdDev };
 }
 
 // Shrinkage toward 1.0 (no role adjustment) by sample size -- a role with a
@@ -120,15 +132,15 @@ async function main() {
   console.log(`  $${leagueMinimum.toLocaleString()}`);
 
   // Fit one curve per player type -- see header comment for why.
-  const curvesByType = new Map<PlayerType, { intercept: number; slope: number; sampleSize: number; minOverall: number; maxOverall: number }>();
+  const curvesByType = new Map<PlayerType, { intercept: number; slope: number; rSquared: number; residualStdDev: number; sampleSize: number; minOverall: number; maxOverall: number }>();
   for (const type of ["hitter", "pitcher"] as const) {
     const group = clean.filter((c) => PITCHER_ROLES.has(c.role) === (type === "pitcher"));
     if (group.length < 10) throw new Error(`Only ${group.length} clean ${type} contracts -- too small to fit a curve. Aborting.`);
     const points = group.map((c) => ({ x: c.overall, y: Math.log(c.aav) }));
-    const { intercept, slope } = fitLine(points);
+    const { intercept, slope, rSquared, residualStdDev } = fitLine(points);
     const overalls = group.map((c) => c.overall);
-    curvesByType.set(type, { intercept, slope, sampleSize: group.length, minOverall: Math.min(...overalls), maxOverall: Math.max(...overalls) });
-    console.log(`${type} curve: ln(AAV) = ${intercept.toFixed(4)} + ${slope.toFixed(4)} * Overall (n=${group.length}, Overall range ${Math.min(...overalls)}-${Math.max(...overalls)})`);
+    curvesByType.set(type, { intercept, slope, rSquared, residualStdDev, sampleSize: group.length, minOverall: Math.min(...overalls), maxOverall: Math.max(...overalls) });
+    console.log(`${type} curve: ln(AAV) = ${intercept.toFixed(4)} + ${slope.toFixed(4)} * Overall (n=${group.length}, R²=${rSquared.toFixed(3)}, residual SD=${residualStdDev.toFixed(3)}, Overall range ${Math.min(...overalls)}-${Math.max(...overalls)})`);
   }
 
   // Per-role multiplier: each role's actual average AAV vs. what its own
@@ -187,6 +199,7 @@ async function main() {
       refresh_run_id: currentRunId,
       player_type: type,
       intercept: curve.intercept, slope: curve.slope,
+      r_squared: curve.rSquared, residual_std_dev: curve.residualStdDev,
       sample_size: curve.sampleSize,
       min_overall_in_sample: curve.minOverall,
       max_overall_in_sample: curve.maxOverall,
