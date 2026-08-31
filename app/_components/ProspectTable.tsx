@@ -184,7 +184,12 @@ export function ProspectTable({ rows, showInternalLinks }: { rows: ProspectRow[]
 
   return (
     <div>
-      <div style={{ marginBottom: 10, display: "flex", gap: 8, alignItems: "center" }}>
+      {/* flexWrap: "wrap" added 2026-08-31 -- this row (H/P + Role toggle
+          buttons, plus the search box) had no wrap at all, so on a real
+          mobile viewport (checked at 375px) it just overflowed the whole
+          page horizontally instead of dropping extra buttons to a second
+          line. rowGap keeps wrapped rows from touching once they stack. */}
+      <div style={{ marginBottom: 10, display: "flex", flexWrap: "wrap", gap: 8, rowGap: 6, alignItems: "center" }}>
         {(["all", "H", "P"] as const).map((f) => (
           <button
             key={f}

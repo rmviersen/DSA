@@ -460,6 +460,7 @@ body {
 .filter-bar {
   display: flex;
   align-items: center;
+  flex-wrap: wrap;
   gap: 0.75rem;
   margin-bottom: 1.25rem;
   padding: 0.75rem 1rem;
@@ -1240,6 +1241,36 @@ tbody tr:last-child td {
     flex-direction: column;
     align-items: flex-start;
     gap: 0.375rem;
+  }
+
+  /* .prospect-namerow's fixed 285px width (added 2026-08-31 to line up the
+     meta line across cards on desktop, where every card sits in one wide
+     column) doesn't shrink on its own -- confirmed as a real, reproducible
+     horizontal-page-overflow bug at 375px width (the fixed box runs to
+     ~462px, well past the viewport). Cross-card alignment doesn't apply
+     here anyway once name/role and meta/stats are already stacked
+     vertically per card (the rule above) -- each card's own width is the
+     only thing that matters on mobile, not lining up against its
+     neighbors. auto lets it size to its real content in that column,
+     capped at the available width so a genuinely long name still wraps
+     instead of overflowing again. */
+  .prospect-namerow {
+    width: auto;
+    max-width: 100%;
+    flex-wrap: wrap;
+  }
+
+  /* .prospect-name's flex-shrink: 0 (correct on desktop, where the whole
+     card is wide and a name never needs to shrink) meant a genuinely long
+     name (e.g. "Mauricio Dominguez") rendered at its full natural width
+     regardless of how narrow .prospect-namerow's own column had become on
+     mobile -- still overflowing the page even after the fixes above.
+     Letting it shrink + actually break/wrap onto a second line inside its
+     own card is what finally keeps every name inside the viewport. */
+  .prospect-name {
+    flex-shrink: 1;
+    min-width: 0;
+    overflow-wrap: break-word;
   }
 }
 
