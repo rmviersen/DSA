@@ -388,24 +388,6 @@ export function ProspectTable({ rows, showInternalLinks }: { rows: ProspectRow[]
                         <span className="prospect-meta-item">Age <b>{r.age ?? "—"}</b></span>
                         <span className="prospect-meta-item">{levelLabel(r.level)}{r.teamAbbr ? ` (${r.teamAbbr})` : ""}</span>
                         <span className="prospect-meta-item">ETA <b>{r.eta ?? "—"}</b></span>
-                        {/* Player comp (2026-08-31): nearest established MLB
-                            player whose CURRENT tool grades match this
-                            prospect's POTENTIAL grades, computed server-side
-                            in scripts/compute-ratings.ts -- see that file's
-                            "Player comp" section for the full methodology.
-                            Only rendered when one exists (absent for a rare
-                            role bucket with no established candidates, not
-                            currently observed in real data). Similarity is a
-                            hover tooltip, not shown inline -- a bare name
-                            reads as a clean, confident comp the way a real
-                            scouting report states one, while the percentage
-                            is still one hover away for anyone who wants to
-                            gauge how close the match actually is. */}
-                        {r.compPlayerName && (
-                          <span className="prospect-meta-item" title={r.compSimilarity !== null ? `${r.compSimilarity}% similarity` : undefined}>
-                            Comp <b>{r.compPlayerName}</b>
-                          </span>
-                        )}
                         <span className="prospect-meta-item">
                           Org Rank <b>{rankLabel(r.prospect_org_rank)}</b>
                           {r.delta?.isNew ? <NewBadge /> : <Delta value={r.delta?.prospectOrgRank} lowerIsBetter />}
@@ -429,6 +411,33 @@ export function ProspectTable({ rows, showInternalLinks }: { rows: ProspectRow[]
                             </span>
                           )}
                         </span>
+                        {/* Player comp (2026-08-31, moved after Draft +
+                            linked to StatsPlus 2026-08-31, Rees's follow-up
+                            asks): nearest established MLB player whose
+                            CURRENT tool grades match this prospect's
+                            POTENTIAL grades, computed server-side in
+                            scripts/compute-ratings.ts -- see that file's
+                            "Player comp" section for the full methodology.
+                            Only rendered when one exists (absent for a rare
+                            role bucket with no established candidates, not
+                            currently observed in real data). The name links
+                            to the comp's own StatsPlus profile (opens in a
+                            new tab, same convention as the ↗ icon next to a
+                            prospect's own name) so a name you don't
+                            recognize is one click from a real profile, not
+                            a dead end. Similarity stays a hover tooltip, not
+                            shown inline -- a bare linked name reads as a
+                            clean, confident comp the way a real scouting
+                            report states one, while the percentage is still
+                            one hover away for anyone who wants it. */}
+                        {r.compPlayerName && r.compPlayerId !== null && (
+                          <span className="prospect-meta-item" title={r.compSimilarity !== null ? `${r.compSimilarity}% similarity` : undefined}>
+                            Comp{" "}
+                            <a href={statsPlusPlayerUrl(r.compPlayerId)} target="_blank" rel="noopener noreferrer">
+                              <b>{r.compPlayerName}</b>
+                            </a>
+                          </span>
+                        )}
                       </div>
                       <div className="prospect-stats">
                         {statLine(r)}
