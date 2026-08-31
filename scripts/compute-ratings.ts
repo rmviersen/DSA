@@ -565,7 +565,7 @@ async function main() {
   const COMP_HITTER_MIN_AB = 1000;
   const COMP_SP_MIN_IP = 200;
   const COMP_RP_MIN_IP = 100;
-  const establishedByRole = new Map<string, { player_id: number; ratings: RatingsInput }[]>();
+  const establishedByRole = new Map<string, { player_id: number; ratings: RatingsInput; overall: number }[]>();
   for (const c of computed) {
     if (!c.role) continue;
     const r = ratingsByPlayer.get(c.player_id);
@@ -575,15 +575,43 @@ async function main() {
       : (c.role === "SP" ? (careerIpByPlayer.get(c.player_id) ?? 0) >= COMP_SP_MIN_IP : (careerIpByPlayer.get(c.player_id) ?? 0) >= COMP_RP_MIN_IP);
     if (!isEstablished) continue;
     if (!establishedByRole.has(c.role)) establishedByRole.set(c.role, []);
-    establishedByRole.get(c.role)!.push({ player_id: c.player_id, ratings: r });
+    establishedByRole.get(c.role)!.push({ player_id: c.player_id, ratings: r, overall: c.overall });
   }
   console.log("Established comp-pool sizes by role: " +
     [...establishedByRole.entries()].map(([role, list]) => `${role}=${list.length}`).join(", "));
 
+  // Value-gap dimension (2026-08-31, Rees's fix): comparing raw tool grades
+  // alone found real cases where the winning "comp" was someone whose
+  // established, fully-realized CURRENT Overall sat nowhere near the
+  // prospect's own POTENTIAL -- confirmed concretely on R.J. Blum (Potential
+  // 84.35), whose comp before this fix was Marty Kilby (Overall 74.35, a
+  // 10-point gap) despite Bob Reyes (Overall 84.08, a 0.27-point gap) being
+  // right there in the same SP pool. Root cause: Kilby happens to throw the
+  // exact same unusual 4-pitch mix as Blum (fastball/sinker/change/splitter
+  // -- most pitchers throw curveball/slider instead), which let raw pitch-
+  // mix agreement outweigh the fact that his aggregate ability is a full
+  // ceiling-tier below Blum's. Since the whole point of a comp is "who does
+  // this prospect's FUTURE look like," value alignment has to come first.
+  // Implemented as an extra weighted dimension (not a hard pre-filter,
+  // which would have risked zero candidates left in the thinner role
+  // buckets for an unusually high- or low-Potential prospect) comparing the
+  // prospect's own computed Potential against each candidate's computed
+  // Overall, weighted to DOMINATE every raw tool-grade dimension combined --
+  // its weight is set to `COMP_VALUE_GAP_DOMINANCE` times the sum of every
+  // other dimension's weight for that specific comparison, so tool-shape
+  // can still break a near-tie between two similarly-value-aligned
+  // candidates, but can never again outweigh a real value mismatch. `10`
+  // was chosen by solving, from the real Blum numbers above, the crossover
+  // point past which Reyes actually beats Kilby (~8x) and rounding up for a
+  // safety margin -- verified empirically after implementing (see the
+  // commit this landed in for the confirmed real before/after result).
+  const COMP_VALUE_GAP_DOMINANCE = 10;
+
   // For every prospect, the nearest established player in the SAME role
-  // bucket by weighted tool-grade distance (see buildCompDims/compDistance
-  // above). A prospect who's already cleared the established bar himself
-  // is excluded as his own comp candidate (rare, but possible for an older
+  // bucket by weighted distance across both raw tool grades (see
+  // buildCompDims/compDistance above) AND the value-gap dimension just
+  // above. A prospect who's already cleared the established bar himself is
+  // excluded as his own comp candidate (rare, but possible for an older
   // "prospect" with real MLB burn already -- see the age<=25/mlb_service_
   // days<45 prospect-pool gate above, which still lets some real workload
   // through). No comp at all (left null) only happens if the role bucket's
@@ -599,7 +627,12 @@ async function main() {
     let best: { player_id: number; distance: number } | null = null;
     for (const candidate of candidates) {
       if (candidate.player_id === c.player_id) continue;
-      const distance = compDistance(buildCompDims(c.role, c.ph, prospectRatings, candidate.ratings));
+      const toolDims = buildCompDims(c.role, c.ph, prospectRatings, candidate.ratings);
+      const otherWeight = toolDims.reduce((s, d) => s + d.weight, 0);
+      const dims = otherWeight > 0
+        ? [...toolDims, { weight: otherWeight * COMP_VALUE_GAP_DOMINANCE, prospectValue: c.potential, establishedValue: candidate.overall }]
+        : toolDims;
+      const distance = compDistance(dims);
       if (distance !== null && (best === null || distance < best.distance)) best = { player_id: candidate.player_id, distance };
     }
     if (best !== null) {

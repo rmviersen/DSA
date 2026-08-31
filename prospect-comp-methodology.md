@@ -57,6 +57,16 @@ Defensive sub-grade weights are the `fielding` weight split according to the sam
 
 **Individual pitch grades have no dedicated weight in `rating_weights`** (the engine only counts *how many* pitches clear a quality bar, via `qp`/`qpp`) — each pitch dimension borrows `weights.stuff / 8` as a reasonable, explicitly tunable default (`PITCH_GRADE_WEIGHT` in `compute-ratings.ts`), not a number derived from anything more principled than "a fraction of Stuff, since pitch grades are part of what Stuff represents."
 
+## 5a. Value-gap dimension (2026-08-31 fix — value alignment comes first)
+
+Comparing raw tool grades alone found real cases where the winning "comp" was someone whose established, fully-realized CURRENT Overall sat nowhere near the prospect's own POTENTIAL — the whole point of a comp is "who does this prospect's *future* look like," so that's backwards. Confirmed concretely on R.J. Blum (Potential 84.35): his comp before this fix was Marty Kilby (Overall 74.35, a 10-point gap) despite Bob Reyes (Overall 84.08, a 0.27-point gap) sitting right there in the same established SP pool. Root cause: Kilby happens to throw the exact same unusual 4-pitch mix as Blum (fastball/sinker/changeup/splitter — most pitchers throw curveball/slider instead), which let raw pitch-mix agreement outweigh the fact that his aggregate ability is a full ceiling-tier below Blum's.
+
+**Fix:** an extra weighted dimension, added alongside the raw tool grades (§4) rather than a hard pre-filter — a fixed tolerance window around the prospect's Potential risked leaving zero candidates in the thinner role buckets (CF/DH) for an unusually high- or low-Potential prospect. The dimension compares the prospect's own computed `potential` against each candidate's computed `overall`, weighted to **dominate every raw tool-grade dimension combined**: its weight is `COMP_VALUE_GAP_DOMINANCE` (`10`) times the sum of every other dimension's weight for that specific comparison. Tool-shape can still break a near-tie between two similarly value-aligned candidates, but can no longer outweigh a real value mismatch the way it did for Blum.
+
+`10` was chosen by solving, from the real Blum/Kilby/Reyes numbers, the crossover multiplier past which Reyes actually beats Kilby (~8×) and rounding up for a safety margin — then verified empirically by re-running against production: Blum's comp flipped to Al Charles (Overall 80.0, a 4.35-point gap), similarity rose 56.6% → 80.8%, and every other prospect's comp tightened the same way (Overall-to-Potential gaps mostly 1–5 points across the top dozen prospects checked, similarity scores mostly 70–92%).
+
+**Side effect worth knowing:** similarity scores are now compressed toward the high end compared to before this fix, since a well-value-matched candidate contributes very little distance on the dominant term almost by construction. The `30`-point calibration in §6 below was set before this dimension existed and hasn't been re-tuned against the new distribution — a real candidate for revisiting if scores start clustering too tightly to be useful (e.g. if genuinely poor matches in a thin bucket still read as "80%+ similar" once the dominant term is satisfied).
+
 ## 6. Distance metric and similarity score
 
 Weighted RMS difference across every applicable dimension, in 20–80-scale grade points:
