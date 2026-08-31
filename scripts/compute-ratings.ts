@@ -551,16 +551,20 @@ async function main() {
   // career MLB workload, separate thresholds for hitters vs. the two
   // pitcher roles since IP accrues at wildly different rates for a starter
   // vs. a reliever (a bar that works for one would exclude nearly every
-  // real career reliever). Confirmed against real data 2026-08-31: 1500 AB
-  // clears ~1260 hitters, but only ~340 of them still have a CURRENT
-  // ratings row at all (the rest are long-retired players the game itself
-  // stopped tracking ratings for -- the same gap already documented for
-  // retired-player exports elsewhere in this project) -- that ~340 is the
-  // real usable pool, and it's automatic here: `computed` (built from
-  // `ratings`) only ever contains players who HAVE a current ratings row.
-  const COMP_HITTER_MIN_AB = 1500;
-  const COMP_SP_MIN_IP = 300;
-  const COMP_RP_MIN_IP = 150;
+  // real career reliever). Lowered 2026-08-31 (Rees's follow-up, same day)
+  // from 1500/300/150 to widen the pool, especially for the thinner role
+  // buckets (C/CF/DH/1B were only 14-20 candidates at the original bars).
+  // Confirmed against real data at the ORIGINAL 1500 AB bar: it cleared
+  // ~1260 hitters, but only ~340 of them still had a CURRENT ratings row at
+  // all (the rest are long-retired players the game itself stopped
+  // tracking ratings for -- the same gap already documented for
+  // retired-player exports elsewhere in this project). That gap is
+  // automatic here regardless of where these thresholds sit: `computed`
+  // (built from `ratings`) only ever contains players who HAVE a current
+  // ratings row.
+  const COMP_HITTER_MIN_AB = 1000;
+  const COMP_SP_MIN_IP = 200;
+  const COMP_RP_MIN_IP = 100;
   const establishedByRole = new Map<string, { player_id: number; ratings: RatingsInput }[]>();
   for (const c of computed) {
     if (!c.role) continue;

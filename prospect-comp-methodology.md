@@ -10,19 +10,21 @@ For each prospect, search a pool of established MLB players and find whichever o
 
 A player qualifies as a comp candidate if he's built up a real MLB track record, summed across **every** refresh run in the database's history (not just the current one — a career total has to look further back than "this refresh"), deduped to the highest `refresh_run_id` per `(player_id, year, stint)` the same way `lib/player-detail-query.ts`'s `latestPerStint` does for the player-detail page's stat history.
 
-- **Hitters:** 1,500+ career MLB at-bats (`COMP_HITTER_MIN_AB` in `compute-ratings.ts`)
-- **Starters:** 300+ career MLB innings (`COMP_SP_MIN_IP`)
-- **Relievers:** 150+ career MLB innings (`COMP_RP_MIN_IP`)
+- **Hitters:** 1,000+ career MLB at-bats (`COMP_HITTER_MIN_AB` in `compute-ratings.ts`)
+- **Starters:** 200+ career MLB innings (`COMP_SP_MIN_IP`)
+- **Relievers:** 100+ career MLB innings (`COMP_RP_MIN_IP`)
+
+Lowered from an original 1,500/300/150 the same day (2026-08-31), on Rees's follow-up, specifically to widen the thinner role buckets (C/CF/DH/1B were only 14–20 candidates each at the original bars).
 
 Separate SP/RP thresholds are required, not optional — a bar that works for a starter excludes nearly every real career reliever, since relievers accrue innings far more slowly.
 
-**Real ceiling on the pool, confirmed against production data 2026-08-31, not a design choice:** of 1,260 hitters who clear 1,500 career AB, only ~339 still have a current ratings row in the latest refresh at all — the rest are long-retired players the game itself stopped tracking ratings for (the same gap already documented for retired-player CSV exports elsewhere in this project). This is automatic in the implementation — the established pool is only ever built from players who already have a row in `player_ratings_snapshots` for the refresh being computed, since that's where `computed` (and therefore every candidate) comes from — no separate "has ratings" check was needed. ~339 hitters is still a healthy pool once split by role bucket (26–90 players each, confirmed by role) — see §3.
+**Real ceiling on the pool, confirmed against production data 2026-08-31, not a design choice:** at the ORIGINAL 1,500 AB bar, 1,260 hitters cleared it, but only ~339 still had a current ratings row in the latest refresh at all — the rest are long-retired players the game itself stopped tracking ratings for (the same gap already documented for retired-player CSV exports elsewhere in this project). This is automatic in the implementation regardless of where the thresholds sit — the established pool is only ever built from players who already have a row in `player_ratings_snapshots` for the refresh being computed, since that's where `computed` (and therefore every candidate) comes from — no separate "has ratings" check was needed. See §3 for the current pool sizes by role at the lowered thresholds.
 
 ## 3. Role scoping
 
 Restricted to the **same role bucket** the site already computes every refresh (`player_computed.role`: C, SS, CF, INF, COF, 1B, DH for hitters; SP, RP for pitchers) — reusing existing, already-tuned logic rather than a second position system. A catcher prospect only ever compares against established catchers.
 
-Established pool sizes by role, as of the 2026-08-31 run (refresh_run_id 23): RP 271, SP 209, COF 51, INF 61, SS 31, DH 14, 1B 18, C 17, CF 20. Every bucket has real candidates; C/CF/DH/1B are the thinnest but still workable.
+Established pool sizes by role, as of the 2026-08-31 run at the current (lowered) thresholds: RP 314, SP 267, INF 121, COF 97, SS 52, 1B 44, C 38, DH 33, CF 30 — every bucket meaningfully larger than the original 1,500/300/150 thresholds gave (which ranged 14–271; see the git history on this file for those original numbers). CF and DH remain the thinnest, but no bucket is thin in an absolute sense anymore.
 
 ## 4. Which grades are compared
 
@@ -84,6 +86,6 @@ Excluded (returns `null`, no meta item rendered): any player who isn't in the pr
 ## 8. Known limitations, worth revisiting
 
 - **No true "legend" comps.** A long-retired star with no current ratings row can never surface as a comp, only someone the game still actively grades. This is a hard OOTP data-tracking gap (documented elsewhere in this project for retired-player exports), not something this feature can work around.
-- **Thin buckets for C/CF/DH/1B** (14–20 established candidates each, vs. 51–271 for the others) mean a comp in those buckets is drawn from a smaller field — still real, but worth keeping in mind if a specific comp there looks like a stretch.
+- **CF and DH are still the thinnest buckets** (30 and 33 established candidates, vs. 38–314 for the others) — a comp there is drawn from a smaller field than most, still real but worth keeping in mind if a specific comp looks like a stretch. This was worse before the 2026-08-31 threshold lowering (14–20 in the thinnest buckets); it's a real, if reduced, structural limit rather than something a further threshold tweak alone fully erases.
 - **The similarity-score calibration (`30` → 0%) is a guess**, not fit to a real distribution of distances. If comps start clustering oddly high or low in practice, this is the first knob to revisit.
 - **Position granularity is role-bucket-level, not position-exact** (INF lumps 2B/3B together; COF lumps LF/RF together) — a deliberate choice given pool sizes at the time this was built, not a limitation nobody considered.
