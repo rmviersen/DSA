@@ -397,21 +397,37 @@ body {
    FarmSystemReportBody) narrowed slightly from the site's normal 1200px
    (2026-08-30, Rees's ask) -- the cards read better a bit tighter. Same
    .site-main:has() mechanism as the org-minors rule above, just narrowing
-   instead of widening. Still wide enough for /prospects' side-by-side
-   Top Prospects + System Rankings layout.
-   Widened back to the site's normal 1200px the next day (2026-08-31,
-   Rees's ask) to give the new "Comp" meta item (see .prospect-meta-item's
-   Comp entry in ProspectTable.tsx) room to sit on the same line as the
-   rest of the row instead of wrapping -- checked directly against the
-   real top-200 list: at 1200px only 4 rows still wrap, all genuine edge
-   cases stacking a long affiliate-league label ("MLB (MXC)"), a long
-   draft string (e.g. "R21 Pk647"), AND a two-word comp name all in one
-   row. Went with landing back on the site's own established default
-   rather than an arbitrary new number once it was already this close to
-   fully solving it (a full 1300px got the last 4 rows too, but felt like
-   more than "a bit" wider). */
+   instead of widening.
+   Widened twice since (2026-08-31, both Rees's asks, same day): first to
+   1200px to give the new "Comp" meta item room to sit on one line: then to
+   1270px once .prospect-namerow (see its own comment) had to grow from
+   220px to 285px to stop a real name+icon-vs-meta-line overlap bug, which
+   ate back into the room the 1200px bump had just bought. Checked directly
+   against the real top-200 list at each step rather than guessing -- at
+   1270px, /TBL/prospects (the full-width, single-table page) wraps only 3
+   rows, all genuine edge cases stacking a long affiliate-league label, a
+   long draft string, AND a two-word comp name all at once.
+   NOTE the overlap fix itself does NOT depend on this width -- it's
+   guaranteed by .prospect-namerow's own fixed width alone, confirmed by
+   testing overlap=0 at every width from 1150px up. This number is tuned
+   purely to minimize meta-line WRAPPING (a lesser, pre-existing cosmetic
+   issue), not to prevent overlap.
+   Known remaining gap: /prospects specifically (showRankings=true, Top
+   Prospects + System Rankings side by side) splits this width between two
+   tables, so the Top Prospects side gets meaningfully less room than on
+   /TBL/prospects and most of its rows DO still wrap at 1270px -- confirmed
+   this is still overlap-free there too, just more wrapped than the
+   standalone page. Actually fitting both columns wrap-free would need
+   ~1800px total (measured directly), which would force horizontal
+   scrolling on any ordinary laptop screen -- not a trade worth making for
+   /prospects, the internal owner-only working page, when the guest-facing
+   /TBL/prospects (which never shows System Rankings alongside it) already
+   looks right at this width. A real fix for /prospects specifically would
+   mean changing that page's layout (e.g. stacking the two tables instead
+   of side-by-side), not another width bump -- flag to Rees if that's
+   wanted. */
 .site-main:has(.prospects-report-page) {
-  max-width: 1200px;
+  max-width: 1270px;
 }
 
 .page-header {
@@ -777,18 +793,26 @@ tbody tr:last-child td {
    name length, so .prospect-details (the meta line + stat line) started at
    a different horizontal position on every single card. That's what made
    scrolling down the list hard to read: nothing lined up row to row.
-   220px comfortably fits the longest real name in the current top-200 pool
-   (18 characters, e.g. "Mauricio Dominguez") plus a role badge and the gap
-   between them, checked directly against the database rather than guessed.
-   A name longer than that still just overflows onto more width rather than
-   wrapping or clipping -- there's no hard truncation here, only a
-   consistent MINIMUM alignment point for the common case. */
+   The first pass at this (220px) was measured wrong -- estimated from
+   character count instead of actually rendering the longest real names,
+   and came in well short. A fixed-width flex item doesn't wrap or clip its
+   overflow, it just renders past its own box edge, so real names longer
+   than 220px were visually overlapping .prospect-details instead of
+   forcing more room for themselves -- exactly the bug Rees caught.
+   Re-measured directly in the browser (2026-08-31, same-day fix):
+   "Mauricio Dominguez" needs 278px in the OWNER view specifically (name +
+   role badge + the small StatsPlus ↗ icon owners get alongside their
+   internal-link name -- guests never see that icon and need ~22px less).
+   285px covers the real owner-view max with a small buffer; the table's
+   own max-width grew alongside this (see .site-main:has(.prospects-report
+   -page) below) so widening this column doesn't just re-introduce
+   meta-line wrapping instead of overlap. */
 .prospect-namerow {
   display: flex;
   align-items: baseline;
   gap: 0.625rem;
   flex-shrink: 0;
-  width: 220px;
+  width: 285px;
 }
 
 /* Meta line and stat line now share this column -- both are direct

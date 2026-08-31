@@ -114,9 +114,18 @@ export async function getTeamRankings(): Promise<TeamRankingRow[]> {
     .map((r) => [r.team_id, r]));
 
   // # of this org's players in the current leaguewide top 100 prospects.
+  // "players!player_computed_player_id_fkey" (not the bare "players"
+  // shorthand), 2026-08-31 gotcha: player_computed gained a SECOND foreign
+  // key to players the same day (comp_player_id, for the player-comp
+  // feature), so PostgREST can no longer infer which relationship a bare
+  // "players(...)" embed means -- it started hard-erroring with PGRST201
+  // ("more than one relationship was found") on every embedded join from
+  // this table, breaking /prospects and /TBL/prospects outright. Every
+  // embedded players(...) join off player_computed anywhere in this file
+  // needs this same explicit constraint-name disambiguation now.
   const top100Rows = await fetchAll<{ player_id: number; players: { organization_id: number | null } | null }>((from, to) =>
     supabase.from("player_computed")
-      .select("player_id,players(organization_id)")
+      .select("player_id,players!player_computed_player_id_fkey(organization_id)")
       .eq("refresh_run_id", refreshRunId).not("prospect_rank", "is", null).lte("prospect_rank", 100)
       .range(from, to) as never
   );
@@ -134,7 +143,7 @@ export async function getTeamRankings(): Promise<TeamRankingRow[]> {
   // isn't the number shown next to them anymore.
   const top3Rows = await fetchAll<{ player_id: number; prospect_org_rank: number | null; prospect_rank: number | null; role: string | null; players: { first_name: string; last_name: string; organization_id: number | null } | null }>((from, to) =>
     supabase.from("player_computed")
-      .select("player_id,prospect_org_rank,prospect_rank,role,players(first_name,last_name,organization_id)")
+      .select("player_id,prospect_org_rank,prospect_rank,role,players!player_computed_player_id_fkey(first_name,last_name,organization_id)")
       .eq("refresh_run_id", refreshRunId).not("prospect_org_rank", "is", null).lte("prospect_org_rank", 3)
       .range(from, to) as never
   );
