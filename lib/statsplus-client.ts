@@ -152,9 +152,28 @@ async function fetchCurrentGameDate(cfg: StatsPlusConfig): Promise<string | null
   return body.current_date ?? null;
 }
 
+/**
+ * The trade block page (`.../thebigleague/tradeblock/`, no `/api/` in the
+ * path -- a real site page, not a CSV/JSON endpoint) is public with no auth,
+ * confirmed via a plain curl 200. The player_id -> asking-price-note map is
+ * baked directly into the page's HTML as a `<script id="tradeblock-pids-
+ * data" type="application/json">{...}</script>` tag -- no separate AJAX call
+ * to reverse-engineer, no per-player scraping needed, one page fetch covers
+ * the whole league's board. Returns the raw HTML; callers (scripts/scrape-
+ * trade-block.ts) extract and parse the JSON themselves, keeping this client
+ * focused on fetching, not parsing -- same division as fetchPublicCsv/
+ * parseCsv above. Derives the league's root URL from `cfg.baseUrl` (which
+ * always ends in `/api`) rather than requiring a second config value.
+ */
+async function fetchTradeBlockHtml(cfg: StatsPlusConfig): Promise<string> {
+  const leagueRoot = cfg.baseUrl.replace(/\/api\/?$/, "");
+  return fetchText(`${leagueRoot}/tradeblock/`);
+}
+
 export function makeStatsPlusClient(cfg: StatsPlusConfig) {
   return {
     teams: () => fetchPublicCsv(cfg, "teams"),
+    tradeBlockHtml: () => fetchTradeBlockHtml(cfg),
     players: () => fetchPublicCsv(cfg, "players"),
     contracts: () => fetchPublicCsv(cfg, "contract"),
     contractExtensions: () => fetchPublicCsv(cfg, "contractextension"),

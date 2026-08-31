@@ -3304,6 +3304,30 @@ export type Database = {
           },
         ]
       }
+      trade_block_snapshots: {
+        Row: {
+          captured_at: string
+          id: number
+          note: string
+          player_id: number
+          refresh_run_id: number
+        }
+        Insert: {
+          captured_at?: string
+          id?: never
+          note?: string
+          player_id: number
+          refresh_run_id: number
+        }
+        Update: {
+          captured_at?: string
+          id?: never
+          note?: string
+          player_id?: number
+          refresh_run_id?: number
+        }
+        Relationships: []
+      }
     }
     Views: {
       [_ in never]: never
