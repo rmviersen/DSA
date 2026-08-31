@@ -170,10 +170,26 @@ async function fetchTradeBlockHtml(cfg: StatsPlusConfig): Promise<string> {
   return fetchText(`${leagueRoot}/tradeblock/`);
 }
 
+/**
+ * A single player's trade-transaction history (`.../player/{id}?page=trade`)
+ * -- public, no auth, confirmed accurate against a real traded player.
+ * Phase 2 of the transaction-history work (2026-08-31) -- see
+ * scripts/scrape-trade-history.ts for the parsing side. Deliberately scoped
+ * to players.was_traded=true only (276 players as of this writing, not the
+ * full ~45,684-player universe) -- see that script's own header comment for
+ * why the earlier "not practical" verdict on this specific piece no longer
+ * holds.
+ */
+async function fetchPlayerTradeHistoryHtml(cfg: StatsPlusConfig, playerId: number): Promise<string> {
+  const leagueRoot = cfg.baseUrl.replace(/\/api\/?$/, "");
+  return fetchText(`${leagueRoot}/player/${playerId}?page=trade`);
+}
+
 export function makeStatsPlusClient(cfg: StatsPlusConfig) {
   return {
     teams: () => fetchPublicCsv(cfg, "teams"),
     tradeBlockHtml: () => fetchTradeBlockHtml(cfg),
+    playerTradeHistoryHtml: (playerId: number) => fetchPlayerTradeHistoryHtml(cfg, playerId),
     players: () => fetchPublicCsv(cfg, "players"),
     contracts: () => fetchPublicCsv(cfg, "contract"),
     contractExtensions: () => fetchPublicCsv(cfg, "contractextension"),

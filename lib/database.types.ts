@@ -3328,6 +3328,93 @@ export type Database = {
         }
         Relationships: []
       }
+      trade_event_items: {
+        Row: {
+          cash_amount: number | null
+          id: number
+          player_id: number | null
+          side: string
+          trade_event_id: number
+        }
+        Insert: {
+          cash_amount?: number | null
+          id?: never
+          player_id?: number | null
+          side: string
+          trade_event_id: number
+        }
+        Update: {
+          cash_amount?: number | null
+          id?: never
+          player_id?: number | null
+          side?: string
+          trade_event_id?: number
+        }
+        Relationships: [
+          {
+            foreignKeyName: "trade_event_items_player_id_fkey"
+            columns: ["player_id"]
+            isOneToOne: false
+            referencedRelation: "players"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "trade_event_items_trade_event_id_fkey"
+            columns: ["trade_event_id"]
+            isOneToOne: false
+            referencedRelation: "trade_events"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      trade_events: {
+        Row: {
+          captured_at: string
+          id: number
+          team_a_id: number | null
+          team_a_name: string | null
+          team_b_id: number | null
+          team_b_name: string | null
+          trade_date: string
+          trade_key: string
+        }
+        Insert: {
+          captured_at?: string
+          id?: never
+          team_a_id?: number | null
+          team_a_name?: string | null
+          team_b_id?: number | null
+          team_b_name?: string | null
+          trade_date: string
+          trade_key: string
+        }
+        Update: {
+          captured_at?: string
+          id?: never
+          team_a_id?: number | null
+          team_a_name?: string | null
+          team_b_id?: number | null
+          team_b_name?: string | null
+          trade_date?: string
+          trade_key?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "trade_events_team_a_id_fkey"
+            columns: ["team_a_id"]
+            isOneToOne: false
+            referencedRelation: "teams"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "trade_events_team_b_id_fkey"
+            columns: ["team_b_id"]
+            isOneToOne: false
+            referencedRelation: "teams"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
     }
     Views: {
       [_ in never]: never
