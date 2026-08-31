@@ -59,6 +59,49 @@ async function main() {
     supabase.from("player_ratings_snapshots").select("*").eq("refresh_run_id", refreshRunId).range(from, to) as never
   );
   console.log(`  ${ratings.length} ratings rows`);
+  // Used by the player-comp section further down to look up an established
+  // candidate's raw CURRENT grades by id (the `ratings` array above is only
+  // ever iterated in bulk elsewhere in this file).
+  const ratingsByPlayer = new Map(ratings.map((r) => [r.player_id, r]));
+
+  // --- Player-comp career workload, 2026-08-31 (Rees's spec) ----------
+  // Career MLB AB/IP for EVERY player who's ever appeared at level_id=1,
+  // summed across ALL refresh runs -- not scoped to refreshRunId, unlike
+  // almost everything else in this file, because a career total by
+  // definition has to look further back than "the current refresh." Same
+  // dedup need as lib/player-detail-query.ts's latestPerStint (a player's
+  // early-career years only exist under the old one-time backfill run, and
+  // a season that got re-pulled under a later run shouldn't be double
+  // counted) -- reimplemented locally rather than imported, since that
+  // helper lives in a browser-reachable lib module and this is a standalone
+  // node script. ~76k total rows across both tables as of 2026-08-31 --
+  // fetchAll's normal pagination handles that fine, this is a one-time cost
+  // per script run, not per-refresh.
+  console.log("Loading career MLB workload (for the player-comp established-player pool)...");
+  function latestPerStint<T extends { player_id: number; year: number; stint: number | null; refresh_run_id: number }>(rowsIn: T[]): T[] {
+    const best = new Map<string, T>();
+    for (const row of rowsIn) {
+      const key = `${row.player_id}|${row.year}|${row.stint ?? 0}`;
+      const existing = best.get(key);
+      if (!existing || row.refresh_run_id > existing.refresh_run_id) best.set(key, row);
+    }
+    return [...best.values()];
+  }
+  const careerBatRows = await fetchAll<{ player_id: number; year: number; stint: number | null; refresh_run_id: number; ab: number | null }>((from, to) =>
+    supabase.from("player_batting_stats_snapshots").select("player_id,year,stint,refresh_run_id,ab").eq("level_id", 1).eq("split_id", 1).range(from, to) as never
+  );
+  const careerPitRows = await fetchAll<{ player_id: number; year: number; stint: number | null; refresh_run_id: number; ip: number | null }>((from, to) =>
+    supabase.from("player_pitching_stats_snapshots").select("player_id,year,stint,refresh_run_id,ip").eq("level_id", 1).eq("split_id", 1).range(from, to) as never
+  );
+  const careerAbByPlayer = new Map<number, number>();
+  for (const row of latestPerStint(careerBatRows)) {
+    careerAbByPlayer.set(row.player_id, (careerAbByPlayer.get(row.player_id) ?? 0) + (row.ab ?? 0));
+  }
+  const careerIpByPlayer = new Map<number, number>();
+  for (const row of latestPerStint(careerPitRows)) {
+    careerIpByPlayer.set(row.player_id, (careerIpByPlayer.get(row.player_id) ?? 0) + (row.ip ?? 0));
+  }
+  console.log(`  Career MLB AB known for ${careerAbByPlayer.size} players, IP known for ${careerIpByPlayer.size}`);
 
   console.log("Loading players (for org/rookie-eligibility context)...");
   // .order("id") required -- see HANDOFF.md gotcha 13. Without it, this
@@ -326,6 +369,104 @@ async function main() {
     return currentYear + flooredYears;
   }
 
+  // --- Player comp, 2026-08-31 (Rees's spec) --------------------------
+  // Methodology proposed and approved 2026-08-31: for a prospect, find the
+  // established MLB player whose CURRENT raw tool grades most closely match
+  // the prospect's POTENTIAL grades (current-only for any tool with no
+  // potential equivalent -- speed, stamina, every defensive sub-grade --
+  // since there's no other value to use for either side there), restricted
+  // to the SAME role bucket (a catcher prospect only ever compares against
+  // established catchers), using the SAME per-field weights already in
+  // `rating_weights` that drive Overall/Potential everywhere else on this
+  // site -- one shared definition of "what matters," not a second one
+  // invented just for this. See prospect-comp-methodology.md for the full
+  // write-up this was approved from.
+  //
+  // Deliberately does NOT replicate the rating engine's composite-only
+  // adjustments (the SP +5 Stuff bonus, the Contact/Control floor gates,
+  // premium-position Batting multipliers) -- those exist to make Overall a
+  // fair single scalar, not to describe a player's actual tool grades, and
+  // folding them in here would distort a tool-for-tool comparison.
+  type CompDim = { weight: number; prospectValue: number; establishedValue: number };
+  const add = (dims: CompDim[], weight: number, prospectValue: number | null, establishedValue: number | null) => {
+    if (prospectValue === null || establishedValue === null) return;
+    dims.push({ weight, prospectValue, establishedValue });
+  };
+  // No dedicated per-pitch weight exists in rating_weights (the engine only
+  // counts *how many* pitches clear a quality bar, via qp/qpp) -- this
+  // borrows a fraction of the Stuff weight as a reasonable, tunable default
+  // rather than inventing an unrelated number. A pitch dimension is only
+  // included when at least one side actually throws it (nonzero raw grade)
+  // -- two zeros (neither throws it) isn't a real signal, while a
+  // zero-vs-real-grade pairing IS one (only one of them has that pitch).
+  const PITCH_GRADE_WEIGHT = weights.stuff / 8;
+  function buildCompDims(role: string, ph: "H" | "P", prospect: RatingsInput, established: RatingsInput): CompDim[] {
+    const dims: CompDim[] = [];
+    if (ph === "H") {
+      add(dims, weights.contact, prospect.pot_cntct, established.cntct);
+      add(dims, weights.gap, prospect.pot_gap, established.gap);
+      add(dims, weights.power, prospect.pot_pow, established.pow);
+      add(dims, weights.eye, prospect.pot_eye, established.eye);
+      add(dims, weights.avoid_ks, prospect.pot_ks, established.ks);
+      add(dims, weights.speed, prospect.speed, established.speed); // current-only, both sides
+      // Defensive sub-grades, scoped to whichever ones the rating engine
+      // itself treats as relevant for this role (matching cRating/
+      // infRating/ofRating's own internal weights in rating-engine.ts, just
+      // scaled down here by the overall `fielding` weight since that's how
+      // much defense counts relative to the bat everywhere else on the
+      // site). 1B/DH intentionally get none -- this data model has no
+      // distinct defensive sub-grade for either.
+      if (role === "C") {
+        add(dims, weights.fielding / 3, prospect.cblk, established.cblk);
+        add(dims, weights.fielding / 3, prospect.cfrm, established.cfrm);
+        add(dims, weights.fielding / 3, prospect.carm, established.carm);
+      } else if (role === "SS" || role === "INF") {
+        add(dims, (weights.fielding * 2) / 5, prospect.ifr, established.ifr);
+        add(dims, weights.fielding / 5, prospect.ife, established.ife);
+        add(dims, weights.fielding / 5, prospect.ifa, established.ifa);
+        add(dims, weights.fielding / 5, prospect.tdp, established.tdp);
+      } else if (role === "CF" || role === "COF") {
+        add(dims, (weights.fielding * 2) / 4, prospect.ofr, established.ofr);
+        add(dims, weights.fielding / 4, prospect.ofe, established.ofe);
+        add(dims, weights.fielding / 4, prospect.ofa, established.ofa);
+      }
+    } else {
+      add(dims, weights.stuff, prospect.pot_stf, established.stf);
+      add(dims, weights.movement, prospect.pot_mov, established.mov);
+      add(dims, weights.control, prospect.pot_ctrl, established.ctrl);
+      add(dims, weights.pbabip, prospect.pot_pbabip, established.pbabip);
+      add(dims, weights.stamina, prospect.stm, established.stm); // current-only, both sides
+      const pitchPairs: [number | null, number | null][] = [
+        [prospect.pot_fst, established.fst], [prospect.pot_snk, established.snk],
+        [prospect.pot_crv, established.crv], [prospect.pot_sld, established.sld],
+        [prospect.pot_chg, established.chg], [prospect.pot_cutt, established.cutt],
+        [prospect.pot_splt, established.splt], [prospect.pot_frk, established.frk],
+        [prospect.pot_circhg, established.circhg], [prospect.pot_knbl, established.knbl],
+        [prospect.pot_kncrv, established.kncrv],
+      ];
+      for (const [prospectVal, establishedVal] of pitchPairs) {
+        if ((prospectVal ?? 0) === 0 && (establishedVal ?? 0) === 0) continue;
+        add(dims, PITCH_GRADE_WEIGHT, prospectVal, establishedVal);
+      }
+    }
+    return dims;
+  }
+  function compDistance(dims: CompDim[]): number | null {
+    if (dims.length === 0) return null;
+    const totalWeight = dims.reduce((s, d) => s + d.weight, 0);
+    if (totalWeight <= 0) return null;
+    const weightedSqSum = dims.reduce((s, d) => s + d.weight * (d.prospectValue - d.establishedValue) ** 2, 0);
+    return Math.sqrt(weightedSqSum / totalWeight);
+  }
+  // First-pass linear calibration (2026-08-31): `distance` is a weighted
+  // RMS difference in 20-80-scale grade points, so 0 is a perfect match.
+  // This threshold (the distance treated as "0% similar") is a starting
+  // guess, not derived from any real distribution yet -- worth revisiting
+  // once real comps have actually been eyeballed against real players.
+  const COMP_DISTANCE_FOR_ZERO_SIMILARITY = 30;
+  const distanceToSimilarity = (distance: number) =>
+    Math.max(0, Math.min(100, 100 - (distance / COMP_DISTANCE_FOR_ZERO_SIMILARITY) * 100));
+
   // --- ranks ---------------------------------------------------------
   // League-wide, by our computed Overall / Potential.
   const byOverallDesc = [...computed].sort((a, b) => b.overall - a.overall);
@@ -406,6 +547,63 @@ async function main() {
     sorted.forEach((c, i) => prospectRoleRankByPlayer.set(c.player_id, i + 1));
   }
 
+  // Established-player pool, per role bucket -- "established" means real
+  // career MLB workload, separate thresholds for hitters vs. the two
+  // pitcher roles since IP accrues at wildly different rates for a starter
+  // vs. a reliever (a bar that works for one would exclude nearly every
+  // real career reliever). Confirmed against real data 2026-08-31: 1500 AB
+  // clears ~1260 hitters, but only ~340 of them still have a CURRENT
+  // ratings row at all (the rest are long-retired players the game itself
+  // stopped tracking ratings for -- the same gap already documented for
+  // retired-player exports elsewhere in this project) -- that ~340 is the
+  // real usable pool, and it's automatic here: `computed` (built from
+  // `ratings`) only ever contains players who HAVE a current ratings row.
+  const COMP_HITTER_MIN_AB = 1500;
+  const COMP_SP_MIN_IP = 300;
+  const COMP_RP_MIN_IP = 150;
+  const establishedByRole = new Map<string, { player_id: number; ratings: RatingsInput }[]>();
+  for (const c of computed) {
+    if (!c.role) continue;
+    const r = ratingsByPlayer.get(c.player_id);
+    if (!r) continue;
+    const isEstablished = c.ph === "H"
+      ? (careerAbByPlayer.get(c.player_id) ?? 0) >= COMP_HITTER_MIN_AB
+      : (c.role === "SP" ? (careerIpByPlayer.get(c.player_id) ?? 0) >= COMP_SP_MIN_IP : (careerIpByPlayer.get(c.player_id) ?? 0) >= COMP_RP_MIN_IP);
+    if (!isEstablished) continue;
+    if (!establishedByRole.has(c.role)) establishedByRole.set(c.role, []);
+    establishedByRole.get(c.role)!.push({ player_id: c.player_id, ratings: r });
+  }
+  console.log("Established comp-pool sizes by role: " +
+    [...establishedByRole.entries()].map(([role, list]) => `${role}=${list.length}`).join(", "));
+
+  // For every prospect, the nearest established player in the SAME role
+  // bucket by weighted tool-grade distance (see buildCompDims/compDistance
+  // above). A prospect who's already cleared the established bar himself
+  // is excluded as his own comp candidate (rare, but possible for an older
+  // "prospect" with real MLB burn already -- see the age<=25/mlb_service_
+  // days<45 prospect-pool gate above, which still lets some real workload
+  // through). No comp at all (left null) only happens if the role bucket's
+  // established pool is empty, which real data shows doesn't currently
+  // happen (every one of the 9 role buckets has real candidates).
+  console.log("Computing player comps for the prospect pool...");
+  const compByPlayer = new Map<number, { comp_player_id: number; comp_similarity: number }>();
+  for (const c of prospectPool) {
+    if (!c.role) continue;
+    const prospectRatings = ratingsByPlayer.get(c.player_id);
+    if (!prospectRatings) continue;
+    const candidates = establishedByRole.get(c.role) ?? [];
+    let best: { player_id: number; distance: number } | null = null;
+    for (const candidate of candidates) {
+      if (candidate.player_id === c.player_id) continue;
+      const distance = compDistance(buildCompDims(c.role, c.ph, prospectRatings, candidate.ratings));
+      if (distance !== null && (best === null || distance < best.distance)) best = { player_id: candidate.player_id, distance };
+    }
+    if (best !== null) {
+      compByPlayer.set(c.player_id, { comp_player_id: best.player_id, comp_similarity: Math.round(distanceToSimilarity(best.distance) * 10) / 10 });
+    }
+  }
+  console.log(`  ${compByPlayer.size} of ${prospectPool.length} prospects got a comp`);
+
   const rows = computed.map((c) => ({
     refresh_run_id: refreshRunId,
     player_id: c.player_id,
@@ -422,6 +620,8 @@ async function main() {
     prospect_org_rank: prospectOrgRankByPlayer.get(c.player_id) ?? null,
     prospect_role_rank: prospectRoleRankByPlayer.get(c.player_id) ?? null,
     eta: prospectRankByPlayer.has(c.player_id) ? estimateEta(c.role, effectiveLevel(playerById.get(c.player_id)?.level, playerById.get(c.player_id)?.league_id), c.overall, c.potential) : null,
+    comp_player_id: compByPlayer.get(c.player_id)?.comp_player_id ?? null,
+    comp_similarity: compByPlayer.get(c.player_id)?.comp_similarity ?? null,
     captured_at: capturedAt,
   }));
 

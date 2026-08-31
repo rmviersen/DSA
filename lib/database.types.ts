@@ -10,7 +10,7 @@ export type Database = {
   // Allows to automatically instantiate createClient with right options
   // instead of createClient<Database, { PostgrestVersion: 'XX' }>(URL, KEY)
   __InternalSupabase: {
-    PostgrestVersion: "14.17"
+    PostgrestVersion: "14.5"
   }
   public: {
     Tables: {
@@ -1286,6 +1286,8 @@ export type Database = {
           batting_p: number | null
           c_rating: number | null
           captured_at: string
+          comp_player_id: number | null
+          comp_similarity: number | null
           draft_org_rank: number | null
           eta: number | null
           fielding: number | null
@@ -1325,6 +1327,8 @@ export type Database = {
           batting_p?: number | null
           c_rating?: number | null
           captured_at: string
+          comp_player_id?: number | null
+          comp_similarity?: number | null
           draft_org_rank?: number | null
           eta?: number | null
           fielding?: number | null
@@ -1364,6 +1368,8 @@ export type Database = {
           batting_p?: number | null
           c_rating?: number | null
           captured_at?: string
+          comp_player_id?: number | null
+          comp_similarity?: number | null
           draft_org_rank?: number | null
           eta?: number | null
           fielding?: number | null
@@ -1399,6 +1405,13 @@ export type Database = {
           weights_id?: number | null
         }
         Relationships: [
+          {
+            foreignKeyName: "player_computed_comp_player_id_fkey"
+            columns: ["comp_player_id"]
+            isOneToOne: false
+            referencedRelation: "players"
+            referencedColumns: ["id"]
+          },
           {
             foreignKeyName: "player_computed_player_id_fkey"
             columns: ["player_id"]

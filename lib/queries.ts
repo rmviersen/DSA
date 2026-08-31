@@ -206,6 +206,18 @@ export interface PlayerRow extends RatingsSlice {
   draft_year: number | null;
   draft_round: number | null;
   draft_overall_pick: number | null;
+  // Nearest established-MLB-player comp (2026-08-31) -- see
+  // scripts/compute-ratings.ts's "Player comp" section for the full
+  // methodology. compPlayerId/compSimilarity come straight from
+  // player_computed; compPlayerName is resolved here since the comp
+  // target is often someone NOT already in this query's own result set
+  // (an established veteran, not a fellow prospect). All null for anyone
+  // with no comp -- a non-prospect (comps are only computed for the
+  // prospect pool) or, in principle, a prospect whose role bucket had no
+  // established candidates at all (not currently observed in real data).
+  compPlayerId: number | null;
+  compPlayerName: string | null;
+  compSimilarity: number | null;
 }
 
 // PERFORMANCE FIX (2026-08-25): this function used to fetch `players` FIRST
@@ -246,7 +258,7 @@ async function fetchComputedPlayers(opts: { orgId?: number; prospectsOnly?: bool
   const sortCol = opts.prospectsOnly ? "prospect_potential" : "overall";
   let cq = supabase
     .from("player_computed")
-    .select("player_id,overall,potential,prospect_potential,prospect_rank,org_rank,prospect_org_rank,prospect_role_rank,role,ph")
+    .select("player_id,overall,potential,prospect_potential,prospect_rank,org_rank,prospect_org_rank,prospect_role_rank,role,ph,comp_player_id,comp_similarity")
     .eq("refresh_run_id", refreshRunId)
     .order(sortCol, { ascending: false })
     .limit(opts.limit + 50);
@@ -254,9 +266,24 @@ async function fetchComputedPlayers(opts: { orgId?: number; prospectsOnly?: bool
   if (idFilter) cq = cq.in("player_id", idFilter);
   const { data: computedData, error: computedErr } = await cq;
   if (computedErr) throw computedErr;
-  const computed = computedData as { player_id: number; overall: number; potential: number; prospect_potential: number; prospect_rank: number | null; org_rank: number | null; prospect_org_rank: number | null; prospect_role_rank: number | null; role: string | null; ph: "H" | "P" | null }[];
+  const computed = computedData as { player_id: number; overall: number; potential: number; prospect_potential: number; prospect_rank: number | null; org_rank: number | null; prospect_org_rank: number | null; prospect_role_rank: number | null; role: string | null; ph: "H" | "P" | null; comp_player_id: number | null; comp_similarity: number | null }[];
   const relevantIds = computed.map((c) => c.player_id);
   if (relevantIds.length === 0) return [];
+
+  // Comp targets are frequently NOT in relevantIds at all (an established
+  // veteran comp'd against a prospect is almost never also a top-200
+  // prospect himself) -- a separate small lookup, not reusable with the
+  // `players` fetch below.
+  const compPlayerIds = [...new Set(computed.map((c) => c.comp_player_id).filter((id): id is number => id !== null))];
+  const compNameById = new Map<number, string>();
+  if (compPlayerIds.length > 0) {
+    const { data: compPlayers, error: compErr } = await supabase
+      .from("players").select("id,first_name,last_name").in("id", compPlayerIds);
+    if (compErr) throw compErr;
+    (compPlayers as { id: number; first_name: string; last_name: string }[]).forEach((p) =>
+      compNameById.set(p.id, `${p.first_name} ${p.last_name}`)
+    );
+  }
 
   // Now scoped to just the (at most opts.limit + 50) winning IDs -- fits in
   // one page/chunk in every realistic case, no more per-500 looping needed.
@@ -367,6 +394,9 @@ async function fetchComputedPlayers(opts: { orgId?: number; prospectsOnly?: bool
         // Normalize to null here so every consumer of PlayerRow gets a
         // consistent "not drafted" signal instead of a misleading "0".
         draft_year: p.draft_year || null, draft_round: p.draft_round || null, draft_overall_pick: p.draft_overall_pick || null,
+        compPlayerId: c.comp_player_id,
+        compPlayerName: c.comp_player_id !== null ? (compNameById.get(c.comp_player_id) ?? null) : null,
+        compSimilarity: c.comp_similarity,
         ...rt,
       };
     })
