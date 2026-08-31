@@ -14,6 +14,152 @@ export type Database = {
   }
   public: {
     Tables: {
+      contract_extension_snapshots: {
+        Row: {
+          allstar_bonus: number | null
+          captured_at: string
+          contract_league_id: number | null
+          contract_team_id: number | null
+          current_year: number | null
+          cyyoung_bonus: number | null
+          id: number
+          is_major: boolean | null
+          last_year_option_buyout: number | null
+          last_year_player_option: boolean | null
+          last_year_team_option: boolean | null
+          last_year_vesting_option: boolean | null
+          league_id: number | null
+          minimum_ip: number | null
+          minimum_ip_bonus: number | null
+          minimum_pa: number | null
+          minimum_pa_bonus: number | null
+          mvp_bonus: number | null
+          next_last_year_option_buyout: number | null
+          next_last_year_player_option: boolean | null
+          next_last_year_team_option: boolean | null
+          next_last_year_vesting_option: boolean | null
+          no_trade: boolean | null
+          player_id: number
+          refresh_run_id: number
+          salary0: number | null
+          salary1: number | null
+          salary10: number | null
+          salary11: number | null
+          salary12: number | null
+          salary13: number | null
+          salary14: number | null
+          salary2: number | null
+          salary3: number | null
+          salary4: number | null
+          salary5: number | null
+          salary6: number | null
+          salary7: number | null
+          salary8: number | null
+          salary9: number | null
+          season_year: number | null
+          team_id: number | null
+          years: number | null
+        }
+        Insert: {
+          allstar_bonus?: number | null
+          captured_at: string
+          contract_league_id?: number | null
+          contract_team_id?: number | null
+          current_year?: number | null
+          cyyoung_bonus?: number | null
+          id?: never
+          is_major?: boolean | null
+          last_year_option_buyout?: number | null
+          last_year_player_option?: boolean | null
+          last_year_team_option?: boolean | null
+          last_year_vesting_option?: boolean | null
+          league_id?: number | null
+          minimum_ip?: number | null
+          minimum_ip_bonus?: number | null
+          minimum_pa?: number | null
+          minimum_pa_bonus?: number | null
+          mvp_bonus?: number | null
+          next_last_year_option_buyout?: number | null
+          next_last_year_player_option?: boolean | null
+          next_last_year_team_option?: boolean | null
+          next_last_year_vesting_option?: boolean | null
+          no_trade?: boolean | null
+          player_id: number
+          refresh_run_id: number
+          salary0?: number | null
+          salary1?: number | null
+          salary10?: number | null
+          salary11?: number | null
+          salary12?: number | null
+          salary13?: number | null
+          salary14?: number | null
+          salary2?: number | null
+          salary3?: number | null
+          salary4?: number | null
+          salary5?: number | null
+          salary6?: number | null
+          salary7?: number | null
+          salary8?: number | null
+          salary9?: number | null
+          season_year?: number | null
+          team_id?: number | null
+          years?: number | null
+        }
+        Update: {
+          allstar_bonus?: number | null
+          captured_at?: string
+          contract_league_id?: number | null
+          contract_team_id?: number | null
+          current_year?: number | null
+          cyyoung_bonus?: number | null
+          id?: never
+          is_major?: boolean | null
+          last_year_option_buyout?: number | null
+          last_year_player_option?: boolean | null
+          last_year_team_option?: boolean | null
+          last_year_vesting_option?: boolean | null
+          league_id?: number | null
+          minimum_ip?: number | null
+          minimum_ip_bonus?: number | null
+          minimum_pa?: number | null
+          minimum_pa_bonus?: number | null
+          mvp_bonus?: number | null
+          next_last_year_option_buyout?: number | null
+          next_last_year_player_option?: boolean | null
+          next_last_year_team_option?: boolean | null
+          next_last_year_vesting_option?: boolean | null
+          no_trade?: boolean | null
+          player_id?: number
+          refresh_run_id?: number
+          salary0?: number | null
+          salary1?: number | null
+          salary10?: number | null
+          salary11?: number | null
+          salary12?: number | null
+          salary13?: number | null
+          salary14?: number | null
+          salary2?: number | null
+          salary3?: number | null
+          salary4?: number | null
+          salary5?: number | null
+          salary6?: number | null
+          salary7?: number | null
+          salary8?: number | null
+          salary9?: number | null
+          season_year?: number | null
+          team_id?: number | null
+          years?: number | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "contract_extension_snapshots_refresh_run_id_fkey"
+            columns: ["refresh_run_id"]
+            isOneToOne: false
+            referencedRelation: "refresh_runs"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       contract_extensions: {
         Row: {
           allstar_bonus: number | null
@@ -150,6 +296,152 @@ export type Database = {
             columns: ["player_id"]
             isOneToOne: true
             referencedRelation: "players"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      contract_snapshots: {
+        Row: {
+          allstar_bonus: number | null
+          captured_at: string
+          contract_league_id: number | null
+          contract_team_id: number | null
+          current_year: number | null
+          cyyoung_bonus: number | null
+          id: number
+          is_major: boolean | null
+          last_year_option_buyout: number | null
+          last_year_player_option: boolean | null
+          last_year_team_option: boolean | null
+          last_year_vesting_option: boolean | null
+          league_id: number | null
+          minimum_ip: number | null
+          minimum_ip_bonus: number | null
+          minimum_pa: number | null
+          minimum_pa_bonus: number | null
+          mvp_bonus: number | null
+          next_last_year_option_buyout: number | null
+          next_last_year_player_option: boolean | null
+          next_last_year_team_option: boolean | null
+          next_last_year_vesting_option: boolean | null
+          no_trade: boolean | null
+          player_id: number
+          refresh_run_id: number
+          salary0: number | null
+          salary1: number | null
+          salary10: number | null
+          salary11: number | null
+          salary12: number | null
+          salary13: number | null
+          salary14: number | null
+          salary2: number | null
+          salary3: number | null
+          salary4: number | null
+          salary5: number | null
+          salary6: number | null
+          salary7: number | null
+          salary8: number | null
+          salary9: number | null
+          season_year: number | null
+          team_id: number | null
+          years: number | null
+        }
+        Insert: {
+          allstar_bonus?: number | null
+          captured_at: string
+          contract_league_id?: number | null
+          contract_team_id?: number | null
+          current_year?: number | null
+          cyyoung_bonus?: number | null
+          id?: never
+          is_major?: boolean | null
+          last_year_option_buyout?: number | null
+          last_year_player_option?: boolean | null
+          last_year_team_option?: boolean | null
+          last_year_vesting_option?: boolean | null
+          league_id?: number | null
+          minimum_ip?: number | null
+          minimum_ip_bonus?: number | null
+          minimum_pa?: number | null
+          minimum_pa_bonus?: number | null
+          mvp_bonus?: number | null
+          next_last_year_option_buyout?: number | null
+          next_last_year_player_option?: boolean | null
+          next_last_year_team_option?: boolean | null
+          next_last_year_vesting_option?: boolean | null
+          no_trade?: boolean | null
+          player_id: number
+          refresh_run_id: number
+          salary0?: number | null
+          salary1?: number | null
+          salary10?: number | null
+          salary11?: number | null
+          salary12?: number | null
+          salary13?: number | null
+          salary14?: number | null
+          salary2?: number | null
+          salary3?: number | null
+          salary4?: number | null
+          salary5?: number | null
+          salary6?: number | null
+          salary7?: number | null
+          salary8?: number | null
+          salary9?: number | null
+          season_year?: number | null
+          team_id?: number | null
+          years?: number | null
+        }
+        Update: {
+          allstar_bonus?: number | null
+          captured_at?: string
+          contract_league_id?: number | null
+          contract_team_id?: number | null
+          current_year?: number | null
+          cyyoung_bonus?: number | null
+          id?: never
+          is_major?: boolean | null
+          last_year_option_buyout?: number | null
+          last_year_player_option?: boolean | null
+          last_year_team_option?: boolean | null
+          last_year_vesting_option?: boolean | null
+          league_id?: number | null
+          minimum_ip?: number | null
+          minimum_ip_bonus?: number | null
+          minimum_pa?: number | null
+          minimum_pa_bonus?: number | null
+          mvp_bonus?: number | null
+          next_last_year_option_buyout?: number | null
+          next_last_year_player_option?: boolean | null
+          next_last_year_team_option?: boolean | null
+          next_last_year_vesting_option?: boolean | null
+          no_trade?: boolean | null
+          player_id?: number
+          refresh_run_id?: number
+          salary0?: number | null
+          salary1?: number | null
+          salary10?: number | null
+          salary11?: number | null
+          salary12?: number | null
+          salary13?: number | null
+          salary14?: number | null
+          salary2?: number | null
+          salary3?: number | null
+          salary4?: number | null
+          salary5?: number | null
+          salary6?: number | null
+          salary7?: number | null
+          salary8?: number | null
+          salary9?: number | null
+          season_year?: number | null
+          team_id?: number | null
+          years?: number | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "contract_snapshots_refresh_run_id_fkey"
+            columns: ["refresh_run_id"]
+            isOneToOne: false
+            referencedRelation: "refresh_runs"
             referencedColumns: ["id"]
           },
         ]

@@ -138,10 +138,22 @@ async function main() {
     await upsertBatched(supabase, "players", (await sp.players()).map(map.mapPlayer), "id");
 
     console.log("Pulling contracts...");
-    await upsertBatched(supabase, "contracts", (await sp.contracts()).map(map.mapContract), "player_id");
+    {
+      const rows = await sp.contracts();
+      await upsertBatched(supabase, "contracts", rows.map(map.mapContract), "player_id");
+      // Also append to the history table (2026-08-31, Rees's ask) -- same raw
+      // rows, no second fetch. Trade-value analysis needs "what did this
+      // contract look like at the time," which the current-state table above
+      // can never answer since it's overwritten every refresh.
+      await insertBatched(supabase, "contract_snapshots", rows.map((r) => map.mapContractSnapshot(r, refreshRunId, capturedAt)));
+    }
 
     console.log("Pulling contract extensions...");
-    await upsertBatched(supabase, "contract_extensions", (await sp.contractExtensions()).map(map.mapContractExtension), "player_id");
+    {
+      const rows = await sp.contractExtensions();
+      await upsertBatched(supabase, "contract_extensions", rows.map(map.mapContractExtension), "player_id");
+      await insertBatched(supabase, "contract_extension_snapshots", rows.map((r) => map.mapContractExtensionSnapshot(r, refreshRunId, capturedAt)));
+    }
 
     console.log("Pulling draft results...");
     {

@@ -119,6 +119,24 @@ export function mapContractExtension(r: RawRow) {
   return { player_id: int(r["player_id"]), ...contractFields(r) };
 }
 
+// --- contract snapshots (2026-08-31) ---------------------------------------
+// `contracts`/`contract_extensions` above are current-state, overwritten every
+// refresh -- fine for "what's this deal right now," useless for reconstructing
+// contract terms as of a past trade. These two capture the identical raw
+// fields into an append-only history instead, tagged by refresh_run_id like
+// every other snapshot table. contractFields() already computes its own
+// `updated_at`, which doesn't apply to a snapshot row -- stripped out here in
+// favor of the passed-in captured_at, matching mapPlayerBatting/mapPlayerRatings.
+
+export function mapContractSnapshot(r: RawRow, refreshRunId: number, capturedAt: string) {
+  const { updated_at: _updatedAt, ...fields } = contractFields(r);
+  return { refresh_run_id: refreshRunId, player_id: int(r["player_id"]), ...fields, captured_at: capturedAt };
+}
+export function mapContractExtensionSnapshot(r: RawRow, refreshRunId: number, capturedAt: string) {
+  const { updated_at: _updatedAt, ...fields } = contractFields(r);
+  return { refresh_run_id: refreshRunId, player_id: int(r["player_id"]), ...fields, captured_at: capturedAt };
+}
+
 // draftYear is resolved by the caller from players.draft_year (2026-08-30
 // fix), NOT derived from "Time (UTC)" the way this used to work -- that
 // field is the real-world wall-clock moment StatsPlus logged the pick, not
