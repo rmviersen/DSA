@@ -12,6 +12,7 @@
     "import-draft-pool": "tsx scripts/import-draft-pool.ts",
     "scrape-trade-block": "tsx scripts/scrape-trade-block.ts",
     "scrape-trade-history": "tsx scripts/scrape-trade-history.ts",
+    "compute-market-rates": "tsx scripts/compute-market-rates.ts",
     "dev": "next dev",
     "build": "next build",
     "start": "next start"

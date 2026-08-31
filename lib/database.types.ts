@@ -1407,6 +1407,91 @@ export type Database = {
           },
         ]
       }
+      market_rate_curves: {
+        Row: {
+          computed_at: string
+          id: number
+          intercept: number
+          league_minimum_salary: number
+          max_overall_in_sample: number | null
+          min_overall_in_sample: number | null
+          refresh_run_id: number
+          sample_size: number
+          slope: number
+        }
+        Insert: {
+          computed_at?: string
+          id?: never
+          intercept: number
+          league_minimum_salary: number
+          max_overall_in_sample?: number | null
+          min_overall_in_sample?: number | null
+          refresh_run_id: number
+          sample_size: number
+          slope: number
+        }
+        Update: {
+          computed_at?: string
+          id?: never
+          intercept?: number
+          league_minimum_salary?: number
+          max_overall_in_sample?: number | null
+          min_overall_in_sample?: number | null
+          refresh_run_id?: number
+          sample_size?: number
+          slope?: number
+        }
+        Relationships: [
+          {
+            foreignKeyName: "market_rate_curves_refresh_run_id_fkey"
+            columns: ["refresh_run_id"]
+            isOneToOne: true
+            referencedRelation: "refresh_runs"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      market_rate_role_multipliers: {
+        Row: {
+          avg_actual_aav: number | null
+          avg_curve_predicted_aav: number | null
+          avg_overall_in_sample: number | null
+          id: number
+          multiplier: number
+          refresh_run_id: number
+          role: string
+          sample_size: number
+        }
+        Insert: {
+          avg_actual_aav?: number | null
+          avg_curve_predicted_aav?: number | null
+          avg_overall_in_sample?: number | null
+          id?: never
+          multiplier: number
+          refresh_run_id: number
+          role: string
+          sample_size: number
+        }
+        Update: {
+          avg_actual_aav?: number | null
+          avg_curve_predicted_aav?: number | null
+          avg_overall_in_sample?: number | null
+          id?: never
+          multiplier?: number
+          refresh_run_id?: number
+          role?: string
+          sample_size?: number
+        }
+        Relationships: [
+          {
+            foreignKeyName: "market_rate_role_multipliers_refresh_run_id_fkey"
+            columns: ["refresh_run_id"]
+            isOneToOne: false
+            referencedRelation: "refresh_runs"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       org_system_bios: {
         Row: {
           bio_text: string
