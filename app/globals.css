@@ -398,9 +398,20 @@ body {
    (2026-08-30, Rees's ask) -- the cards read better a bit tighter. Same
    .site-main:has() mechanism as the org-minors rule above, just narrowing
    instead of widening. Still wide enough for /prospects' side-by-side
-   Top Prospects + System Rankings layout. */
+   Top Prospects + System Rankings layout.
+   Widened back to the site's normal 1200px the next day (2026-08-31,
+   Rees's ask) to give the new "Comp" meta item (see .prospect-meta-item's
+   Comp entry in ProspectTable.tsx) room to sit on the same line as the
+   rest of the row instead of wrapping -- checked directly against the
+   real top-200 list: at 1200px only 4 rows still wrap, all genuine edge
+   cases stacking a long affiliate-league label ("MLB (MXC)"), a long
+   draft string (e.g. "R21 Pk647"), AND a two-word comp name all in one
+   row. Went with landing back on the site's own established default
+   rather than an arbitrary new number once it was already this close to
+   fully solving it (a full 1300px got the last 4 rows too, but felt like
+   more than "a bit" wider). */
 .site-main:has(.prospects-report-page) {
-  max-width: 1050px;
+  max-width: 1200px;
 }
 
 .page-header {
@@ -693,11 +704,18 @@ tbody tr:last-child td {
   gap: 0.875rem;
 }
 
+/* Fixed width, not min-width (2026-08-31, Rees's meta-line-alignment ask --
+   see .prospect-namerow's comment for the other half of this fix). Ranks
+   run 1-200 (TOP_PROSPECTS_LIMIT), and "#200" measured ~65px wide in this
+   font/weight/size vs. "#1"'s ~40px -- a bigger swing than it looks, since
+   every column after this one (name, meta line, stats) was shifting right
+   by that same amount for every double- or triple-digit rank. 68px covers
+   the real measured max with a little room. */
 .prospect-card-rank {
   display: flex;
   flex-direction: column;
   align-items: center;
-  min-width: 2.5rem;
+  width: 68px;
   flex-shrink: 0;
 }
 
@@ -754,11 +772,23 @@ tbody tr:last-child td {
   gap: 1.5rem;
 }
 
+/* Fixed width, not just flex-shrink: 0 (2026-08-31, Rees's ask) -- without
+   a fixed width here, this column's actual width tracked each player's own
+   name length, so .prospect-details (the meta line + stat line) started at
+   a different horizontal position on every single card. That's what made
+   scrolling down the list hard to read: nothing lined up row to row.
+   220px comfortably fits the longest real name in the current top-200 pool
+   (18 characters, e.g. "Mauricio Dominguez") plus a role badge and the gap
+   between them, checked directly against the database rather than guessed.
+   A name longer than that still just overflows onto more width rather than
+   wrapping or clipping -- there's no hard truncation here, only a
+   consistent MINIMUM alignment point for the common case. */
 .prospect-namerow {
   display: flex;
   align-items: baseline;
   gap: 0.625rem;
   flex-shrink: 0;
+  width: 220px;
 }
 
 /* Meta line and stat line now share this column -- both are direct
