@@ -3332,25 +3332,47 @@ export type Database = {
         Row: {
           cash_amount: number | null
           id: number
+          pick_round: number | null
+          pick_team_id: number | null
+          pick_team_name: string | null
+          pick_year: number | null
           player_id: number | null
+          retained_salary_pct: number | null
           side: string
           trade_event_id: number
         }
         Insert: {
           cash_amount?: number | null
           id?: never
+          pick_round?: number | null
+          pick_team_id?: number | null
+          pick_team_name?: string | null
+          pick_year?: number | null
           player_id?: number | null
+          retained_salary_pct?: number | null
           side: string
           trade_event_id: number
         }
         Update: {
           cash_amount?: number | null
           id?: never
+          pick_round?: number | null
+          pick_team_id?: number | null
+          pick_team_name?: string | null
+          pick_year?: number | null
           player_id?: number | null
+          retained_salary_pct?: number | null
           side?: string
           trade_event_id?: number
         }
         Relationships: [
+          {
+            foreignKeyName: "trade_event_items_pick_team_id_fkey"
+            columns: ["pick_team_id"]
+            isOneToOne: false
+            referencedRelation: "teams"
+            referencedColumns: ["id"]
+          },
           {
             foreignKeyName: "trade_event_items_player_id_fkey"
             columns: ["player_id"]
@@ -3371,6 +3393,7 @@ export type Database = {
         Row: {
           captured_at: string
           id: number
+          status: string
           team_a_id: number | null
           team_a_name: string | null
           team_b_id: number | null
@@ -3381,6 +3404,7 @@ export type Database = {
         Insert: {
           captured_at?: string
           id?: never
+          status?: string
           team_a_id?: number | null
           team_a_name?: string | null
           team_b_id?: number | null
@@ -3391,6 +3415,7 @@ export type Database = {
         Update: {
           captured_at?: string
           id?: never
+          status?: string
           team_a_id?: number | null
           team_a_name?: string | null
           team_b_id?: number | null

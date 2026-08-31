@@ -170,26 +170,55 @@ async function fetchTradeBlockHtml(cfg: StatsPlusConfig): Promise<string> {
   return fetchText(`${leagueRoot}/tradeblock/`);
 }
 
-/**
- * A single player's trade-transaction history (`.../player/{id}?page=trade`)
- * -- public, no auth, confirmed accurate against a real traded player.
- * Phase 2 of the transaction-history work (2026-08-31) -- see
- * scripts/scrape-trade-history.ts for the parsing side. Deliberately scoped
- * to players.was_traded=true only (276 players as of this writing, not the
- * full ~45,684-player universe) -- see that script's own header comment for
- * why the earlier "not practical" verdict on this specific piece no longer
- * holds.
- */
-async function fetchPlayerTradeHistoryHtml(cfg: StatsPlusConfig, playerId: number): Promise<string> {
+/** One page of the trade-ledger AJAX endpoint (see fetchTradeLedgerHtml below). */
+async function fetchTradeLedgerPage(
+  cfg: StatsPlusConfig,
+  opts: { page?: number; rows?: number; view?: "recent" | "void" } = {},
+): Promise<{ total: number; html: string }> {
   const leagueRoot = cfg.baseUrl.replace(/\/api\/?$/, "");
-  return fetchText(`${leagueRoot}/player/${playerId}?page=trade`);
+  const { page = 0, rows = 25, view = "recent" } = opts;
+  const url = `${leagueRoot}/ttajaxtable/?info=recent&page=${page}&rows=${rows}&view=${view}&team=0`;
+  const text = await fetchText(url);
+  const body = JSON.parse(text) as { data: string; total: number };
+  return { total: body.total, html: body.data };
+}
+
+/**
+ * The league's full trade ledger (StatsPlus's own `/trade/#recent` tab,
+ * 2001-present) -- public, no auth, confirmed via plain curl. Backs this
+ * page's own AJAX table widget at `/ttajaxtable/?info=recent`, which returns
+ * JSON (`{data: "<tr>...</tr>...", total: N}`) rather than the page's raw
+ * HTML -- `data` is the table body's `<tr>` markup, one row per trade, ready
+ * for a caller to load into cheerio directly. Fetches in two requests: probe
+ * with `rows=1` to read `total`, then re-request with `rows=total+50` so the
+ * entire ledger comes back in one page (confirmed: ~2.5MB / ~3s for the full
+ * 1,101-trade history as of 2026-08-31 -- comfortably one request, no need
+ * for real pagination). Confirmed byte-identical across two consecutive
+ * fetches, so trade order is stable, not re-shuffled per request.
+ *
+ * `view: "void"` is a separate, smaller list (85 rows as of this writing) of
+ * *cancelled* trades that never actually went through -- a distinct dataset,
+ * not a filter on the main 1,101, and not pulled by default here.
+ *
+ * Replaced the old per-player `playerTradeHistoryHtml()` approach entirely
+ * (2026-08-31) -- see scripts/scrape-trade-history.ts's header comment for
+ * why: that approach relied on `players.was_traded`, which turned out to
+ * flag only 274 of the 1,749 players actually involved in a real trade (16%)
+ * -- a bad premise, not a scraping bug. This endpoint needs no such flag at
+ * all; it's the authoritative source StatsPlus itself renders as "every
+ * trade in league history."
+ */
+async function fetchTradeLedgerHtml(cfg: StatsPlusConfig, view: "recent" | "void" = "recent"): Promise<string> {
+  const probe = await fetchTradeLedgerPage(cfg, { rows: 1, view });
+  const full = await fetchTradeLedgerPage(cfg, { rows: probe.total + 50, view });
+  return full.html;
 }
 
 export function makeStatsPlusClient(cfg: StatsPlusConfig) {
   return {
     teams: () => fetchPublicCsv(cfg, "teams"),
     tradeBlockHtml: () => fetchTradeBlockHtml(cfg),
-    playerTradeHistoryHtml: (playerId: number) => fetchPlayerTradeHistoryHtml(cfg, playerId),
+    tradeLedgerHtml: (view?: "recent" | "void") => fetchTradeLedgerHtml(cfg, view),
     players: () => fetchPublicCsv(cfg, "players"),
     contracts: () => fetchPublicCsv(cfg, "contract"),
     contractExtensions: () => fetchPublicCsv(cfg, "contractextension"),
