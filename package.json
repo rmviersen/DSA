@@ -13,6 +13,7 @@
     "scrape-trade-block": "tsx scripts/scrape-trade-block.ts",
     "scrape-trade-history": "tsx scripts/scrape-trade-history.ts",
     "compute-market-rates": "tsx scripts/compute-market-rates.ts",
+    "scan-market-contracts": "tsx scripts/scan-market-contracts.ts",
     "dev": "next dev",
     "build": "next build",
     "start": "next start"

@@ -272,6 +272,19 @@ async function main() {
       console.error(`compute-team-ratings.ts failed after a successful refresh -- raw data is fine, but no fresh team_computed snapshot was produced: ${err}`);
       process.exitCode = 1;
     }
+
+    // Trade-value engine, market-rate piece (2026-08-31) -- accumulates any
+    // newly-signed clean free-agent contracts into market_rate_training_
+    // contracts. Cheap and append-only (a no-op for a contract already on
+    // file), so it's safe to run every refresh rather than on its own
+    // separate cadence.
+    console.log("Scanning for new clean market-rate contracts...");
+    try {
+      execFileSync("npx", ["tsx", "scripts/scan-market-contracts.ts"], { stdio: "inherit", shell: true });
+    } catch (err) {
+      console.error(`scan-market-contracts.ts failed after a successful refresh -- raw data is fine, but this run's contracts weren't scanned into the training pool: ${err}`);
+      process.exitCode = 1;
+    }
   } catch (err) {
     await supabase.from("refresh_runs").update({ status: "failed", completed_at: new Date().toISOString(), notes: String(err) }).eq("id", refreshRunId);
     console.error(`Refresh run ${refreshRunId} failed:`, err);

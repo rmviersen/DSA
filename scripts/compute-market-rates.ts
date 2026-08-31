@@ -1,17 +1,26 @@
 import "dotenv/config";
 import { makeSupabaseClient } from "../lib/supabase-client.js";
+import { PITCHER_ROLES, computeLeagueMinimumSalary, type PlayerType } from "../lib/contract-classification.js";
 
-// First piece of the trade-value engine (2026-08-31, Rees's ask). Fits "what
-// does the open market actually pay for this talent level" from this
-// league's own real contracts -- the reference curve every player's contract
-// surplus gets measured against later. Full reasoning for every filter below
-// lives in HANDOFF.md's transaction-analysis section; short version: OOTP
-// (like real MLB) pays players on a fixed, escalating scale by service time
-// completely independent of talent -- confirmed in this league's own data:
-// pre-arb averages ~$122K, arbitration-eligible ~$2.6M, free-agent-eligible
-// ~$9.3M. Regressing salary against Overall across ALL players would mostly
-// measure "how many years has this guy been in the league," not talent. This
-// script fits the curve on a deliberately narrowed CLEAN sample only.
+// Fits "what does the open market actually pay for this talent level" from
+// the ACCUMULATED training pool in market_rate_training_contracts (built and
+// kept current by scripts/scan-market-contracts.ts, run every refresh) --
+// not a single snapshot's cross-section. This is the fix for small-sample
+// role multipliers only ever being as good as whatever's clean right now
+// (264 players as of the first build, 2026-08-31): the training pool grows
+// every time a new clean free-agent contract is signed, so a role's number
+// (COF's in particular, still thin as of this writing) gets more reliable
+// over time, especially through the offseason free-agency window.
+//
+// Full reasoning for the two-curve split, the shrinkage, and the DH cap
+// below lives in HANDOFF.md's transaction-analysis section -- short version:
+// pooling hitters and pitchers into one curve let RP's lower pay drag the
+// baseline down and inflate every hitting position (DH came out priced
+// ABOVE every defensive position, which is backwards -- confirmed wrong by
+// Rees). Fixed by fitting separate curves per player type, shrinking each
+// role's raw multiplier toward 1.0 by sample size, and explicitly capping DH
+// at the lowest other hitting-role multiplier (a domain constraint no
+// regression can infer on its own).
 
 const PAGE_SIZE = 1000;
 
@@ -29,41 +38,6 @@ async function fetchAll<T>(query: (from: number, to: number) => Promise<{ data: 
   return all;
 }
 
-interface ContractSnapshotRow {
-  player_id: number;
-  is_major: boolean | null;
-  years: number | null;
-  salary0: number | null; salary1: number | null; salary2: number | null; salary3: number | null; salary4: number | null;
-  salary5: number | null; salary6: number | null; salary7: number | null; salary8: number | null; salary9: number | null;
-  salary10: number | null; salary11: number | null; salary12: number | null; salary13: number | null; salary14: number | null;
-}
-
-// A contract's AAV (average annual value) rather than its year-1 salary --
-// avoids a back-/front-loaded deal skewing the curve. `years<=1` has no real
-// multi-year structure to average, so salary0 IS the AAV in that case.
-function computeAAV(row: ContractSnapshotRow): number | null {
-  const years = row.years ?? 0;
-  if (years <= 1) return row.salary0 ?? null;
-  const salaryFields = [
-    row.salary0, row.salary1, row.salary2, row.salary3, row.salary4,
-    row.salary5, row.salary6, row.salary7, row.salary8, row.salary9,
-    row.salary10, row.salary11, row.salary12, row.salary13, row.salary14,
-  ];
-  const used = salaryFields.slice(0, Math.min(years, 15)).filter((v): v is number => typeof v === "number");
-  if (used.length === 0) return row.salary0 ?? null;
-  return used.reduce((a, b) => a + b, 0) / used.length;
-}
-
-function mode(values: number[]): number | null {
-  if (values.length === 0) return null;
-  const counts = new Map<number, number>();
-  for (const v of values) counts.set(v, (counts.get(v) ?? 0) + 1);
-  let best: number | null = null;
-  let bestCount = 0;
-  for (const [v, c] of counts) if (c > bestCount) { best = v; bestCount = c; }
-  return best;
-}
-
 // Ordinary least squares, y = intercept + slope * x.
 function fitLine(points: { x: number; y: number }[]): { intercept: number; slope: number } {
   const n = points.length;
@@ -79,139 +53,73 @@ function fitLine(points: { x: number; y: number }[]): { intercept: number; slope
   return { intercept, slope };
 }
 
-// PITCHER_ROLES/HITTER_ROLES: the pooled curve used to mix both together,
-// which let RP's genuinely lower pay drag the whole baseline down and make
-// every hitting position look inflated relative to it (confirmed 2026-08-31 --
-// DH came out priced ABOVE every defensive position, which is backwards: DH
-// offers zero defensive value and should never outrank a position that also
-// plays the field). Fitting a separate curve per player type removes that
-// cross-contamination -- SP/RP compared only to other pitchers, hitters only
-// to other hitters.
-const PITCHER_ROLES = new Set(["SP", "RP"]);
-
 // Shrinkage toward 1.0 (no role adjustment) by sample size -- a role with a
-// small clean sample (as few as 6-23 players, confirmed 2026-08-31) produces
-// a noisy raw ratio that shouldn't be trusted at face value. SHRINKAGE_K is
-// the "how many observations-worth of trust does a n=0 role start with"
-// constant -- weight on the raw multiplier is n/(n+k). At k=25: a thin
-// sample like DH (n=11) keeps ~30% of its raw signal, a well-supported one
-// like RP (n=75) keeps ~75%. Deliberately a plain constant, not a DB-stored
-// weight like rating_weights -- this is a statistical shrinkage parameter
-// tuned once for how noisy small samples are, not a business judgment call
-// Rees would want to retune independently of the underlying data.
+// small clean sample produces a noisy raw ratio that shouldn't be trusted at
+// face value. SHRINKAGE_K is the "how many observations-worth of trust does
+// a n=0 role start with" constant -- weight on the raw multiplier is
+// n/(n+k). Deliberately a plain constant, not a DB-stored weight like
+// rating_weights -- this is a statistical shrinkage parameter tuned for how
+// noisy small samples are, not a business judgment call to retune
+// independently of the underlying data.
 const SHRINKAGE_K = 25;
 function shrink(raw: number, n: number): number {
   const weight = n / (n + SHRINKAGE_K);
   return 1 + (raw - 1) * weight;
 }
 
+interface TrainingContract { playerId: number; overall: number; role: string; aav: number }
+
 async function main() {
   const supabase = makeSupabaseClient();
 
-  // Contracts and ratings refresh on different cadences -- contracts get
-  // pulled every refresh (public, no auth needed), but ratings/player_computed
-  // only update on a session-authenticated run, which happens less often (and
-  // is sometimes deliberately skipped, e.g. --skip-ratings). Confirmed
-  // 2026-08-31: latest contract_snapshots was refresh_run_id 25, latest
-  // player_computed was refresh_run_id 24 -- two different runs. Rather than
-  // require an exact match (which would mean this can only ever run
-  // immediately after a full ratings refresh), find the latest of each
-  // independently -- a player's Overall/role rarely shifts much over the gap
-  // between two nearby refreshes, so this is a reasonable join for a
-  // league-wide curve, even if it wouldn't be precise enough for scoring one
-  // specific trade against a specific date.
-  console.log("Finding latest refresh run with contract snapshots...");
-  const { data: contractRunRow, error: contractRunErr } = await supabase
-    .from("contract_snapshots").select("refresh_run_id").order("refresh_run_id", { ascending: false }).limit(1).single();
-  if (contractRunErr || !contractRunRow) {
+  console.log("Loading accumulated training contracts (market_rate_training_contracts)...");
+  const training = await fetchAll<{ player_id: number; overall: number; role: string; aav: number }>((from, to) =>
+    supabase.from("market_rate_training_contracts").select("player_id, overall, role, aav").range(from, to) as never
+  );
+  console.log(`  ${training.length} distinct clean contracts on file`);
+  if (training.length < 20) {
     throw new Error(
-      `No contract_snapshots found anywhere -- contract snapshotting only started 2026-08-31. ` +
-      `Run scripts/refresh.ts at least once after that date before running this.`
+      `Only ${training.length} training contracts found -- too small a sample to fit a reliable curve. ` +
+      `Run scripts/scan-market-contracts.ts first (also runs automatically as part of scripts/refresh.ts).`
     );
   }
-  const contractsRunId = (contractRunRow as { refresh_run_id: number }).refresh_run_id;
-  console.log(`  contract_snapshots: refresh_run_id ${contractsRunId}`);
+  const clean: TrainingContract[] = training.map((t) => ({ playerId: t.player_id, overall: t.overall, role: t.role, aav: t.aav }));
 
-  console.log("Finding latest refresh run with player_computed...");
-  const { data: computedRunRow, error: computedRunErr } = await supabase
-    .from("player_computed").select("refresh_run_id").order("refresh_run_id", { ascending: false }).limit(1).single();
-  if (computedRunErr || !computedRunRow) throw new Error(`No player_computed rows found at all: ${computedRunErr?.message}`);
-  const computedRunId = (computedRunRow as { refresh_run_id: number }).refresh_run_id;
-  console.log(`  player_computed: refresh_run_id ${computedRunId}`);
-  if (contractsRunId !== computedRunId) {
-    console.log(`  (different runs -- expected, see comment above; using each table's own latest)`);
+  // Tag the output with the CURRENT latest refresh run -- "when was this fit
+  // computed," independent of when any individual training contract was
+  // first observed (those can span many past refreshes).
+  console.log("Finding latest refresh run (for tagging this fit)...");
+  const { data: runRow, error: runErr } = await supabase
+    .from("refresh_runs").select("id").order("id", { ascending: false }).limit(1).single();
+  if (runErr || !runRow) throw new Error(`No refresh_runs found: ${runErr?.message}`);
+  const currentRunId = (runRow as { id: number }).id;
+  console.log(`  refresh_run_id ${currentRunId}`);
+
+  // League minimum is purely informational here now (classification already
+  // happened in scan-market-contracts.ts) -- recomputed fresh from the
+  // latest contract snapshot rather than read back from a previous curve
+  // row, so this script works standalone on a first-ever run too.
+  console.log("Computing current league minimum salary (for display context)...");
+  const { data: latestContractRun } = await supabase
+    .from("contract_snapshots").select("refresh_run_id").order("refresh_run_id", { ascending: false }).limit(1).maybeSingle();
+  let leagueMinimum = 0;
+  if (latestContractRun) {
+    const runId = (latestContractRun as { refresh_run_id: number }).refresh_run_id;
+    const lowServiceContracts = await fetchAll<{ player_id: number; is_major: boolean | null; salary0: number | null }>((from, to) =>
+      supabase.from("contract_snapshots").select("player_id, is_major, salary0").eq("refresh_run_id", runId).range(from, to) as never
+    );
+    const players = await fetchAll<{ id: number; mlb_service_years: number | null }>((from, to) =>
+      supabase.from("players").select("id, mlb_service_years").range(from, to) as never
+    );
+    const serviceByPlayer = new Map(players.map((p) => [p.id, p.mlb_service_years]));
+    const lowServiceSalaries = lowServiceContracts
+      .filter((c) => c.is_major && (c.salary0 ?? 0) > 0 && (serviceByPlayer.get(c.player_id) ?? 0) < 3)
+      .map((c) => c.salary0!);
+    leagueMinimum = computeLeagueMinimumSalary(lowServiceSalaries);
   }
+  console.log(`  $${leagueMinimum.toLocaleString()}`);
 
-  console.log("Loading contract snapshots...");
-  const contracts = await fetchAll<ContractSnapshotRow>((from, to) =>
-    supabase.from("contract_snapshots")
-      .select("player_id, is_major, years, salary0, salary1, salary2, salary3, salary4, salary5, salary6, salary7, salary8, salary9, salary10, salary11, salary12, salary13, salary14")
-      .eq("refresh_run_id", contractsRunId).range(from, to) as never
-  );
-  console.log(`  ${contracts.length} contract snapshot rows`);
-
-  console.log("Loading contract extension snapshots (for the below-market-extension exclusion)...");
-  const extensions = await fetchAll<{ player_id: number; salary0: number | null; years: number | null }>((from, to) =>
-    supabase.from("contract_extension_snapshots").select("player_id, salary0, years").eq("refresh_run_id", contractsRunId).range(from, to) as never
-  );
-  const hasRealExtension = new Set(extensions.filter((e) => (e.salary0 ?? 0) > 0 || (e.years ?? 0) > 0).map((e) => e.player_id));
-  console.log(`  ${hasRealExtension.size} players have a real (non-empty) contract extension on file`);
-
-  console.log("Loading players (service time, retired status)...");
-  const players = await fetchAll<{ id: number; mlb_service_years: number | null; retired: boolean | null }>((from, to) =>
-    supabase.from("players").select("id, mlb_service_years, retired").order("id").range(from, to) as never
-  );
-  const playerById = new Map(players.map((p) => [p.id, p]));
-
-  console.log("Loading player_computed (Overall, role)...");
-  const computed = await fetchAll<{ player_id: number; overall: number | null; role: string | null }>((from, to) =>
-    supabase.from("player_computed").select("player_id, overall, role").eq("refresh_run_id", computedRunId).range(from, to) as never
-  );
-  const computedByPlayer = new Map(computed.map((c) => [c.player_id, c]));
-
-  // League minimum salary, computed FRESH from this refresh's own data (the
-  // mode of salary0 among clearly pre-arb players) rather than hardcoded --
-  // confirmed 2026-08-31 this is a real, sharp constant ($500,000 as of that
-  // check), but one that rises over time as seasons pass.
-  const lowServiceSalaries = contracts
-    .filter((c) => c.is_major && (c.salary0 ?? 0) > 0)
-    .filter((c) => (playerById.get(c.player_id)?.mlb_service_years ?? 0) < 3)
-    .map((c) => c.salary0!);
-  const leagueMinimum = mode(lowServiceSalaries) ?? 0;
-  console.log(`League minimum salary (mode of low-service salaries, n=${lowServiceSalaries.length}): $${leagueMinimum.toLocaleString()}`);
-
-  // The clean free-agent-market sample. Every filter here is earned by a
-  // confirmed pattern in this league's own data (HANDOFF.md has the full
-  // investigation): meaningfully above league minimum (excludes rule-driven
-  // rookie-scale deals regardless of service time), 6+ years of MLB service
-  // (true free-agent eligibility -- below that, even a normal-looking salary
-  // is arbitration-suppressed), and not also present in
-  // contract_extension_snapshots (excludes a small number of players whose
-  // current deal actually originated as a below-market extension signed
-  // before free agency).
-  interface CleanPoint { playerId: number; overall: number; role: string; aav: number }
-  const clean: CleanPoint[] = [];
-  for (const c of contracts) {
-    if (!c.is_major) continue;
-    const player = playerById.get(c.player_id);
-    if (!player || player.retired) continue;
-    if ((player.mlb_service_years ?? 0) < 6) continue;
-    if ((c.salary0 ?? 0) <= leagueMinimum * 1.05) continue;
-    if (hasRealExtension.has(c.player_id)) continue;
-    const pc = computedByPlayer.get(c.player_id);
-    if (!pc || pc.overall == null || !pc.role) continue;
-    const aav = computeAAV(c);
-    if (!aav || aav <= 0) continue;
-    clean.push({ playerId: c.player_id, overall: pc.overall, role: pc.role, aav });
-  }
-  console.log(`Clean free-agent-market sample: ${clean.length} players`);
-  if (clean.length < 20) {
-    throw new Error(`Only ${clean.length} clean free-agent-market contracts found -- too small a sample to fit a reliable curve. Aborting rather than writing a garbage curve.`);
-  }
-
-  // Fit one curve per player type (see PITCHER_ROLES comment above) rather
-  // than a single pooled curve across both.
-  type PlayerType = "hitter" | "pitcher";
+  // Fit one curve per player type -- see header comment for why.
   const curvesByType = new Map<PlayerType, { intercept: number; slope: number; sampleSize: number; minOverall: number; maxOverall: number }>();
   for (const type of ["hitter", "pitcher"] as const) {
     const group = clean.filter((c) => PITCHER_ROLES.has(c.role) === (type === "pitcher"));
@@ -223,16 +131,12 @@ async function main() {
     console.log(`${type} curve: ln(AAV) = ${intercept.toFixed(4)} + ${slope.toFixed(4)} * Overall (n=${group.length}, Overall range ${Math.min(...overalls)}-${Math.max(...overalls)})`);
   }
 
-  // Per-role multiplier: each role's actual average AAV vs. what its OWN
-  // player type's curve alone would have predicted for that role's average
-  // Overall -- this is where "a top reliever isn't worth what a top starter
-  // is worth" gets captured empirically, from what this league's own GMs
-  // actually pay, rather than a hand-picked weight. Raw ratios are then (1)
-  // shrunk toward 1.0 by sample size, and (2) for DH specifically, capped at
-  // the lowest other hitting-role multiplier -- DH provides zero defensive
-  // value, so it can never legitimately rank above a position that also
-  // plays the field, regardless of what a small, noisy sample says.
-  const byRole = new Map<string, CleanPoint[]>();
+  // Per-role multiplier: each role's actual average AAV vs. what its own
+  // player type's curve alone would have predicted, then shrunk toward 1.0
+  // by sample size, then DH is capped at the lowest other hitting-role
+  // multiplier (DH provides zero defensive value -- it can never
+  // legitimately outrank a position that also plays the field).
+  const byRole = new Map<string, TrainingContract[]>();
   for (const c of clean) {
     if (!byRole.has(c.role)) byRole.set(c.role, []);
     byRole.get(c.role)!.push(c);
@@ -258,10 +162,13 @@ async function main() {
   }
   const dhRow = roleRows.find((r) => r.role === "DH");
   if (dhRow) {
-    const lowestOtherHitter = Math.min(...roleRows.filter((r) => r.playerType === "hitter" && r.role !== "DH").map((r) => r.shrunkMultiplier));
-    if (dhRow.shrunkMultiplier > lowestOtherHitter) {
-      dhRow.finalMultiplier = lowestOtherHitter;
-      dhRow.dhCapped = true;
+    const otherHitters = roleRows.filter((r) => r.playerType === "hitter" && r.role !== "DH");
+    if (otherHitters.length > 0) {
+      const lowestOtherHitter = Math.min(...otherHitters.map((r) => r.shrunkMultiplier));
+      if (dhRow.shrunkMultiplier > lowestOtherHitter) {
+        dhRow.finalMultiplier = lowestOtherHitter;
+        dhRow.dhCapped = true;
+      }
     }
   }
   roleRows.sort((a, b) => b.finalMultiplier - a.finalMultiplier);
@@ -277,7 +184,7 @@ async function main() {
   console.log("Writing market_rate_curves...");
   for (const [type, curve] of curvesByType) {
     const { error: curveErr } = await supabase.from("market_rate_curves").upsert({
-      refresh_run_id: contractsRunId,
+      refresh_run_id: currentRunId,
       player_type: type,
       intercept: curve.intercept, slope: curve.slope,
       sample_size: curve.sampleSize,
@@ -291,7 +198,7 @@ async function main() {
   console.log("Writing market_rate_role_multipliers...");
   const { error: roleErr } = await supabase.from("market_rate_role_multipliers").upsert(
     roleRows.map((r) => ({
-      refresh_run_id: contractsRunId,
+      refresh_run_id: currentRunId,
       role: r.role,
       raw_multiplier: r.rawMultiplier,
       shrunk_multiplier: r.shrunkMultiplier,

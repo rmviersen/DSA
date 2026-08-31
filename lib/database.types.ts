@@ -1504,6 +1504,56 @@ export type Database = {
           },
         ]
       }
+      market_rate_training_contracts: {
+        Row: {
+          aav: number
+          first_observed_at: string
+          first_observed_refresh_run_id: number
+          id: number
+          overall: number
+          player_id: number
+          player_type: string
+          role: string
+          salary0: number
+          season_year: number
+          years: number
+        }
+        Insert: {
+          aav: number
+          first_observed_at?: string
+          first_observed_refresh_run_id: number
+          id?: never
+          overall: number
+          player_id: number
+          player_type: string
+          role: string
+          salary0: number
+          season_year: number
+          years: number
+        }
+        Update: {
+          aav?: number
+          first_observed_at?: string
+          first_observed_refresh_run_id?: number
+          id?: never
+          overall?: number
+          player_id?: number
+          player_type?: string
+          role?: string
+          salary0?: number
+          season_year?: number
+          years?: number
+        }
+        Relationships: [
+          {
+            foreignKeyName: "market_rate_training_contract_first_observed_refresh_run_i_fkey"
+            columns: ["first_observed_refresh_run_id"]
+            isOneToOne: false
+            referencedRelation: "refresh_runs"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       org_system_bios: {
         Row: {
           bio_text: string
