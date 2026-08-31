@@ -79,6 +79,32 @@ function fitLine(points: { x: number; y: number }[]): { intercept: number; slope
   return { intercept, slope };
 }
 
+// PITCHER_ROLES/HITTER_ROLES: the pooled curve used to mix both together,
+// which let RP's genuinely lower pay drag the whole baseline down and make
+// every hitting position look inflated relative to it (confirmed 2026-08-31 --
+// DH came out priced ABOVE every defensive position, which is backwards: DH
+// offers zero defensive value and should never outrank a position that also
+// plays the field). Fitting a separate curve per player type removes that
+// cross-contamination -- SP/RP compared only to other pitchers, hitters only
+// to other hitters.
+const PITCHER_ROLES = new Set(["SP", "RP"]);
+
+// Shrinkage toward 1.0 (no role adjustment) by sample size -- a role with a
+// small clean sample (as few as 6-23 players, confirmed 2026-08-31) produces
+// a noisy raw ratio that shouldn't be trusted at face value. SHRINKAGE_K is
+// the "how many observations-worth of trust does a n=0 role start with"
+// constant -- weight on the raw multiplier is n/(n+k). At k=25: a thin
+// sample like DH (n=11) keeps ~30% of its raw signal, a well-supported one
+// like RP (n=75) keeps ~75%. Deliberately a plain constant, not a DB-stored
+// weight like rating_weights -- this is a statistical shrinkage parameter
+// tuned once for how noisy small samples are, not a business judgment call
+// Rees would want to retune independently of the underlying data.
+const SHRINKAGE_K = 25;
+function shrink(raw: number, n: number): number {
+  const weight = n / (n + SHRINKAGE_K);
+  return 1 + (raw - 1) * weight;
+}
+
 async function main() {
   const supabase = makeSupabaseClient();
 
@@ -183,65 +209,98 @@ async function main() {
     throw new Error(`Only ${clean.length} clean free-agent-market contracts found -- too small a sample to fit a reliable curve. Aborting rather than writing a garbage curve.`);
   }
 
-  // Pooled curve: ln(AAV) = intercept + slope * Overall. Log-linear because
-  // salary vs. talent is a right-skewed relationship (elite talent gets paid
-  // disproportionately more, not linearly more) -- standard for this kind of
-  // fit and keeps predicted values always positive.
-  const points = clean.map((c) => ({ x: c.overall, y: Math.log(c.aav) }));
-  const { intercept, slope } = fitLine(points);
-  const overalls = clean.map((c) => c.overall);
-  const minOverall = Math.min(...overalls);
-  const maxOverall = Math.max(...overalls);
-  console.log(`Pooled curve: ln(AAV) = ${intercept.toFixed(4)} + ${slope.toFixed(4)} * Overall (n=${clean.length}, Overall range ${minOverall}-${maxOverall})`);
+  // Fit one curve per player type (see PITCHER_ROLES comment above) rather
+  // than a single pooled curve across both.
+  type PlayerType = "hitter" | "pitcher";
+  const curvesByType = new Map<PlayerType, { intercept: number; slope: number; sampleSize: number; minOverall: number; maxOverall: number }>();
+  for (const type of ["hitter", "pitcher"] as const) {
+    const group = clean.filter((c) => PITCHER_ROLES.has(c.role) === (type === "pitcher"));
+    if (group.length < 10) throw new Error(`Only ${group.length} clean ${type} contracts -- too small to fit a curve. Aborting.`);
+    const points = group.map((c) => ({ x: c.overall, y: Math.log(c.aav) }));
+    const { intercept, slope } = fitLine(points);
+    const overalls = group.map((c) => c.overall);
+    curvesByType.set(type, { intercept, slope, sampleSize: group.length, minOverall: Math.min(...overalls), maxOverall: Math.max(...overalls) });
+    console.log(`${type} curve: ln(AAV) = ${intercept.toFixed(4)} + ${slope.toFixed(4)} * Overall (n=${group.length}, Overall range ${Math.min(...overalls)}-${Math.max(...overalls)})`);
+  }
 
-  // Per-role multiplier: each role's actual average AAV vs. what the pooled
-  // curve alone would have predicted for that role's average Overall --
-  // this is where "a top reliever isn't worth what a top starter is worth"
-  // gets captured, empirically, from what this league's own GMs actually pay,
-  // rather than a hand-picked weight.
+  // Per-role multiplier: each role's actual average AAV vs. what its OWN
+  // player type's curve alone would have predicted for that role's average
+  // Overall -- this is where "a top reliever isn't worth what a top starter
+  // is worth" gets captured empirically, from what this league's own GMs
+  // actually pay, rather than a hand-picked weight. Raw ratios are then (1)
+  // shrunk toward 1.0 by sample size, and (2) for DH specifically, capped at
+  // the lowest other hitting-role multiplier -- DH provides zero defensive
+  // value, so it can never legitimately rank above a position that also
+  // plays the field, regardless of what a small, noisy sample says.
   const byRole = new Map<string, CleanPoint[]>();
   for (const c of clean) {
     if (!byRole.has(c.role)) byRole.set(c.role, []);
     byRole.get(c.role)!.push(c);
   }
-  const roleRows: { role: string; multiplier: number; sample_size: number; avg_overall_in_sample: number; avg_actual_aav: number; avg_curve_predicted_aav: number }[] = [];
+  interface RoleRow {
+    role: string; playerType: PlayerType; sampleSize: number; avgOverall: number;
+    avgActualAav: number; avgPredictedAav: number; rawMultiplier: number; shrunkMultiplier: number;
+    finalMultiplier: number; dhCapped: boolean;
+  }
+  const roleRows: RoleRow[] = [];
   for (const [role, group] of byRole) {
+    const playerType: PlayerType = PITCHER_ROLES.has(role) ? "pitcher" : "hitter";
+    const curve = curvesByType.get(playerType)!;
     const avgOverall = group.reduce((s, c) => s + c.overall, 0) / group.length;
     const avgActualAav = group.reduce((s, c) => s + c.aav, 0) / group.length;
-    const avgPredictedAav = group.reduce((s, c) => s + Math.exp(intercept + slope * c.overall), 0) / group.length;
-    const multiplier = avgPredictedAav > 0 ? avgActualAav / avgPredictedAav : 1;
-    roleRows.push({ role, multiplier, sample_size: group.length, avg_overall_in_sample: avgOverall, avg_actual_aav: avgActualAav, avg_curve_predicted_aav: avgPredictedAav });
+    const avgPredictedAav = group.reduce((s, c) => s + Math.exp(curve.intercept + curve.slope * c.overall), 0) / group.length;
+    const rawMultiplier = avgPredictedAav > 0 ? avgActualAav / avgPredictedAav : 1;
+    const shrunkMultiplier = shrink(rawMultiplier, group.length);
+    roleRows.push({
+      role, playerType, sampleSize: group.length, avgOverall, avgActualAav, avgPredictedAav,
+      rawMultiplier, shrunkMultiplier, finalMultiplier: shrunkMultiplier, dhCapped: false,
+    });
   }
-  roleRows.sort((a, b) => b.multiplier - a.multiplier);
-  console.log("Per-role multipliers (actual AAV ÷ pooled-curve-predicted AAV):");
+  const dhRow = roleRows.find((r) => r.role === "DH");
+  if (dhRow) {
+    const lowestOtherHitter = Math.min(...roleRows.filter((r) => r.playerType === "hitter" && r.role !== "DH").map((r) => r.shrunkMultiplier));
+    if (dhRow.shrunkMultiplier > lowestOtherHitter) {
+      dhRow.finalMultiplier = lowestOtherHitter;
+      dhRow.dhCapped = true;
+    }
+  }
+  roleRows.sort((a, b) => b.finalMultiplier - a.finalMultiplier);
+  console.log("Per-role multipliers (raw -> shrunk -> final, sample-size-weighted, DH capped against defensive positions):");
   for (const r of roleRows) {
     console.log(
-      `  ${r.role.padEnd(4)} x${r.multiplier.toFixed(2)}  (n=${r.sample_size}, avg Overall ${r.avg_overall_in_sample.toFixed(1)}, ` +
-      `actual $${Math.round(r.avg_actual_aav).toLocaleString()} vs curve $${Math.round(r.avg_curve_predicted_aav).toLocaleString()})`
+      `  ${r.role.padEnd(4)} raw x${r.rawMultiplier.toFixed(2)} -> shrunk x${r.shrunkMultiplier.toFixed(2)}` +
+      `${r.dhCapped ? ` -> capped x${r.finalMultiplier.toFixed(2)}` : ""}` +
+      `  (n=${r.sampleSize}, avg Overall ${r.avgOverall.toFixed(1)}, actual $${Math.round(r.avgActualAav).toLocaleString()} vs curve $${Math.round(r.avgPredictedAav).toLocaleString()})`
     );
   }
 
   console.log("Writing market_rate_curves...");
-  const { error: curveErr } = await supabase.from("market_rate_curves").upsert({
-    refresh_run_id: contractsRunId,
-    intercept, slope,
-    sample_size: clean.length,
-    min_overall_in_sample: minOverall,
-    max_overall_in_sample: maxOverall,
-    league_minimum_salary: leagueMinimum,
-  } as never, { onConflict: "refresh_run_id" });
-  if (curveErr) throw new Error(`market_rate_curves upsert failed: ${curveErr.message}`);
+  for (const [type, curve] of curvesByType) {
+    const { error: curveErr } = await supabase.from("market_rate_curves").upsert({
+      refresh_run_id: contractsRunId,
+      player_type: type,
+      intercept: curve.intercept, slope: curve.slope,
+      sample_size: curve.sampleSize,
+      min_overall_in_sample: curve.minOverall,
+      max_overall_in_sample: curve.maxOverall,
+      league_minimum_salary: leagueMinimum,
+    } as never, { onConflict: "refresh_run_id,player_type" });
+    if (curveErr) throw new Error(`market_rate_curves upsert failed (${type}): ${curveErr.message}`);
+  }
 
   console.log("Writing market_rate_role_multipliers...");
   const { error: roleErr } = await supabase.from("market_rate_role_multipliers").upsert(
     roleRows.map((r) => ({
       refresh_run_id: contractsRunId,
       role: r.role,
-      multiplier: r.multiplier,
-      sample_size: r.sample_size,
-      avg_overall_in_sample: r.avg_overall_in_sample,
-      avg_actual_aav: r.avg_actual_aav,
-      avg_curve_predicted_aav: r.avg_curve_predicted_aav,
+      raw_multiplier: r.rawMultiplier,
+      shrunk_multiplier: r.shrunkMultiplier,
+      final_multiplier: r.finalMultiplier,
+      dh_capped: r.dhCapped,
+      sample_size: r.sampleSize,
+      avg_overall_in_sample: r.avgOverall,
+      avg_actual_aav: r.avgActualAav,
+      avg_curve_predicted_aav: r.avgPredictedAav,
     })) as never[],
     { onConflict: "refresh_run_id,role" }
   );

@@ -1415,6 +1415,7 @@ export type Database = {
           league_minimum_salary: number
           max_overall_in_sample: number | null
           min_overall_in_sample: number | null
+          player_type: string
           refresh_run_id: number
           sample_size: number
           slope: number
@@ -1426,6 +1427,7 @@ export type Database = {
           league_minimum_salary: number
           max_overall_in_sample?: number | null
           min_overall_in_sample?: number | null
+          player_type: string
           refresh_run_id: number
           sample_size: number
           slope: number
@@ -1437,6 +1439,7 @@ export type Database = {
           league_minimum_salary?: number
           max_overall_in_sample?: number | null
           min_overall_in_sample?: number | null
+          player_type?: string
           refresh_run_id?: number
           sample_size?: number
           slope?: number
@@ -1445,7 +1448,7 @@ export type Database = {
           {
             foreignKeyName: "market_rate_curves_refresh_run_id_fkey"
             columns: ["refresh_run_id"]
-            isOneToOne: true
+            isOneToOne: false
             referencedRelation: "refresh_runs"
             referencedColumns: ["id"]
           },
@@ -1456,31 +1459,40 @@ export type Database = {
           avg_actual_aav: number | null
           avg_curve_predicted_aav: number | null
           avg_overall_in_sample: number | null
+          dh_capped: boolean
+          final_multiplier: number
           id: number
-          multiplier: number
+          raw_multiplier: number
           refresh_run_id: number
           role: string
           sample_size: number
+          shrunk_multiplier: number
         }
         Insert: {
           avg_actual_aav?: number | null
           avg_curve_predicted_aav?: number | null
           avg_overall_in_sample?: number | null
+          dh_capped?: boolean
+          final_multiplier: number
           id?: never
-          multiplier: number
+          raw_multiplier: number
           refresh_run_id: number
           role: string
           sample_size: number
+          shrunk_multiplier: number
         }
         Update: {
           avg_actual_aav?: number | null
           avg_curve_predicted_aav?: number | null
           avg_overall_in_sample?: number | null
+          dh_capped?: boolean
+          final_multiplier?: number
           id?: never
-          multiplier?: number
+          raw_multiplier?: number
           refresh_run_id?: number
           role?: string
           sample_size?: number
+          shrunk_multiplier?: number
         }
         Relationships: [
           {
