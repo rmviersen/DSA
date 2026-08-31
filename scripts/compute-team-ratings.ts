@@ -50,8 +50,18 @@ async function main() {
     prospect_org_rank: number | null; org_rank: number | null;
     players: { organization_id: number | null } | null;
   }>((from, to) =>
+    // "players!player_computed_player_id_fkey" (not the bare "players"
+    // shorthand), 2026-08-31 gotcha: player_computed gained a second
+    // foreign key to players (comp_player_id, for the player-comp feature)
+    // the same day, so PostgREST can no longer infer which relationship a
+    // bare "players(...)" embed means -- it started hard-erroring with
+    // PGRST201 on every run since, silently stalling team_computed on the
+    // last refresh that succeeded before the migration landed (confirmed:
+    // team_computed was stuck on refresh_run_id 23 while refresh_runs had
+    // already moved on to 24). Same fix already applied to the equivalent
+    // embeds in lib/queries.ts's getOrgTeams().
     supabase.from("player_computed")
-      .select("player_id, overall, prospect_potential, ph, prospect_org_rank, org_rank, players(organization_id)")
+      .select("player_id, overall, prospect_potential, ph, prospect_org_rank, org_rank, players!player_computed_player_id_fkey(organization_id)")
       .eq("refresh_run_id", refreshRunId)
       .range(from, to) as never
   );
