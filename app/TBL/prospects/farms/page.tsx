@@ -1,5 +1,6 @@
-import { getTeamRankings } from "@/lib/queries";
-import { TeamRankingsTable } from "@/app/_components/TeamRankingsTable";
+import { getSystemRankingsDetailed } from "@/lib/system-rankings-query";
+import { SystemRankingsCards } from "@/app/_components/SystemRankingsCards";
+import { checkOwnerState } from "@/lib/owner-cookie";
 
 export const dynamic = "force-dynamic";
 
@@ -8,20 +9,30 @@ export const dynamic = "force-dynamic";
 // /TBL/prospects). Lives at /TBL/prospects/farms specifically so it falls
 // under the existing /TBL/prospects guest-access rule in middleware.ts
 // (which allows anything starting with "/TBL/prospects/") with zero
-// changes needed there. No team/date filter UI here -- this table isn't
-// itself scoped to one org (it's always the full league board), and it
-// never showed baseline-comparison deltas even on the combined page, so
-// there's nothing for a filter bar to control yet. Team names link back to
-// /TBL/prospects?team=... via the basePath prop, same as before the split.
+// changes needed there.
+//
+// Rebuilt 2026-08-31 (Rees's spec) from a plain table into the same
+// card-based language as Top Prospects: getSystemRankingsDetailed() (new
+// query module, lib/system-rankings-query.ts) replaces getTeamRankings()
+// here specifically -- getTeamRankings/TeamRankingsTable are UNCHANGED and
+// still power /prospects' compact side-by-side rankings column, which
+// doesn't have room for these much taller cards.
 export default async function SystemRankingsPage() {
-  const teamRankings = await getTeamRankings();
+  const [rankings, { isRealOwner, isPreviewingGuest }] = await Promise.all([
+    getSystemRankingsDetailed(),
+    checkOwnerState(),
+  ]);
+  // Same owner/guest link semantics as /TBL/prospects's own page.tsx --
+  // display-only (the internal /players/[id] pages are already owner-only
+  // at the middleware level regardless of what this page links to).
+  const showInternalLinks = isRealOwner && !isPreviewingGuest;
   return (
     <>
       <header className="page-header">
         <h1>System Rankings</h1>
         <p>Minor league system strength, org by org</p>
       </header>
-      <TeamRankingsTable rows={teamRankings} basePath="/TBL/prospects" />
+      <SystemRankingsCards rows={rankings} showInternalLinks={showInternalLinks} />
     </>
   );
 }

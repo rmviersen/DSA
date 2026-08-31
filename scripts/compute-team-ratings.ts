@@ -40,13 +40,18 @@ const rankDesc = <T,>(items: T[], key: (t: T) => number | null) => {
 // replacement-level guys" apart from "twenty solid-but-unspectacular
 // ones," and gave zero credit to a 21st-ranked prospect no matter how
 // good, even in a stacked system).
-function blueChipPlusDepth(valuesDesc: number[], cutoff: number): number {
-  let total = 0;
+// Returns the two pieces separately (2026-08-31, needed once the System
+// Rankings cards wanted to show Blue-Chip/Depth/Balance as their own
+// visible grade breakdown, not just baked into one combined split score) --
+// callers that only want the total still just add blueChip + depth.
+function blueChipPlusDepth(valuesDesc: number[], cutoff: number): { blueChip: number; depth: number } {
+  let blueChip = 0, depth = 0;
   valuesDesc.forEach((v, i) => {
     const rank = i + 1;
-    total += rank <= cutoff ? v : v / (rank - cutoff);
+    if (rank <= cutoff) blueChip += v;
+    else depth += v / (rank - cutoff);
   });
-  return total;
+  return { blueChip, depth };
 }
 
 interface PlayerRow {
@@ -116,6 +121,8 @@ async function main() {
     minor_league_pitching_rating: number | null;
     minor_league_readiness_rating: number | null;
     balance_index: number | null;
+    blue_chip_score: number | null;
+    depth_score: number | null;
     team_ovr: number | null;
   }
 
@@ -132,8 +139,10 @@ async function main() {
     const hittersDesc = prospectsInOrg.filter((r) => r.ph === "H").sort((a, b) => b.prospect_potential - a.prospect_potential);
     const pitchersDesc = prospectsInOrg.filter((r) => r.ph === "P").sort((a, b) => b.prospect_potential - a.prospect_potential);
 
-    const battingScore = hittersDesc.length > 0 ? blueChipPlusDepth(hittersDesc.map((r) => r.prospect_potential), srw.blue_chip_cutoff) : null;
-    const pitchingScore = pitchersDesc.length > 0 ? blueChipPlusDepth(pitchersDesc.map((r) => r.prospect_potential), srw.blue_chip_cutoff) : null;
+    const battingSplit = hittersDesc.length > 0 ? blueChipPlusDepth(hittersDesc.map((r) => r.prospect_potential), srw.blue_chip_cutoff) : null;
+    const pitchingSplit = pitchersDesc.length > 0 ? blueChipPlusDepth(pitchersDesc.map((r) => r.prospect_potential), srw.blue_chip_cutoff) : null;
+    const battingScore = battingSplit ? battingSplit.blueChip + battingSplit.depth : null;
+    const pitchingScore = pitchingSplit ? pitchingSplit.blueChip + pitchingSplit.depth : null;
 
     // System Score: batting + pitching, minus a penalty for the GAP between
     // them -- a lopsided system (all bat, no arm, or vice versa) can no
@@ -156,12 +165,23 @@ async function main() {
     const weakerSplit = Math.min(battingForMath, pitchingForMath);
     const balanceIndex = strongerSplit > 0 ? weakerSplit / strongerSplit : null;
 
+    // Blue-Chip Score / Depth Score, combined across BOTH splits (2026-08-31,
+    // for the System Rankings cards' 3-way grade breakdown -- Blue-Chip vs.
+    // Depth vs. Balance) -- purely a display decomposition of the SAME
+    // batting+pitching totals already summed into minor_league_rating above,
+    // not a new or different number. Null only when the org has literally no
+    // prospects in either split at all.
+    const blueChipScore = (battingSplit || pitchingSplit) ? (battingSplit?.blueChip ?? 0) + (pitchingSplit?.blueChip ?? 0) : null;
+    const depthScore = (battingSplit || pitchingSplit) ? (battingSplit?.depth ?? 0) + (pitchingSplit?.depth ?? 0) : null;
+
     // Readiness: same Blue-Chip + Depth shape, using CURRENT Overall
     // instead of Potential -- "how much of this system's value is already
     // realized, not just projected." No balance penalty here -- that
     // concept is about the main ceiling-based ranking above, not this one.
-    const battingReadiness = hittersDesc.length > 0 ? blueChipPlusDepth(hittersDesc.map((r) => r.overall), srw.blue_chip_cutoff) : 0;
-    const pitchingReadiness = pitchersDesc.length > 0 ? blueChipPlusDepth(pitchersDesc.map((r) => r.overall), srw.blue_chip_cutoff) : 0;
+    const battingReadinessSplit = hittersDesc.length > 0 ? blueChipPlusDepth(hittersDesc.map((r) => r.overall), srw.blue_chip_cutoff) : null;
+    const pitchingReadinessSplit = pitchersDesc.length > 0 ? blueChipPlusDepth(pitchersDesc.map((r) => r.overall), srw.blue_chip_cutoff) : null;
+    const battingReadiness = battingReadinessSplit ? battingReadinessSplit.blueChip + battingReadinessSplit.depth : 0;
+    const pitchingReadiness = pitchingReadinessSplit ? pitchingReadinessSplit.blueChip + pitchingReadinessSplit.depth : 0;
     const minorLeagueReadiness = (hittersDesc.length > 0 || pitchersDesc.length > 0) ? battingReadiness + pitchingReadiness : null;
 
     // Top 18 players org-wide by Overall (RLB's "Team OVR" gate) -- UNCHANGED,
@@ -180,6 +200,8 @@ async function main() {
       minor_league_pitching_rating: pitchingScore,
       minor_league_readiness_rating: minorLeagueReadiness,
       balance_index: balanceIndex,
+      blue_chip_score: blueChipScore,
+      depth_score: depthScore,
       team_ovr: teamOvr,
     };
   });
@@ -205,6 +227,8 @@ async function main() {
       minor_league_readiness_rating: a.minor_league_readiness_rating,
       tbl_readiness_rank: readinessRankByTeam.get(a) ?? null,
       balance_index: a.balance_index,
+      blue_chip_score: a.blue_chip_score,
+      depth_score: a.depth_score,
       system_rank_weights_id: srw.id,
       team_ovr: a.team_ovr,
       roster_rank: rosterRankByTeam.get(a) ?? null,

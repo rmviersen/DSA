@@ -45,6 +45,14 @@ System Score = (Batting Score + Pitching Score) − balance_penalty × |Batting 
 
 **These starting defaults are a first pass, not a final answer** — same spirit as `rating_weights`' own "starting point for methodology testing, not assumed correct long-term" note. Worth revisiting once the rebuilt System Rankings page has been looked at with real eyes for a while.
 
+## 5a. Displaying the breakdown on the System Rankings cards (2026-08-31)
+
+The rebuilt `/TBL/prospects/farms` page shows Blue-Chip, Depth, and Balance as their own visible grade words (not numbers, per Rees's spec) alongside the four ranks. Two things worth knowing:
+
+- `team_computed.blue_chip_score`/`depth_score` store the batting+pitching-**combined** Blue-Chip and Depth totals separately — purely a display decomposition of numbers that already summed into `minor_league_batting_rating`/`minor_league_pitching_rating`, not a new calculation.
+- **Blue-Chip and Depth are graded by percentile among orgs** (a fresh, round 5-band calibration — top 10% Elite, next 20% Plus, middle 40% Average, next 20% Below Average, bottom 10% Well Below Average — deliberately NOT the player-level 20-80 grade-word table, since these are arbitrary-unit sums with no meaning outside league context).
+- **Balance Index is graded on ABSOLUTE fixed thresholds instead** (≥0.90 Elite, ≥0.75 Plus, ≥0.55 Average, ≥0.35 Below Average, else Well Below Average) — caught live during the build: the whole league currently clusters at 0.85–0.98 balance (no genuinely lopsided systems exist this season), so percentile grading made an objectively strong 0.91 read as "Below Average" purely because a few orgs sat even higher. Balance Index is a self-explanatory 0-1 ratio with real absolute meaning on its own, unlike Blue-Chip/Depth, so grading it against the league's current distribution rather than its own fixed scale was the actual bug, not a calibration nitpick.
+
 ## 6. What's unchanged
 
 - The underlying prospect population (league-wide prospect pool, scoped to each org) — same players who'd have counted under the old methodology.

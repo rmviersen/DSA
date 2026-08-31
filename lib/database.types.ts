@@ -1115,6 +1115,35 @@ export type Database = {
           },
         ]
       }
+      org_system_bios: {
+        Row: {
+          bio_text: string
+          generated_at: string
+          organization_id: number
+          refresh_run_id: number
+        }
+        Insert: {
+          bio_text: string
+          generated_at?: string
+          organization_id: number
+          refresh_run_id: number
+        }
+        Update: {
+          bio_text?: string
+          generated_at?: string
+          organization_id?: number
+          refresh_run_id?: number
+        }
+        Relationships: [
+          {
+            foreignKeyName: "org_system_bios_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: true
+            referencedRelation: "teams"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       platform_events: {
         Row: {
           created_at: string
@@ -2944,7 +2973,9 @@ export type Database = {
           batting: number | null
           batting_prospect_rank: number | null
           batting_rank: number | null
+          blue_chip_score: number | null
           captured_at: string
+          depth_score: number | null
           draft_rating: number | null
           fielding: number | null
           fielding_rank: number | null
@@ -2976,7 +3007,9 @@ export type Database = {
           batting?: number | null
           batting_prospect_rank?: number | null
           batting_rank?: number | null
+          blue_chip_score?: number | null
           captured_at: string
+          depth_score?: number | null
           draft_rating?: number | null
           fielding?: number | null
           fielding_rank?: number | null
@@ -3008,7 +3041,9 @@ export type Database = {
           batting?: number | null
           batting_prospect_rank?: number | null
           batting_rank?: number | null
+          blue_chip_score?: number | null
           captured_at?: string
+          depth_score?: number | null
           draft_rating?: number | null
           fielding?: number | null
           fielding_rank?: number | null

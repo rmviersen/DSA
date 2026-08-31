@@ -938,6 +938,205 @@ tbody tr:last-child td {
   letter-spacing: 0.03em;
 }
 
+/* ── System Rankings cards (2026-08-31) ──
+   Same card-based language as the Top Prospects cards above (background/
+   border/radius/shadow, the same hover lift, the same whole-card click-to-
+   expand pattern for the org-analysis bio -- .prospect-card--clickable/
+   .prospect-bio-expanded/.prospect-bio-indicator are all reused verbatim
+   here rather than duplicated, since the interaction is identical) --
+   deliberately allowed to run TALLER than a prospect card, per Rees's
+   explicit spec, since each one carries a full team header, two five-name
+   columns, and a grade breakdown instead of one line of stats. */
+.system-cards {
+  display: flex;
+  flex-direction: column;
+  gap: 0.875rem;
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .system-cards {
+    animation: dsa-fade-in 0.15s ease;
+  }
+}
+
+.system-card {
+  background: var(--color-card-bg);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-sm);
+  padding: 1rem 1.25rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.875rem;
+  transition: transform 0.15s ease, box-shadow 0.15s ease;
+  position: relative;
+}
+
+.system-card:hover {
+  transform: scale(1.01);
+  box-shadow: var(--shadow-md);
+  z-index: 1;
+}
+
+/* Team + the four rank badges, one row (2026-08-31, Rees's spec: "the
+   ranks should be on the top line"). Wraps on narrow viewports (flex-wrap)
+   rather than forcing a horizontal scroll -- four rank badges plus a full
+   team name/logo is a lot to fit on one line at mobile widths. */
+.system-card-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+}
+
+.system-card-team {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  min-width: 0;
+}
+
+.system-card-logo {
+  width: 42px;
+  height: 42px;
+  border-radius: 50%;
+  flex-shrink: 0;
+  display: block;
+}
+
+.system-card-name {
+  font-family: var(--font-display), system-ui, sans-serif;
+  font-weight: 700;
+  font-size: 1.1875rem;
+  color: var(--color-heading);
+}
+
+.system-card-ranks {
+  display: flex;
+  gap: 1.25rem;
+  flex-wrap: wrap;
+}
+
+.system-rank-item {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.0625rem;
+}
+
+.system-rank-label {
+  font-size: 0.6875rem;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--color-text-muted);
+}
+
+/* Color comes inline via percentileStyle() in lib/display-helpers.ts --
+   the same red->orange->yellow->green->light-blue gradient already used
+   for grades on /players, /draft, and /org-minors, just re-anchored to
+   "where does this org rank among the league" instead of a raw 20-80
+   grade. Bold + slightly larger than the label above it, matching how
+   .prospect-card-rank .num is treated as the visually dominant number in
+   a prospect card's own header. */
+.system-rank-value {
+  font-family: var(--font-display), system-ui, sans-serif;
+  font-weight: 700;
+  font-size: 1.125rem;
+  line-height: 1;
+}
+
+/* Top 5 hitters / top 5 pitchers, side by side (2026-08-31, Rees's spec).
+   Stacks to one column under 640px (see the media query further down) --
+   two 5-name columns side by side gets cramped well before mobile width. */
+.system-card-columns {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 1.5rem;
+}
+
+.system-card-column h3 {
+  font-family: var(--font-display), system-ui, sans-serif;
+  font-size: 0.8125rem;
+  font-weight: 700;
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+  color: var(--color-text-muted);
+  margin: 0 0 0.375rem;
+}
+
+.system-prospect-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  font-size: 0.875rem;
+}
+
+.system-prospect-list li {
+  display: flex;
+  gap: 0.4375rem;
+}
+
+.system-prospect-rank {
+  font-weight: 700;
+  color: var(--color-text-muted);
+  flex-shrink: 0;
+  min-width: 2rem;
+}
+
+.system-prospect-role {
+  color: var(--color-text-muted);
+  flex-shrink: 0;
+}
+
+.system-prospect-name {
+  color: var(--color-border-strong);
+  text-decoration: none;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.system-prospect-name:hover {
+  text-decoration: underline;
+}
+
+.system-prospect-empty {
+  font-size: 0.875rem;
+  color: var(--color-text-muted);
+  font-style: italic;
+}
+
+/* Blue-Chip / Depth / Balance breakdown (2026-08-31, Rees's spec: "an
+   actual breakdown of their grade to highlight the blue chip vs depth vs
+   balance... just displaying grades would work here" -- words, not the
+   underlying percentiles/raw scores). Same border-top-as-a-new-section
+   language as .prospect-bio-expanded below it. */
+.system-grade-breakdown {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.25rem 1.25rem;
+  border-top: 1px solid var(--color-border);
+  padding-top: 0.625rem;
+  font-size: 0.8125rem;
+  color: var(--color-text-muted);
+}
+
+.system-grade-breakdown b {
+  font-weight: 700;
+}
+
+@media (max-width: 640px) {
+  .system-card-columns {
+    grid-template-columns: 1fr;
+    gap: 0.75rem;
+  }
+}
+
 /* ── Role color-coding (2026-08-26) ──
    Five position-family hues (pitchers/catchers/infield/outfield/DH), each
    with one CSS custom property per specific role so multiple roles in the
