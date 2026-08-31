@@ -167,6 +167,8 @@ body {
   display: flex;
   align-items: center;
   justify-content: space-between;
+  flex-wrap: wrap;
+  row-gap: 0.5rem;
   gap: 1.5rem;
   max-width: var(--content-max-width);
   margin: 0 auto;
@@ -216,8 +218,29 @@ body {
 
 .site-nav-links {
   display: flex;
-  flex-wrap: wrap;
-  gap: 0.25rem;
+  flex-wrap: nowrap;
+  gap: 0.1rem;
+  /* 2026-08-31 fix: with 7 items (2 of them dropdowns) this was wrapping to
+     a second line -- crammed into a single row alongside the brand and the
+     right-side actions cluster, there simply wasn't enough width left for
+     all 7 at a realistic desktop size (confirmed: only ~450px of 1200px
+     remained at a 1280px window, but the links need ~700px). Rather than
+     trim the brand or the theme toggle/game-date/guest-preview controls to
+     fight for that space, .site-nav (above) now wraps -- this row takes
+     `flex-basis: 100%`, forcing it onto its own dedicated full-width line
+     below the brand+actions row, where it comfortably has the whole
+     container's width for one line. overflow-x/scrollbar-hiding kept only
+     as a last-resort safety net for a genuinely narrow custom window
+     between this and the 640px mobile breakpoint (which has its own
+     explicit column layout further down, unaffected by this). */
+  flex: 1 1 100%;
+  order: 3;
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+
+.site-nav-links::-webkit-scrollbar {
+  display: none;
 }
 
 /* Groups the right-side header items (Preview as Guest / login link, the
@@ -239,9 +262,10 @@ body {
   font-weight: 600;
   text-decoration: none;
   color: var(--color-text-on-navy-muted);
-  padding: 0.5rem 0.875rem;
+  padding: 0.5rem 0.7rem;
   border-radius: var(--radius-sm);
   transition: color 0.15s, background 0.15s;
+  white-space: nowrap;
 }
 
 .site-nav-links a:hover {
@@ -291,10 +315,11 @@ body {
   font-size: 0.9375rem;
   font-weight: 600;
   color: var(--color-text-on-navy-muted);
-  padding: 0.5rem 0.875rem;
+  padding: 0.5rem 0.7rem;
   border-radius: var(--radius-sm);
   cursor: default;
   transition: color 0.15s, background 0.15s;
+  white-space: nowrap;
 }
 
 .site-nav-dropdown-trigger::after {
@@ -311,12 +336,20 @@ body {
 .site-nav-dropdown-menu {
   display: none;
   position: absolute;
+  /* 2026-08-31 fix: this used to sit `margin-top: 0.25rem` below the
+     trigger -- a real gap OUTSIDE .site-nav-dropdown's hoverable box
+     (position:relative doesn't expand a parent to cover an absolutely-
+     positioned child), so moving the mouse from the trigger down to the
+     menu crossed a dead zone and lost :hover before arriving, closing the
+     menu -- exactly the "doesn't stay open long enough to click" bug Rees
+     hit. Flush against the trigger (top: 100%, no margin) closes that gap
+     entirely; the lost breathing room is added back as padding-top
+     instead, which IS inside the hoverable box. */
   top: 100%;
   left: 0;
   flex-direction: column;
   min-width: 12rem;
-  padding: 0.4rem;
-  margin-top: 0.25rem;
+  padding: 0.65rem 0.4rem 0.4rem;
   background: var(--color-navy);
   border: 1px solid rgba(255, 255, 255, 0.12);
   border-radius: var(--radius-sm);

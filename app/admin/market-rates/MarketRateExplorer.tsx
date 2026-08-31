@@ -2,7 +2,7 @@
 
 import { useMemo, useState } from "react";
 import {
-  ScatterChart, Scatter, XAxis, YAxis, ZAxis, CartesianGrid, Tooltip, Legend,
+  Scatter, XAxis, YAxis, ZAxis, CartesianGrid, Legend,
   ResponsiveContainer, Line, ComposedChart,
 } from "recharts";
 import type { MarketRateCurve, RoleMultiplier, TrainingContractPoint } from "../../../lib/market-rate-query";
@@ -60,6 +60,18 @@ export default function MarketRateExplorer({ curves, roleMultipliers, contracts 
   const [playerTypeFilter, setPlayerTypeFilter] = useState<PlayerTypeFilter>("all");
   const [roleFilter, setRoleFilter] = useState<Set<string>>(new Set(allRoles));
   const [drilldownRole, setDrilldownRole] = useState<string | null>(null);
+
+  // Point detail panel, driven by explicit per-Scatter handlers rather than
+  // recharts' built-in <Tooltip> (2026-08-31 fix -- the built-in tooltip
+  // wasn't firing on hover at all; recharts v3 supports onMouseEnter/
+  // onMouseLeave/onClick directly on <Scatter>, dispatched per-symbol, which
+  // is both more reliable and gives "hover OR click" for free, per Rees's
+  // ask). Hovering shows a live preview; clicking pins a point so its detail
+  // stays visible even after the mouse moves away -- cleared by clicking the
+  // same point again or picking a different one.
+  const [hoveredPoint, setHoveredPoint] = useState<TrainingContractPoint | null>(null);
+  const [pinnedPoint, setPinnedPoint] = useState<TrainingContractPoint | null>(null);
+  const activePoint = hoveredPoint ?? pinnedPoint;
 
   const hitterCurve = curves.find((c) => c.playerType === "hitter");
   const pitcherCurve = curves.find((c) => c.playerType === "pitcher");
@@ -182,29 +194,44 @@ export default function MarketRateExplorer({ curves, roleMultipliers, contracts 
 
       {/* Scatter plot */}
       <div style={cardStyle}>
-        <h2 style={sectionTitleStyle}>Overall vs. Contract Value (AAV)</h2>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", flexWrap: "wrap", gap: "0.75rem", marginBottom: "0.75rem" }}>
+          <h2 style={{ ...sectionTitleStyle, margin: 0 }}>Overall vs. Contract Value (AAV)</h2>
+          {/* Point detail panel -- always rendered (even empty) so the layout
+              doesn't jump as the user hovers/clicks around. */}
+          <div
+            style={{
+              minWidth: 260, minHeight: 64, padding: "0.5rem 0.85rem", borderRadius: 6,
+              border: `1px solid ${activePoint ? colorForRole(activePoint.role) : "var(--color-border)"}`,
+              background: "var(--color-bg)", fontSize: "0.8125rem",
+            }}
+          >
+            {activePoint ? (
+              <>
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", gap: "0.5rem" }}>
+                  <span style={{ fontWeight: 700 }}>{activePoint.playerName}</span>
+                  {pinnedPoint && !hoveredPoint && (
+                    <button
+                      onClick={() => setPinnedPoint(null)}
+                      style={{ border: "none", background: "none", color: "var(--color-text-muted)", cursor: "pointer", fontSize: "0.75rem", padding: 0 }}
+                    >
+                      clear ✕
+                    </button>
+                  )}
+                </div>
+                <div style={{ color: "var(--color-text-muted)" }}>{activePoint.role} · Overall {activePoint.overall.toFixed(1)}</div>
+                <div style={{ fontWeight: 600 }}>{fmtMoney(activePoint.aav)} AAV · {activePoint.years}yr, signed {activePoint.seasonYear}</div>
+              </>
+            ) : (
+              <div style={{ color: "var(--color-text-muted)", lineHeight: "64px" }}>Hover or click a point for details</div>
+            )}
+          </div>
+        </div>
         <ResponsiveContainer width="100%" height={480}>
           <ComposedChart margin={{ top: 10, right: 30, bottom: 10, left: 10 }}>
             <CartesianGrid strokeDasharray="3 3" stroke="var(--color-border)" />
             <XAxis type="number" dataKey="overall" name="Overall" domain={["auto", "auto"]} tick={{ fontSize: 12 }} label={{ value: "Overall", position: "insideBottom", offset: -5, fontSize: 12 }} />
             <YAxis type="number" dataKey="aav" name="AAV" tickFormatter={fmtMoney} tick={{ fontSize: 12 }} width={70} label={{ value: "AAV", angle: -90, position: "insideLeft", fontSize: 12 }} />
             <ZAxis range={[70, 70]} />
-            <Tooltip
-              cursor={{ strokeDasharray: "3 3" }}
-              content={({ active, payload }) => {
-                if (!active || !payload || payload.length === 0) return null;
-                const p = payload[0].payload as TrainingContractPoint & { overall: number; aav: number };
-                if (!("playerName" in p)) return null; // a curve-line point, not a real contract
-                return (
-                  <div style={{ background: "var(--color-surface)", border: "1px solid var(--color-border)", borderRadius: 6, padding: "0.6rem 0.8rem", boxShadow: "var(--shadow-md)", fontSize: "0.8125rem" }}>
-                    <div style={{ fontWeight: 700, marginBottom: 2 }}>{p.playerName}</div>
-                    <div style={{ color: "var(--color-text-muted)" }}>{p.role} · Overall {p.overall.toFixed(1)}</div>
-                    <div style={{ fontWeight: 600, marginTop: 4 }}>{fmtMoney(p.aav)} AAV</div>
-                    <div style={{ color: "var(--color-text-muted)", fontSize: "0.75rem" }}>{p.years}yr, signed {p.seasonYear}</div>
-                  </div>
-                );
-              }}
-            />
             <Legend verticalAlign="top" height={32} />
             {allRoles.filter((r) => roleFilter.has(r) && (playerTypeFilter === "all" || filtered.some((c) => c.role === r))).map((role) => (
               <Scatter
@@ -213,6 +240,13 @@ export default function MarketRateExplorer({ curves, roleMultipliers, contracts 
                 data={filtered.filter((c) => c.role === role)}
                 fill={colorForRole(role)}
                 fillOpacity={0.75}
+                cursor="pointer"
+                onMouseEnter={(data: unknown) => setHoveredPoint(data as TrainingContractPoint)}
+                onMouseLeave={() => setHoveredPoint(null)}
+                onClick={(data: unknown) => {
+                  const point = data as TrainingContractPoint;
+                  setPinnedPoint((prev) => (prev && prev.playerId === point.playerId && prev.seasonYear === point.seasonYear ? null : point));
+                }}
               />
             ))}
             {curveLines.map((line) => (
