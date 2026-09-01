@@ -21,7 +21,8 @@ const pageTitleStyle = {
 export default async function WeightTuningPage() {
   const [snapshots, history] = await Promise.all([getLatestWeightTuningSnapshots(), getWeightTuningHistory()]);
 
-  const hasAny = snapshots.hitting || snapshots.baserunning || snapshots.pitching_sp || snapshots.pitching_rp || snapshots.overall_blend;
+  const hasAny = snapshots.hitting || snapshots.baserunning || snapshots.pitching_sp || snapshots.pitching_rp
+    || snapshots.pitching_sp_war || snapshots.pitching_rp_war || snapshots.overall_blend;
   if (!hasAny) {
     return (
       <div style={{ padding: "2rem" }}>

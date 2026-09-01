@@ -202,6 +202,23 @@ Rees pushed back on two things about the first pitching regression, both correct
 - **`/admin/weight-tuning`'s old pooled "Pitching" tab retired** in favor of separate "Pitching (SP)"/"Pitching (RP)" tabs — historical pooled rows are left in `weight_tuning_runs` (stream `pitching`), just no longer surfaced as a tab. New stream values `pitching_sp`/`pitching_rp` added to the table's check constraint.
 - **Diagnostic only, same as everything else** — nothing written to `rating_weights` yet.
 
+### Pitching: FIP- and WAR/100 IP now shown side by side, both split by SP/RP (2026-09-02)
+
+Rees, before deciding whether to ship the FIP--based split: "I want to have both regressions available in the page." Also noted the built-in Control gate already offsets some of the weight reduction for poor-control pitchers, which helps rationalize a lower linear Control weight than today's 0.300. `compute-pitching-weights.ts` now runs all four combinations (same population/predictors each time, only the target differs) and persists each to its own stream (`pitching_sp`/`pitching_rp` = FIP-, `pitching_sp_war`/`pitching_rp_war` = WAR/100 IP), all visible as separate tabs on `/admin/weight-tuning`.
+
+| | SP · FIP- | SP · WAR | RP · FIP- | RP · WAR |
+|---|---|---|---|---|
+| R² | 0.421 | **0.462** | 0.276 | **0.344** |
+| Stuff | 0.327 | 0.297 | 0.475 | 0.412 |
+| Movement | 0.428 | 0.420 | 0.311 | 0.322 |
+| Control | 0.190 | 0.193 | 0.214 | 0.185 |
+| Stamina | 0.055 | 0.090 | 0.000 | 0.081 |
+
+- **Control is remarkably stable across all four constructions** — 0.185 to 0.214 regardless of role or target. That's a much stronger signal than any single regression alone: four independently-built fits converging tightly in the same band is real evidence, not an artifact of one target's quirks. Consistently below today's live 0.300, consistently above the original (flawed, pooled) regression's 0.174.
+- **WAR shows a *higher* R² than the hand-built FIP- in both roles** — worth being upfront about rather than assuming FIP- automatically "won." Plausible explanation: this engine's `player_pitching_stats_snapshots.war` field sits alongside a separate `ra9war` column, which suggests `war` here may already be a FIP-flavored (not pure runs-allowed) calculation, refined beyond this session's simplified constant-based FIP- construction — meaning Rees's original "WAR bakes in too much non-skill noise" concern may be less true for *this specific* `war` field than for real MLB's runs-allowed-based pitcher WAR. Not confirmed which field is which; flagged as an open question, not resolved.
+- **Stamina scores meaningfully higher under WAR than under FIP-** (0.090/0.081 vs 0.055/0.000) — plausible reading: WAR-per-inning still carries some residual usage/context signal that a purely rate-based FIP- construction strips out entirely, consistent with the earlier theory that stamina's real value operates through innings *volume*, not per-inning quality.
+- Still fully diagnostic — nothing written to `rating_weights`. Rees is doing further analysis across all four before deciding what (if anything) to ship.
+
 ### Not built yet (don't design against these)
 - Win/loss-based team power rankings (needs league-relative stat normalization, not started)
 - Ratings/computed values for pre-draft amateurs — same rating engine works fine on them once they have data, but the ingestion pipeline for their scouted grades is still manual/deferred

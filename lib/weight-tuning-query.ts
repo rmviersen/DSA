@@ -13,17 +13,22 @@ import { makeSupabaseClient } from "./supabase-client";
 // export, not just a type, from this module would otherwise pull a
 // server-only env var read into the browser bundle).
 
-export type Stream = "hitting" | "baserunning" | "pitching" | "overall_blend" | "pitching_sp" | "pitching_rp";
+export type Stream = "hitting" | "baserunning" | "pitching" | "overall_blend" | "pitching_sp" | "pitching_rp" | "pitching_sp_war" | "pitching_rp_war";
 export const STREAMS: { key: Stream; label: string }[] = [
   { key: "hitting", label: "Hitting" },
   { key: "baserunning", label: "Baserunning" },
-  { key: "pitching_sp", label: "Pitching (SP)" },
-  { key: "pitching_rp", label: "Pitching (RP)" },
+  { key: "pitching_sp", label: "Pitching (SP, FIP-)" },
+  { key: "pitching_rp", label: "Pitching (RP, FIP-)" },
+  { key: "pitching_sp_war", label: "Pitching (SP, WAR)" },
+  { key: "pitching_rp_war", label: "Pitching (RP, WAR)" },
   { key: "overall_blend", label: "Batter Blend" },
 ];
 // "pitching" (undifferentiated, pooled SP+RP) is retired as of 2026-09-02 in
-// favor of pitching_sp/pitching_rp -- its historical rows are left in
-// weight_tuning_runs, just no longer shown as a tab.
+// favor of the role-split streams above -- its historical rows are left in
+// weight_tuning_runs, just no longer shown as a tab. Both FIP- and WAR/100 IP
+// versions of the SP/RP split are kept side by side (2026-09-02, Rees's ask,
+// for comparing how much the target metric itself changes the implied
+// weights) -- same population/predictors, only the target differs.
 
 export interface WeightTuningCoefficientRow {
   key: string;
@@ -61,7 +66,10 @@ export async function getLatestWeightTuningSnapshots(): Promise<Record<Stream, W
     .order("refresh_run_id", { ascending: false });
   if (error) throw error;
 
-  const result: Record<Stream, WeightTuningSnapshot | null> = { hitting: null, baserunning: null, pitching: null, overall_blend: null, pitching_sp: null, pitching_rp: null };
+  const result: Record<Stream, WeightTuningSnapshot | null> = {
+    hitting: null, baserunning: null, pitching: null, overall_blend: null,
+    pitching_sp: null, pitching_rp: null, pitching_sp_war: null, pitching_rp_war: null,
+  };
   const latestRunRowByStream = new Map<Stream, { id: number; refresh_run_id: number; target_metric: string; r_squared: number; sample_size: number; computed_at: string }>();
   for (const r of (runs ?? []) as { id: number; refresh_run_id: number; stream: Stream; target_metric: string; r_squared: number; sample_size: number; computed_at: string }[]) {
     if (!latestRunRowByStream.has(r.stream)) latestRunRowByStream.set(r.stream, r);

@@ -4,7 +4,11 @@ import { fitMultipleLinear } from "../lib/regression.js";
 import { persistWeightTuningRun } from "../lib/weight-tuning-persist.js";
 
 // Pitching weight-tuning (rebuilt 2026-09-02, Rees's corrections to the
-// original version):
+// original version). Runs BOTH targets side by side (Rees's follow-up ask,
+// same day, before deciding whether to ship) -- FIP- AND WAR/100 IP, each
+// split by SP/RP, same population/predictors, only the target differs. All
+// four persist to their own weight_tuning_runs stream so they're all
+// visible together on /admin/weight-tuning, not just FIP-'s word for it.
 //
 // 1. Target is FIP- (park-adjusted), not WAR -- WAR bakes in real runs
 //    allowed, which is heavily influenced by defense/luck/sequencing on
@@ -117,15 +121,16 @@ async function main() {
     return !!meta && meta.league_id === 200 && (meta.mlb_service_days ?? 0) > 0;
   };
 
-  console.log("Loading 2031 MLB pitching stats (bb, hp, k, hra, ip, er)...");
-  const pitchingRows = await fetchAll<{ player_id: number; team_id: number | null; bb: number | null; hp: number | null; k: number | null; hra: number | null; ip: number | null; er: number | null }>((from, to) =>
-    supabase.from("player_pitching_stats_snapshots").select("player_id, team_id, bb, hp, k, hra, ip, er")
+  console.log("Loading 2031 MLB pitching stats (bb, hp, k, hra, ip, er, war)...");
+  const pitchingRows = await fetchAll<{ player_id: number; team_id: number | null; bb: number | null; hp: number | null; k: number | null; hra: number | null; ip: number | null; er: number | null; war: number | null }>((from, to) =>
+    supabase.from("player_pitching_stats_snapshots").select("player_id, team_id, bb, hp, k, hra, ip, er, war")
       .eq("year", 2031).eq("level_id", 1).eq("split_id", 1).eq("refresh_run_id", statsRunId)
       .range(from, to) as never
   );
 
   const byPlayerRaw = new Map<number, PitchCategories>();
   const byPlayerAdjusted = new Map<number, PitchCategories>();
+  const warByPlayer = new Map<number, number>(); // unadjusted -- Rees's ask is to compare against WAR/100 IP as-is, not a park-adjusted version of it
   for (const p of pitchingRows) {
     if (!isRealMlbPlayer(p.player_id)) continue;
     const stint: PitchCategories = { bb: p.bb ?? 0, hp: p.hp ?? 0, k: p.k ?? 0, hr: p.hra ?? 0, ip: p.ip ?? 0, er: p.er ?? 0 };
@@ -133,6 +138,7 @@ async function main() {
     const hrFactor = p.team_id != null ? hrFactorByTeam.get(p.team_id) : undefined;
     const adjustedHr = hrFactor != null ? stint.hr / (1 + (hrFactor - 1) * 0.5) : stint.hr;
     byPlayerAdjusted.set(p.player_id, addTotals(byPlayerAdjusted.get(p.player_id) ?? emptyTotals(), { ...stint, hr: adjustedHr }));
+    warByPlayer.set(p.player_id, (warByPlayer.get(p.player_id) ?? 0) + (p.war ?? 0));
   }
   console.log(`  ${byPlayerRaw.size} real MLB pitchers with any 2031 IP`);
 
@@ -158,7 +164,7 @@ async function main() {
   );
   const computedByPlayer = new Map(computed.map((c) => [c.player_id, c]));
 
-  interface Row { playerId: number; fipMinus: number; stf: number; mov: number; ctrl: number; stm: number; qp: number; ip: number }
+  interface Row { playerId: number; fipMinus: number; warRate: number; stf: number; mov: number; ctrl: number; stm: number; qp: number; ip: number }
   const spRows: Row[] = [];
   const rpRows: Row[] = [];
   for (const [playerId, adjusted] of byPlayerAdjusted) {
@@ -169,23 +175,29 @@ async function main() {
     const r = ratingsByPlayer.get(playerId);
     if (!r || r.stf == null || r.mov == null || r.ctrl == null || r.stm == null || c.qp == null) continue;
     const fipMinus = 100 * (fip(adjusted, fipConstant) / leagueFip);
-    const row: Row = { playerId, fipMinus, stf: r.stf, mov: r.mov, ctrl: r.ctrl, stm: r.stm, qp: c.qp, ip: adjusted.ip };
+    const warRate = ((warByPlayer.get(playerId) ?? 0) / adjusted.ip) * 100;
+    const row: Row = { playerId, fipMinus, warRate, stf: r.stf, mov: r.mov, ctrl: r.ctrl, stm: r.stm, qp: c.qp, ip: adjusted.ip };
     (c.role === "SP" ? spRows : rpRows).push(row);
   }
   console.log(`  ${spRows.length} qualifying SP (>=${MIN_IP_SP} IP), ${rpRows.length} qualifying RP (>=${MIN_IP_RP} IP)`);
 
   const labels = ["Stuff", "Movement", "Control", "Stamina"];
 
-  async function runForRole(roleLabel: "SP" | "RP", rows: Row[], stream: "pitching_sp" | "pitching_rp") {
+  // Runs one role x one target combination. `getY` returns the value to
+  // regress against, already sign-adjusted so higher is always better (FIP-
+  // is inverted by the caller since it's a lower-is-better stat -- see call
+  // sites below) -- keeps every persisted coefficient's sign meaning
+  // identical regardless of which of the two targets produced it.
+  async function runOne(
+    roleLabel: "SP" | "RP", rows: Row[], stream: "pitching_sp" | "pitching_rp" | "pitching_sp_war" | "pitching_rp_war",
+    targetLabel: string, getY: (r: Row) => number
+  ) {
     if (rows.length < 30) {
-      console.log(`\n${roleLabel}: only ${rows.length} qualifying pitchers -- too small to trust a 4-variable regression. Skipping.`);
+      console.log(`\n${roleLabel} / ${targetLabel}: only ${rows.length} qualifying pitchers -- too small to trust a 4-variable regression. Skipping.`);
       return;
     }
-    // Regress against NEGATIVE FIP- so a positive coefficient always means
-    // "better pitching" -- consistent sign convention with every other
-    // script this session, even though FIP- itself is a lower-is-better stat.
-    const fit = fitMultipleLinear(rows.map((r) => ({ x: [r.stf, r.mov, r.ctrl, r.stm], y: -r.fipMinus })));
-    console.log(`\n${roleLabel}: -FIP- ~ Stuff + Movement + Control + Stamina  (n=${rows.length}, R²=${fit.rSquared.toFixed(3)})`);
+    const fit = fitMultipleLinear(rows.map((r) => ({ x: [r.stf, r.mov, r.ctrl, r.stm], y: getY(r) })));
+    console.log(`\n${roleLabel} vs. ${targetLabel}  (n=${rows.length}, R²=${fit.rSquared.toFixed(3)})`);
     for (let i = 0; i < labels.length; i++) {
       console.log(`  ${labels[i].padEnd(10)} standardized=${fit.standardizedCoefficients[i].toFixed(3)}`);
     }
@@ -203,14 +215,13 @@ async function main() {
     // Exploratory 5-variable variant with "quality pitches" (qp) added --
     // printed for context only, NOT persisted (see the file-level comment
     // on why: likely collinear with Stuff, magnitude of overlap unknown).
-    const fitWithQp = fitMultipleLinear(rows.map((r) => ({ x: [r.stf, r.mov, r.ctrl, r.stm, r.qp], y: -r.fipMinus })));
+    const fitWithQp = fitMultipleLinear(rows.map((r) => ({ x: [r.stf, r.mov, r.ctrl, r.stm, r.qp], y: getY(r) })));
     console.log(`  Exploratory, with QP count added (R²=${fitWithQp.rSquared.toFixed(3)}): ${[...labels, "QP count"].map((l, i) => `${l}=${fitWithQp.standardizedCoefficients[i].toFixed(3)}`).join(", ")}`);
-    console.log(`  (not persisted -- QP is likely built from the same underlying per-pitch-type grades as Stuff; watch for Stuff's own coefficient dropping here as the signal of that overlap)`);
 
     await persistWeightTuningRun(supabase, {
       refreshRunId: computedRunId,
       stream,
-      targetMetric: `FIP- (park-adjusted, ${roleLabel} only)`,
+      targetMetric: `${targetLabel} (${roleLabel} only)`,
       rSquared: fit.rSquared,
       sampleSize: rows.length,
       coefficients: labels.map((label, i) => ({
@@ -224,8 +235,13 @@ async function main() {
     });
   }
 
-  await runForRole("SP", spRows, "pitching_sp");
-  await runForRole("RP", rpRows, "pitching_rp");
+  // Both targets, both roles -- Rees's ask, to compare side by side on
+  // /admin/weight-tuning how much the target metric itself moves the
+  // implied weights, not just take FIP-'s word for it.
+  await runOne("SP", spRows, "pitching_sp", "FIP- (park-adjusted)", (r) => -r.fipMinus);
+  await runOne("RP", rpRows, "pitching_rp", "FIP- (park-adjusted)", (r) => -r.fipMinus);
+  await runOne("SP", spRows, "pitching_sp_war", "WAR / 100 IP", (r) => r.warRate);
+  await runOne("RP", rpRows, "pitching_rp_war", "WAR / 100 IP", (r) => r.warRate);
 
   console.log("\nDone -- rating_weights itself is untouched; this only saved the diagnostic history.");
 }
