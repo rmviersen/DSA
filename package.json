@@ -13,6 +13,7 @@
     "compute-baserunning-weights": "tsx scripts/compute-baserunning-weights.ts",
     "scrape-ballpark-factors": "tsx scripts/scrape-ballpark-factors.ts",
     "compute-pitching-weights": "tsx scripts/compute-pitching-weights.ts",
+    "compute-overall-blend-weights": "tsx scripts/compute-overall-blend-weights.ts",
     "compute-team-ratings": "tsx scripts/compute-team-ratings.ts",
     "import-draft-pool": "tsx scripts/import-draft-pool.ts",
     "scrape-trade-block": "tsx scripts/scrape-trade-block.ts",

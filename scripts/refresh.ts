@@ -325,6 +325,13 @@ async function main() {
       console.error(`compute-pitching-weights.ts failed after a successful refresh -- raw data is fine, but this run's pitching regression wasn't saved: ${err}`);
       process.exitCode = 1;
     }
+    console.log("Computing Batting/Fielding/Baserunning blend weight-tuning regression for this run...");
+    try {
+      execFileSync("npx", ["tsx", "scripts/compute-overall-blend-weights.ts"], { stdio: "inherit", shell: true });
+    } catch (err) {
+      console.error(`compute-overall-blend-weights.ts failed after a successful refresh -- raw data is fine, but this run's overall-blend regression wasn't saved: ${err}`);
+      process.exitCode = 1;
+    }
 
     // Trade-value engine, market-rate piece (2026-08-31) -- accumulates any
     // newly-signed clean free-agent contracts into market_rate_training_

@@ -13,11 +13,12 @@ import { makeSupabaseClient } from "./supabase-client";
 // export, not just a type, from this module would otherwise pull a
 // server-only env var read into the browser bundle).
 
-export type Stream = "hitting" | "baserunning" | "pitching";
+export type Stream = "hitting" | "baserunning" | "pitching" | "overall_blend";
 export const STREAMS: { key: Stream; label: string }[] = [
   { key: "hitting", label: "Hitting" },
   { key: "baserunning", label: "Baserunning" },
   { key: "pitching", label: "Pitching" },
+  { key: "overall_blend", label: "Batter Blend" },
 ];
 
 export interface WeightTuningCoefficientRow {
@@ -56,7 +57,7 @@ export async function getLatestWeightTuningSnapshots(): Promise<Record<Stream, W
     .order("refresh_run_id", { ascending: false });
   if (error) throw error;
 
-  const result: Record<Stream, WeightTuningSnapshot | null> = { hitting: null, baserunning: null, pitching: null };
+  const result: Record<Stream, WeightTuningSnapshot | null> = { hitting: null, baserunning: null, pitching: null, overall_blend: null };
   const latestRunRowByStream = new Map<Stream, { id: number; refresh_run_id: number; target_metric: string; r_squared: number; sample_size: number; computed_at: string }>();
   for (const r of (runs ?? []) as { id: number; refresh_run_id: number; stream: Stream; target_metric: string; r_squared: number; sample_size: number; computed_at: string }[]) {
     if (!latestRunRowByStream.has(r.stream)) latestRunRowByStream.set(r.stream, r);

@@ -20,7 +20,7 @@ const statLabelStyle: React.CSSProperties = { fontSize: "0.75rem", color: "var(-
 const statValueStyle: React.CSSProperties = { fontSize: "1.375rem", fontWeight: 700, fontVariantNumeric: "tabular-nums", color: "var(--color-heading)" };
 
 const STREAM_COLORS: Record<Stream, string> = {
-  hitting: "#0b3049", baserunning: "#57904a", pitching: "#a8763a",
+  hitting: "#0b3049", baserunning: "#57904a", pitching: "#a8763a", overall_blend: "#8a5a9e",
 };
 
 interface Props {
@@ -153,9 +153,9 @@ export default function WeightTuningExplorer({ snapshots, history }: Props) {
         <h2 style={sectionTitleStyle}>R² over time, by stream</h2>
         {historyByRun.length <= 1 ? (
           <p style={{ color: "var(--color-text-muted)", fontSize: "0.875rem" }}>
-            Only one refresh&apos;s worth of history so far — this chart fills in as more refreshes run (each of the
-            three scripts now runs automatically every refresh, see <code>refresh.ts</code>). Come back after a
-            few more sims to see a real trend instead of a single point.
+            Only one refresh&apos;s worth of history so far — this chart fills in as more refreshes run (all four
+            scripts now run automatically every refresh, see <code>refresh.ts</code>). Come back after a few more
+            sims to see a real trend instead of a single point.
           </p>
         ) : (
           <ResponsiveContainer width="100%" height={280}>

@@ -21,7 +21,7 @@ export async function persistWeightTuningRun(
   supabase: SupabaseClient<any>,
   opts: {
     refreshRunId: number;
-    stream: "hitting" | "baserunning" | "pitching";
+    stream: "hitting" | "baserunning" | "pitching" | "overall_blend";
     targetMetric: string;
     rSquared: number;
     sampleSize: number;
