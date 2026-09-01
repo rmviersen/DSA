@@ -273,6 +273,19 @@ async function main() {
       process.exitCode = 1;
     }
 
+    // Role-calibrated fielding weight (2026-08-31) -- reads the
+    // player_computed/rating snapshot this run JUST wrote, so its output
+    // (fielding_role_weights) is naturally one refresh behind: this run's
+    // numbers get picked up by compute-ratings.ts on the NEXT refresh, not
+    // this one. Same lag already accepted for contracts vs. ratings.
+    console.log("Computing role-calibrated fielding weights for this run...");
+    try {
+      execFileSync("npx", ["tsx", "scripts/compute-fielding-weights.ts"], { stdio: "inherit", shell: true });
+    } catch (err) {
+      console.error(`compute-fielding-weights.ts failed after a successful refresh -- raw data is fine, but fielding_role_weights wasn't refreshed this run: ${err}`);
+      process.exitCode = 1;
+    }
+
     // Trade-value engine, market-rate piece (2026-08-31) -- accumulates any
     // newly-signed clean free-agent contracts into market_rate_training_
     // contracts. Cheap and append-only (a no-op for a contract already on

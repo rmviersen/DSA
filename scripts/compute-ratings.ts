@@ -27,6 +27,27 @@ async function main() {
   const weights: WeightSet = weightRow as WeightSet;
   console.log(`Using weight set #${weights.id}: "${(weightRow as { label: string }).label}"`);
 
+  // Role-calibrated fielding weight (2026-08-31) -- fielding_role_weights is
+  // computed separately by scripts/compute-fielding-weights.ts (its own
+  // refresh_run_id, one run behind this one, same lag already accepted
+  // elsewhere in this pipeline e.g. contracts vs. ratings). Missing
+  // entirely (table never populated yet) or missing a specific role both
+  // fall back to a multiplier of 1 inside computeRatings -- today's flat
+  // w.fielding behavior, unchanged.
+  console.log("Loading role-calibrated fielding weights (if any exist yet)...");
+  const { data: fieldingWeightRows } = await supabase
+    .from("fielding_role_weights").select("refresh_run_id, role, relative_multiplier").order("refresh_run_id", { ascending: false });
+  const fieldingWeights: Record<string, number> = {};
+  if (fieldingWeightRows && fieldingWeightRows.length > 0) {
+    const latestFieldingRunId = (fieldingWeightRows[0] as { refresh_run_id: number }).refresh_run_id;
+    for (const row of fieldingWeightRows as { refresh_run_id: number; role: string; relative_multiplier: number }[]) {
+      if (row.refresh_run_id === latestFieldingRunId) fieldingWeights[row.role] = row.relative_multiplier;
+    }
+    console.log(`  Using fielding weights from refresh_run_id ${latestFieldingRunId}: ${JSON.stringify(fieldingWeights)}`);
+  } else {
+    console.log("  None found yet -- every role uses the flat w.fielding baseline this run.");
+  }
+
   console.log("Finding latest succeeded refresh run with ratings...");
   const { data: runRow, error: runErr } = await supabase
     .from("refresh_runs")
@@ -206,7 +227,7 @@ async function main() {
     // age lives on `players`, not `player_ratings_snapshots` -- merged in
     // here for the age-gated Contact/Control floor gates (2026-08-27).
     const age = playerById.get(r.player_id)?.age ?? null;
-    const c = computeRatings({ ...r, age }, weights, splits);
+    const c = computeRatings({ ...r, age }, weights, splits, fieldingWeights);
     return { player_id: r.player_id, ...c };
   });
 

@@ -8,6 +8,7 @@
     "check-new-sim": "tsx scripts/check-new-sim.ts",
     "refresh:public-only": "tsx scripts/refresh.ts --skip-ratings",
     "compute-ratings": "tsx scripts/compute-ratings.ts",
+    "compute-fielding-weights": "tsx scripts/compute-fielding-weights.ts",
     "compute-team-ratings": "tsx scripts/compute-team-ratings.ts",
     "import-draft-pool": "tsx scripts/import-draft-pool.ts",
     "scrape-trade-block": "tsx scripts/scrape-trade-block.ts",

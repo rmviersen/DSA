@@ -34,3 +34,34 @@ export function fitLine(points: { x: number; y: number }[]): RegressionResult {
   const residualStdDev = n > 2 ? Math.sqrt(ssRes / (n - 2)) : 0;
   return { intercept, slope, rSquared, residualStdDev };
 }
+
+// Pool-adjacent-violators algorithm (2026-08-31, for scripts/compute-
+// fielding-weights.ts): projects `values` -- given in the order you want the
+// OUTPUT to respect -- onto the nearest non-increasing sequence, weighted by
+// `weights` (a bigger weight is trusted more during merging, e.g. sample
+// size). Whenever a value is bigger than the one before it (a violation of
+// "non-increasing"), the two are merged into one weighted-average block and
+// the check repeats backward until the whole sequence is non-increasing
+// again. This is what guarantees an ordering constraint (e.g. "SS's fielding
+// weight can never end up below 1B's") holds by construction, not by hoping
+// a noisy per-group regression happens to agree with it.
+export function isotonicRegressionNonIncreasing(values: number[], weights: number[]): number[] {
+  interface Block { value: number; weight: number; count: number }
+  const stack: Block[] = [];
+  for (let i = 0; i < values.length; i++) {
+    let merged: Block = { value: values[i], weight: weights[i], count: 1 };
+    while (stack.length > 0 && stack[stack.length - 1].value < merged.value) {
+      const prev = stack.pop()!;
+      const totalWeight = prev.weight + merged.weight;
+      merged = {
+        value: totalWeight === 0 ? merged.value : (prev.value * prev.weight + merged.value * merged.weight) / totalWeight,
+        weight: totalWeight,
+        count: prev.count + merged.count,
+      };
+    }
+    stack.push(merged);
+  }
+  const result: number[] = [];
+  for (const block of stack) for (let i = 0; i < block.count; i++) result.push(block.value);
+  return result;
+}

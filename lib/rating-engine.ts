@@ -254,7 +254,14 @@ const countAtLeast = (threshold: number, ...grades: (number | null)[]) =>
   // compile error and blocks the production build entirely.
   grades.reduce<number>((n, g) => n + (g !== null && g >= threshold ? 1 : 0), 0);
 
-export function computeRatings(r: RatingsInput, w: WeightSet, splits: HandednessSplits): ComputedRatings {
+export function computeRatings(
+  r: RatingsInput, w: WeightSet, splits: HandednessSplits,
+  // Role -> relative fielding-weight multiplier (fielding_role_weights,
+  // computed by scripts/compute-fielding-weights.ts). Optional so existing
+  // callers/tests that don't pass one keep today's flat w.fielding
+  // behavior exactly (every role effectively gets multiplier 1).
+  fieldingWeights?: Record<string, number>
+): ComputedRatings {
   // Computed early (before Batting) so the catcher batting multiplier below
   // can gate on it -- deliberately mirrors the Role priority-1 "C" branch
   // further down (same threshold, `ROLE_BUCKET_THRESHOLDS.c_pot`), reused
@@ -472,14 +479,6 @@ export function computeRatings(r: RatingsInput, w: WeightSet, splits: Handedness
     zero(r.stm) * w.stamina + qpp * w.qp_multiplier) * controlGateP;
   const pitchingP = Math.max(pitching, pitchingPRaw - 3);
 
-  const overall = Math.max(batting + fielding * w.fielding, pitching);
-  const potential = Math.max(battingP + fielding * w.fielding, pitchingP);
-  const ph: "H" | "P" = batting + fielding * w.fielding > pitching ? "H" : "P";
-
-  const isBustRisk = r.prone === "Fragile" || r.prone === "Wrecked";
-  const riskAdjusted = isBustRisk ? potential - 5 : potential;
-  const prospectPotential = riskAdjusted + overall * 0.25 - 12.5;
-
   // --- SP/RP: on-field role classification from stamina/pitch-mix, distinct
   // from the isSP check above (which uses the player's real assigned position
   // to decide the Pitching formula's starter bonus). This is a display label,
@@ -491,6 +490,12 @@ export function computeRatings(r: RatingsInput, w: WeightSet, splits: Handedness
   // --- Role: position-player role grouping. See ROLE_BUCKET_THRESHOLDS
   // above for the full rationale. Priority order (first match wins) is the
   // real defensive spectrum: C -> SS -> CF -> INF (2B/3B) -> COF -> 1B -> DH.
+  // Moved ahead of Overall/Potential below (2026-08-31) -- previously
+  // computed after them, back when Role was purely a display label with no
+  // bearing on the formula itself. Now that fieldingWeight (right below)
+  // needs to look Role up, it has to exist first. Safe to move: nothing in
+  // this block depends on overall/batting/fielding, only on raw grades and
+  // sp_rp/battingP/pitchingP, all already computed above this point.
   let role: string;
   if (r.pos === "SP" || r.pos === "RP" || r.pos === "CL") {
     role = sp_rp;
@@ -509,6 +514,26 @@ export function computeRatings(r: RatingsInput, w: WeightSet, splits: Handedness
   } else {
     role = "DH";
   }
+
+  // --- Role-calibrated fielding weight (2026-08-31, Rees's ask) --
+  // fieldingWeights is a role -> relative-multiplier map computed by
+  // scripts/compute-fielding-weights.ts (fielding_role_weights table),
+  // applied on top of the existing flat w.fielding baseline rather than
+  // replacing it -- a role sitting exactly at the league-wide average keeps
+  // today's behavior unchanged (multiplier 1), only roles with an earned,
+  // order-safe signal move away from it. Defaults to 1 (today's flat
+  // behavior, unchanged) if no per-role table has been computed yet, or for
+  // a role with no entry (pitchers never need one -- the `pitching` branch
+  // of the max() below doesn't involve fielding at all).
+  const fieldingWeight = w.fielding * (fieldingWeights?.[role] ?? 1);
+
+  const overall = Math.max(batting + fielding * fieldingWeight, pitching);
+  const potential = Math.max(battingP + fielding * fieldingWeight, pitchingP);
+  const ph: "H" | "P" = batting + fielding * fieldingWeight > pitching ? "H" : "P";
+
+  const isBustRisk = r.prone === "Fragile" || r.prone === "Wrecked";
+  const riskAdjusted = isBustRisk ? potential - 5 : potential;
+  const prospectPotential = riskAdjusted + overall * 0.25 - 12.5;
 
   // --- TBL Pos: which defensive positions this player projects to handle.
   const tblPos =

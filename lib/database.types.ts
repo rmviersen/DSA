@@ -1220,6 +1220,53 @@ export type Database = {
         }
         Relationships: []
       }
+      fielding_role_weights: {
+        Row: {
+          computed_at: string
+          id: number
+          ordered_slope: number
+          pooled_slope: number
+          raw_slope: number
+          refresh_run_id: number
+          relative_multiplier: number
+          role: string
+          sample_size: number
+          shrunk_slope: number
+        }
+        Insert: {
+          computed_at?: string
+          id?: never
+          ordered_slope: number
+          pooled_slope: number
+          raw_slope: number
+          refresh_run_id: number
+          relative_multiplier: number
+          role: string
+          sample_size: number
+          shrunk_slope: number
+        }
+        Update: {
+          computed_at?: string
+          id?: never
+          ordered_slope?: number
+          pooled_slope?: number
+          raw_slope?: number
+          refresh_run_id?: number
+          relative_multiplier?: number
+          role?: string
+          sample_size?: number
+          shrunk_slope?: number
+        }
+        Relationships: [
+          {
+            foreignKeyName: "fielding_role_weights_refresh_run_id_fkey"
+            columns: ["refresh_run_id"]
+            isOneToOne: false
+            referencedRelation: "refresh_runs"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       game_box_scores: {
         Row: {
           away_errors: number | null
