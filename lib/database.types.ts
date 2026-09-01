@@ -3237,8 +3237,16 @@ export type Database = {
           qp_multiplier: number
           qp_threshold: number
           qpp_threshold: number
+          rp_control: number
+          rp_movement: number
+          rp_stamina: number
+          rp_stuff: number
+          sp_control: number
+          sp_movement: number
           sp_rp_min_pitches: number
           sp_rp_stamina_threshold: number
+          sp_stamina: number
+          sp_stuff: number
           speed: number
           ss_batting_multiplier: number
           stamina: number
@@ -3282,8 +3290,16 @@ export type Database = {
           qp_multiplier: number
           qp_threshold?: number
           qpp_threshold?: number
+          rp_control?: number
+          rp_movement?: number
+          rp_stamina?: number
+          rp_stuff?: number
+          sp_control?: number
+          sp_movement?: number
           sp_rp_min_pitches?: number
           sp_rp_stamina_threshold?: number
+          sp_stamina?: number
+          sp_stuff?: number
           speed: number
           ss_batting_multiplier?: number
           stamina: number
@@ -3327,8 +3343,16 @@ export type Database = {
           qp_multiplier?: number
           qp_threshold?: number
           qpp_threshold?: number
+          rp_control?: number
+          rp_movement?: number
+          rp_stamina?: number
+          rp_stuff?: number
+          sp_control?: number
+          sp_movement?: number
           sp_rp_min_pitches?: number
           sp_rp_stamina_threshold?: number
+          sp_stamina?: number
+          sp_stuff?: number
           speed?: number
           ss_batting_multiplier?: number
           stamina?: number

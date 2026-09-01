@@ -219,6 +219,16 @@ Rees, before deciding whether to ship the FIP--based split: "I want to have both
 - **Stamina scores meaningfully higher under WAR than under FIP-** (0.090/0.081 vs 0.055/0.000) — plausible reading: WAR-per-inning still carries some residual usage/context signal that a purely rate-based FIP- construction strips out entirely, consistent with the earlier theory that stamina's real value operates through innings *volume*, not per-inning quality.
 - Still fully diagnostic — nothing written to `rating_weights`. Rees is doing further analysis across all four before deciding what (if anything) to ship.
 
+### Pitching weights shipped: real SP/RP split, WAR/100 IP as the target (2026-09-02)
+
+Rees: "Let's go with the WAR rate metric for our final approach given the higher R2 and the fact that I believe that WAR is already FIP adjusted." This is the first weight change this session that needed a real formula restructure, not just new numbers in existing columns — pitching had never had role-specific weights before.
+
+- **New `rating_weights` columns**: `sp_stuff`/`sp_movement`/`sp_control`/`sp_stamina` and `rp_stuff`/`rp_movement`/`rp_control`/`rp_stamina`, defaulted to the old flat values so historical rows (id 1-4) are unaffected. The old flat `stuff`/`movement`/`control`/`stamina` columns are kept for history only — **no longer read by the formula**.
+- **`lib/rating-engine.ts` restructured**: extracted the exact stamina/pitch-count gate that already decided the `sp_rp` *display* label (`isRoleRP = stm ≤ threshold OR qpp < minimum`) and computed it *earlier*, before `pitchingRaw`/`pitchingPRaw`, so those can pick `sp_*` or `rp_*` weights per pitcher. Not circular — the gate depends only on raw `stm`/`qpp` against fixed thresholds, never on any weight-derived value. `sp_rp` itself now just reuses `isRoleRP` instead of recomputing the same expression.
+- **New active row (id=5)**: SP → stuff 0.297, movement 0.420, control 0.193, stamina 0.090 (n=178, R²=0.462). RP → stuff 0.412, movement 0.322, control 0.185, stamina 0.081 (n=207, R²=0.344). **PBABIP set to 0** for both — Movement already bakes in PBABIP+HRA as a composite, so it was never a separate predictor in either regression (same reasoning as Avoid Ks going to 0 for hitting).
+- **Why WAR over FIP-, per Rees**: higher R² in both roles (0.462/0.344 vs. 0.421/0.276), and a belief that this engine's `war` field is already FIP-flavored (not pure runs-allowed) given a separate `ra9war` column exists alongside it — not independently confirmed which field is which, just the working assumption going in.
+- **Recomputed and verified sane**: SP/RP role benchmarks shifted by small, expected amounts (RP 50.3→51.0, SP 53.3→53.1 MLB-avg Overall), consistent with the modest net weight changes: Stuff down a bit for SP, Movement up for SP, Control up for both roles, Stamina meaningfully lower for RP than SP (0.081 vs 0.090) matching the real baseball logic that stamina matters less once you're already in short relief.
+
 ### Not built yet (don't design against these)
 - Win/loss-based team power rankings (needs league-relative stat normalization, not started)
 - Ratings/computed values for pre-draft amateurs — same rating engine works fine on them once they have data, but the ingestion pipeline for their scouted grades is still manual/deferred

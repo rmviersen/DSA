@@ -84,6 +84,15 @@ export interface WeightSet {
   // set explicitly sets it, per scripts/compute-overall-blend-weights.ts.
   batting: number;
   fielding: number; stuff: number; movement: number; control: number; stamina: number; pbabip: number;
+  // Role-split pitching weights (2026-09-02) -- replace stuff/movement/
+  // control/stamina above in the actual formula (those four stay in the
+  // type/table for historical rows only). Starters and relievers lean on
+  // different tools for real reasons (relievers max out on pure stuff over
+  // short stints; starters need Movement/Control to hold up through a
+  // lineup multiple times) -- confirmed via separate regressions against
+  // real WAR/100 IP, not assumed. See scripts/compute-pitching-weights.ts.
+  sp_stuff: number; sp_movement: number; sp_control: number; sp_stamina: number;
+  rp_stuff: number; rp_movement: number; rp_control: number; rp_stamina: number;
   // Baserunning composite (2026-09-01) -- internal weights tuned via
   // scripts/compute-baserunning-weights.ts (regressed against real UBR/100
   // PA, R²=0.553). `baserunning` itself is the composite's TOP-LEVEL blend
@@ -459,6 +468,17 @@ export function computeRatings(
 
   const isSP = r.pos === "SP";
 
+  // On-field role gate, computed here (not down at sp_rp below) specifically
+  // so pitchingRaw can pick the right weight vector -- purely a function of
+  // raw stm/qpp against fixed thresholds, no dependency on batting/pitching
+  // values, so this isn't circular. Same exact expression sp_rp uses further
+  // down; extracted so both read from one place.
+  const isRoleRP = zero(r.stm) <= w.sp_rp_stamina_threshold || qpp < w.sp_rp_min_pitches;
+  const pStuff = isRoleRP ? w.rp_stuff : w.sp_stuff;
+  const pMovement = isRoleRP ? w.rp_movement : w.sp_movement;
+  const pControl = isRoleRP ? w.rp_control : w.sp_control;
+  const pStamina = isRoleRP ? w.rp_stamina : w.sp_stamina;
+
   // Same idea for pitchers: Stuff/Movement/PBABIP/Control blended by real
   // league IP exposure vs LHB/RHB. Stamina has no handedness-split field at
   // all (only a single `stm`), so it stays unsplit -- confirmed with Rees
@@ -493,9 +513,9 @@ export function computeRatings(
     : controlGateP;
 
   const pitchingRaw =
-    (isSP ? stfBlend + 5 : stfBlend) * w.stuff +
-    movBlend * w.movement + pbabipBlend * w.pbabip + ctrlBlend * w.control +
-    zero(r.stm) * w.stamina + qp * w.qp_multiplier;
+    (isSP ? stfBlend + 5 : stfBlend) * pStuff +
+    movBlend * pMovement + pbabipBlend * w.pbabip + ctrlBlend * pControl +
+    zero(r.stm) * pStamina + qp * w.qp_multiplier;
   const pitching = pitchingRaw * controlGate;
 
   // Same projected-split treatment as Batting above (2026-08-28). HRA is
@@ -512,9 +532,9 @@ export function computeRatings(
   const potPbabipBlend = projPbabip.l * splits.pitchingPctVsL + projPbabip.r * splits.pitchingPctVsR;
 
   const pitchingPRaw =
-    ((isSP ? potStfBlend + 5 : potStfBlend) * w.stuff +
-    potMovBlend * w.movement + potPbabipBlend * w.pbabip + potCtrlBlend * w.control +
-    zero(r.stm) * w.stamina + qpp * w.qp_multiplier) * controlGateP;
+    ((isSP ? potStfBlend + 5 : potStfBlend) * pStuff +
+    potMovBlend * pMovement + potPbabipBlend * w.pbabip + potCtrlBlend * pControl +
+    zero(r.stm) * pStamina + qpp * w.qp_multiplier) * controlGateP;
   const pitchingP = Math.max(pitching, pitchingPRaw - 3);
 
   // --- SP/RP: on-field role classification from stamina/pitch-mix, distinct
@@ -523,7 +543,7 @@ export function computeRatings(
   // not a formula input.
   const sp_rp: string =
     battingP > pitchingP ? "" :
-    (zero(r.stm) <= w.sp_rp_stamina_threshold || qpp < w.sp_rp_min_pitches) ? "RP" : "SP";
+    isRoleRP ? "RP" : "SP";
 
   // --- Role: position-player role grouping. See ROLE_BUCKET_THRESHOLDS
   // above for the full rationale. Priority order (first match wins) is the
