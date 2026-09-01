@@ -114,18 +114,38 @@ async function main() {
     console.log(`  ${labels[i].padEnd(12)} raw coef=${fit.coefficients[i].toFixed(4)} WAR-pts/100PA per composite-pt   standardized=${fit.standardizedCoefficients[i].toFixed(3)}`);
   }
 
-  const clamped = fit.standardizedCoefficients.map((c) => Math.max(0, c));
+  // Implied weight comes from the RAW coefficients, NOT standardized ones
+  // (bug fixed 2026-09-02, caught via a real anomaly -- Jeremy Porten, elite
+  // Batting/weak Baserunning, ranking outside the top 100 despite a real 7.1
+  // WAR season). Standardized coefficients answer "how much does a 1-SD move
+  // in X affect Y" -- the right lens for judging relative importance, which
+  // is why they're still shown above. But applying THOSE (renormalized) as
+  // literal multipliers against RAW composite values silently reintroduces
+  // each variable's own scale: Batting is an average of six grades (SD ~4.9
+  // among real hitters -- naturally compressed by averaging), Baserunning is
+  // dominated by one grade, `run`, at 71.5% of its own formula (SD ~17.5 --
+  // barely compressed at all). Weight x SD is what actually determines an
+  // input's real influence on a ranking built from raw values, and with the
+  // standardized-derived weights, Baserunning's 3.5x larger variance was
+  // silently outweighing Batting's 3.5x larger weight -- roughly equal real
+  // swing power despite looking nothing alike in the weight column. Raw
+  // coefficients are already expressed in real units ("WAR per raw
+  // composite point"), which is the dimensionally correct thing to
+  // normalize and apply directly to raw values.
+  const clamped = fit.coefficients.map((c) => Math.max(0, c));
   const sum = clamped.reduce((s, c) => s + c, 0);
   const normalized = sum > 0 ? clamped.map((c) => c / sum) : clamped.map(() => 0);
 
   console.log("\nLoading the live active weight set (for the current-weight comparison column)...");
-  const { data: weightRow } = await supabase.from("rating_weights").select("fielding, baserunning").eq("is_active", true).maybeSingle();
-  const current = weightRow as { fielding: number; baserunning: number } | null;
-  // Batting has no explicit weight column today -- nothing multiplies it in
-  // `overall = max(batting + fielding*fieldingWeight + baserunning*w.baserunning, pitching)`,
-  // which is exactly the same as an implicit weight of 1.
+  // `batting` is a real column since 2026-09-02 (previously implicit 1,
+  // nothing multiplied it) -- read it directly rather than hardcoding,
+  // which was its own stale-snapshot bug (always reported 1 here even
+  // after batting's real weight shipped, since this select never asked for
+  // the new column).
+  const { data: weightRow } = await supabase.from("rating_weights").select("batting, fielding, baserunning").eq("is_active", true).maybeSingle();
+  const current = weightRow as { batting: number; fielding: number; baserunning: number } | null;
   const currentByLabel: Record<string, number | null> = {
-    Batting: 1, Fielding: current?.fielding ?? null, Baserunning: current?.baserunning ?? null,
+    Batting: current?.batting ?? null, Fielding: current?.fielding ?? null, Baserunning: current?.baserunning ?? null,
   };
   const currentSum = (currentByLabel.Batting ?? 0) + (currentByLabel.Fielding ?? 0) + (currentByLabel.Baserunning ?? 0);
 

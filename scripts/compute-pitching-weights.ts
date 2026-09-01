@@ -201,7 +201,11 @@ async function main() {
     for (let i = 0; i < labels.length; i++) {
       console.log(`  ${labels[i].padEnd(10)} standardized=${fit.standardizedCoefficients[i].toFixed(3)}`);
     }
-    const clamped = fit.standardizedCoefficients.map((c) => Math.max(0, c));
+    // Implied weight uses RAW coefficients, not standardized ones -- bug
+    // fixed 2026-09-02 (see compute-overall-blend-weights.ts's comment for
+    // the full story). Low practical impact here -- these four are all
+    // individual 20-80 grades -- but fixed for consistency regardless.
+    const clamped = fit.coefficients.map((c) => Math.max(0, c));
     const sum = clamped.reduce((s, c) => s + c, 0);
     const normalized = sum > 0 ? clamped.map((c) => c / sum) : clamped.map(() => 0);
 

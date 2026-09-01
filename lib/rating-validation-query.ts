@@ -102,6 +102,23 @@ export interface ValidationPoint {
   war: number; // raw season WAR -- shown for context in the detail panel, not plotted/regressed
   warRate: number; // WAR per 100 PA (hitters) or per 100 IP (pitchers) -- the actual plotted/regressed value
   playingTime: number; // PA for hitters, IP for pitchers
+  // Hitters only (2026-09-02, Rees's ask: overlay Fielding against WAR per
+  // defensive innings, not PA -- explicitly NOT for setting weights, just a
+  // reference view; he's already comfortable with the current Fielding
+  // weight). WAR/100 PA still bundles offense and defense together for a
+  // position player, so this doesn't isolate defense any more cleanly than
+  // the PA-based rate does -- but it scopes the EXPOSURE denominator to
+  // actual defensive playing time instead of batting trips, which is the
+  // specific comparison he asked to see. Checked for a real position-
+  // adjusted defensive metric first (something ZR-like but not position-
+  // specific -- his own example: "+10 at 3B but -7 at SS for the same
+  // player") -- confirmed none exists in player_fielding_stats_snapshots
+  // (only raw, per-position zr/opps/plays, no runs-above-position-average
+  // or positional-adjustment field). Building a real position-adjusted ZR
+  // is a bigger, separate piece of work -- flagged as a follow-up
+  // suggestion, not built here.
+  fieldingInnings: number | null;
+  warRateByFieldingInnings: number | null;
   grades: Record<string, number | null>;
 }
 
@@ -137,7 +154,7 @@ export async function getRatingValidationPoints(): Promise<ValidationPoint[]> {
   const { data: weightRow } = await supabase.from("rating_weights").select("catcher_fielding_bonus, infield_fielding_bonus, outfield_fielding_bonus").eq("is_active", true).maybeSingle();
   const weights = weightRow as { catcher_fielding_bonus: number; infield_fielding_bonus: number; outfield_fielding_bonus: number } | null;
 
-  const [computed, ratings, battingRows, pitchingRows, players] = await Promise.all([
+  const [computed, ratings, battingRows, pitchingRows, players, fieldingRows] = await Promise.all([
     fetchAll<{ player_id: number; overall: number | null; role: string | null }>((from, to) =>
       supabase.from("player_computed").select("player_id, overall, role").eq("refresh_run_id", computedRunId).range(from, to) as never
     ),
@@ -159,6 +176,13 @@ export async function getRatingValidationPoints(): Promise<ValidationPoint[]> {
     ),
     fetchAll<{ id: number; first_name: string | null; last_name: string | null }>((from, to) =>
       supabase.from("players").select("id, first_name, last_name").range(from, to) as never
+    ),
+    // split_id=0 here, NOT 1 -- player_fielding_stats_snapshots' own "overall"
+    // convention differs from batting/pitching (gotcha already confirmed
+    // when /org-minors wired in ZR). A player fields multiple positions
+    // across separate rows; summed below into one season total.
+    fetchAll<{ player_id: number; ip: number | null }>((from, to) =>
+      supabase.from("player_fielding_stats_snapshots").select("player_id, ip").eq("year", 2031).eq("level_id", 1).eq("split_id", 0).eq("refresh_run_id", statsRunId).range(from, to) as never
     ),
   ]);
 
@@ -195,6 +219,12 @@ export async function getRatingValidationPoints(): Promise<ValidationPoint[]> {
     cur.war += p.war ?? 0;
     pitchingByPlayer.set(p.player_id, cur);
   }
+  // Summed across every position a player fielded that season (a real
+  // multi-position player has one row per position).
+  const fieldingInningsByPlayer = new Map<number, number>();
+  for (const f of fieldingRows) {
+    fieldingInningsByPlayer.set(f.player_id, (fieldingInningsByPlayer.get(f.player_id) ?? 0) + (f.ip ?? 0));
+  }
 
   const PITCHER_ROLES = new Set(["SP", "RP"]);
   const MIN_PA = 100;
@@ -212,9 +242,12 @@ export async function getRatingValidationPoints(): Promise<ValidationPoint[]> {
     if (playerType === "hitter") {
       const bat = battingByPlayer.get(playerId);
       if (!bat || bat.pa < MIN_PA) continue;
+      const fieldingInnings = fieldingInningsByPlayer.get(playerId) ?? null;
       points.push({
         playerId, playerName, role: pc.role, playerType, overall: pc.overall,
         war: bat.war, warRate: (bat.war / bat.pa) * 100, playingTime: bat.pa,
+        fieldingInnings,
+        warRateByFieldingInnings: fieldingInnings && fieldingInnings > 0 ? (bat.war / fieldingInnings) * 100 : null,
         grades: { cntct: r.cntct, gap: r.gap, pow: r.pow, eye: r.eye, ks: r.ks, speed: r.speed, fielding: computeFielding(r) },
       });
     } else {
@@ -224,6 +257,7 @@ export async function getRatingValidationPoints(): Promise<ValidationPoint[]> {
       points.push({
         playerId, playerName, role: pc.role, playerType, overall: pc.overall,
         war: pit.war, warRate: (pit.war / pit.ip) * 100, playingTime: pit.ip,
+        fieldingInnings: null, warRateByFieldingInnings: null,
         grades: { stf: r.stf, mov: r.mov, ctrl: r.ctrl, stm: r.stm, pbabip: r.pbabip },
       });
     }

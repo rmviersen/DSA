@@ -117,7 +117,11 @@ async function main() {
     console.log(`  ${labels[i].padEnd(24)} raw coef=${fit.coefficients[i].toFixed(5)} UBR-pts/100PA per grade-pt   standardized=${fit.standardizedCoefficients[i].toFixed(3)}`);
   }
 
-  const clamped = fit.standardizedCoefficients.map((c) => Math.max(0, c));
+  // Implied weight uses RAW coefficients, not standardized ones -- bug fixed
+  // 2026-09-02 (see compute-overall-blend-weights.ts's comment for the full
+  // story). Low practical impact here -- these four are all individual
+  // 20-80 grades -- but fixed for consistency regardless.
+  const clamped = fit.coefficients.map((c) => Math.max(0, c));
   const sum = clamped.reduce((s, c) => s + c, 0);
   const normalized = sum > 0 ? clamped.map((c) => c / sum) : clamped.map(() => 0);
   console.log("\nImplied relative weight vector if normalized to sum to 1 (diagnostic only -- nothing written anywhere):");
@@ -160,8 +164,14 @@ async function main() {
     targetMetric: "UBR / 100 PA",
     rSquared: fit.rSquared,
     sampleSize: rows.length,
+    // Stable, explicit keys (2026-09-02 cleanup) matching the
+    // baserunning_{key}_weight column suffixes directly -- needed for
+    // getLatestWeightTuningSnapshots() to map each row to its live weight
+    // column. The prior auto-derived-from-label keys ("run_baserunning",
+    // "steal_tendency_stlrt") worked for display but couldn't be mapped
+    // back to a column name predictably.
     coefficients: labels.map((label, i) => ({
-      key: label.toLowerCase().replace(/[^a-z]+/g, "_").replace(/^_|_$/g, ""),
+      key: ["speed", "run", "steal", "stlrt"][i],
       label,
       rawCoefficient: fit.coefficients[i],
       standardizedCoefficient: fit.standardizedCoefficients[i],

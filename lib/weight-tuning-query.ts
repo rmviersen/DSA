@@ -36,7 +36,17 @@ export interface WeightTuningCoefficientRow {
   rawCoefficient: number;
   standardizedCoefficient: number;
   impliedWeight: number;
-  currentWeight: number | null;
+  // Two distinct things (2026-09-02 fix, Rees: "the current weight column
+  // currently reflects the old... I want to show the actual current weights
+  // that are being applied always, and then another column with the old
+  // weights"): `weightAtRunTime` is a snapshot captured by the compute
+  // script when this regression last ran -- goes stale the moment
+  // rating_weights changes again afterward. `liveWeight` is looked up fresh
+  // from the currently-active rating_weights row every time this page
+  // loads, so it's never stale even if the underlying weight changes
+  // without this regression being re-run.
+  weightAtRunTime: number | null;
+  liveWeight: number | null;
 }
 
 export interface WeightTuningSnapshot {
@@ -57,8 +67,37 @@ export interface WeightTuningHistoryPoint {
   sampleSize: number;
 }
 
+// Maps a (stream, variable key) pair to the live rating_weights column that
+// actually governs it today. Kept in one place rather than scattered across
+// each compute script, since this is purely a display concern -- the
+// compute scripts already know their own historical snapshot value, they
+// don't need to know the CURRENT column name too.
+function liveWeightFor(stream: Stream, key: string, live: Record<string, number | null>): number | null {
+  switch (stream) {
+    case "hitting":
+      return live[key] ?? null; // keys already match column names: contact/gap/power/eye/avoid_ks/speed
+    case "baserunning":
+      return live[`baserunning_${key}_weight`] ?? null; // speed/run/steal/stlrt
+    case "pitching_sp": case "pitching_sp_war":
+      return live[`sp_${key}`] ?? null; // stuff/movement/control/stamina
+    case "pitching_rp": case "pitching_rp_war":
+      return live[`rp_${key}`] ?? null;
+    case "overall_blend":
+      return live[key] ?? null; // batting/fielding/baserunning
+    case "pitching":
+      return null; // retired stream, no live column mapping needed
+  }
+}
+
 export async function getLatestWeightTuningSnapshots(): Promise<Record<Stream, WeightTuningSnapshot | null>> {
   const supabase = makeSupabaseClient();
+
+  const { data: liveWeightRow } = await supabase
+    .from("rating_weights")
+    .select("contact, gap, power, eye, avoid_ks, speed, batting, fielding, baserunning, sp_stuff, sp_movement, sp_control, sp_stamina, rp_stuff, rp_movement, rp_control, rp_stamina, baserunning_speed_weight, baserunning_run_weight, baserunning_steal_weight, baserunning_stlrt_weight")
+    .eq("is_active", true)
+    .maybeSingle();
+  const liveWeights = (liveWeightRow ?? {}) as Record<string, number | null>;
 
   const { data: runs, error } = await supabase
     .from("weight_tuning_runs")
@@ -89,7 +128,8 @@ export async function getLatestWeightTuningSnapshots(): Promise<Record<Stream, W
       .map((c) => ({
         key: c.variable_key, label: c.variable_label,
         rawCoefficient: c.raw_coefficient, standardizedCoefficient: c.standardized_coefficient,
-        impliedWeight: c.implied_weight, currentWeight: c.current_weight,
+        impliedWeight: c.implied_weight, weightAtRunTime: c.current_weight,
+        liveWeight: liveWeightFor(stream, c.variable_key, liveWeights),
       }))
       .sort((a, b) => b.standardizedCoefficient - a.standardizedCoefficient);
     result[stream] = {

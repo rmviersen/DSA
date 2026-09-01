@@ -47,10 +47,21 @@ function buildVariables(playerType: "hitter" | "pitcher"): Variable[] {
 
 interface Props { points: ValidationPoint[] }
 
+type RateBasis = "pa" | "fieldingInnings";
+
 export default function RatingValidationExplorer({ points }: Props) {
   const [playerType, setPlayerType] = useState<"hitter" | "pitcher">("hitter");
   const variables = useMemo(() => buildVariables(playerType), [playerType]);
   const [selectedKey, setSelectedKey] = useState<string>("overall");
+  // Hitter-only (2026-09-02, Rees's ask) -- overlay Fielding (or any other
+  // variable) against WAR/100 defensive innings instead of WAR/100 PA.
+  // Reference view only, deliberately not used to set any weight -- he's
+  // already comfortable with the current Fielding weight. Doesn't isolate
+  // defense any more cleanly than the PA-based rate (still real total WAR,
+  // offense included), it just scopes the exposure denominator to actual
+  // defensive playing time instead of batting trips.
+  const [rateBasis, setRateBasis] = useState<RateBasis>("pa");
+  const getRate = (p: ValidationPoint) => rateBasis === "fieldingInnings" ? p.warRateByFieldingInnings : p.warRate;
 
   const typeRoles = useMemo(() => [...new Set(points.filter((p) => p.playerType === playerType).map((p) => p.role))].sort(), [points, playerType]);
   const [roleFilter, setRoleFilter] = useState<Set<string>>(() => new Set(typeRoles));
@@ -59,6 +70,7 @@ export default function RatingValidationExplorer({ points }: Props) {
     setPlayerType(t);
     setSelectedKey("overall");
     setRoleFilter(new Set([...new Set(points.filter((p) => p.playerType === t).map((p) => p.role))]));
+    if (t === "pitcher") setRateBasis("pa");
   }
   function toggleRole(role: string) {
     setRoleFilter((prev) => {
@@ -69,11 +81,11 @@ export default function RatingValidationExplorer({ points }: Props) {
   }
 
   const filtered = useMemo(
-    () => points.filter((p) => p.playerType === playerType && roleFilter.has(p.role)),
-    [points, playerType, roleFilter]
+    () => points.filter((p) => p.playerType === playerType && roleFilter.has(p.role) && getRate(p) != null),
+    [points, playerType, roleFilter, rateBasis]
   );
 
-  const warRateLabel = playerType === "hitter" ? "WAR / 100 PA" : "WAR / 100 IP";
+  const warRateLabel = playerType === "pitcher" ? "WAR / 100 IP" : rateBasis === "fieldingInnings" ? "WAR / 100 Defensive IP" : "WAR / 100 PA";
   const minimumCaption = playerType === "hitter" ? "100+ PA" : "75+ IP (SP), 30+ IP (RP)";
 
   // Regression stats for EVERY variable (not just the selected one) --
@@ -82,19 +94,19 @@ export default function RatingValidationExplorer({ points }: Props) {
   const variableStats = useMemo(() => {
     return variables.map((v) => {
       const vPoints = filtered
-        .map((p) => ({ x: v.getValue(p), y: p.warRate, raw: p }))
-        .filter((d): d is { x: number; y: number; raw: ValidationPoint } => d.x != null);
+        .map((p) => ({ x: v.getValue(p), y: getRate(p), raw: p }))
+        .filter((d): d is { x: number; y: number; raw: ValidationPoint } => d.x != null && d.y != null);
       if (vPoints.length < 5) return { variable: v, n: vPoints.length, fit: null };
       const fit = fitLine(vPoints.map((d) => ({ x: d.x, y: d.y })));
       return { variable: v, n: vPoints.length, fit };
     }).sort((a, b) => (b.fit?.rSquared ?? -1) - (a.fit?.rSquared ?? -1));
-  }, [variables, filtered]);
+  }, [variables, filtered, rateBasis]);
 
   const selected = variables.find((v) => v.key === selectedKey) ?? variables[0];
   const selectedStat = variableStats.find((s) => s.variable.key === selected.key);
   const chartData = useMemo(
-    () => filtered.map((p) => ({ ...p, x: selected.getValue(p) })).filter((p) => p.x != null),
-    [filtered, selected]
+    () => filtered.map((p) => ({ ...p, x: selected.getValue(p), y: getRate(p) })).filter((p) => p.x != null && p.y != null),
+    [filtered, selected, rateBasis]
   );
   const curveLine = useMemo(() => {
     if (!selectedStat?.fit || chartData.length === 0) return null;
@@ -131,6 +143,27 @@ export default function RatingValidationExplorer({ points }: Props) {
             </button>
           ))}
         </div>
+        {playerType === "hitter" && (
+          <>
+            <div style={{ width: 1, alignSelf: "stretch", background: "var(--color-border)" }} />
+            <div style={{ display: "flex", gap: "0.5rem" }}>
+              {([["pa", "WAR / 100 PA"], ["fieldingInnings", "WAR / 100 Defensive IP"]] as const).map(([basis, label]) => (
+                <button
+                  key={basis}
+                  onClick={() => setRateBasis(basis)}
+                  style={{
+                    padding: "0.35rem 0.85rem", borderRadius: "999px", fontSize: "0.8125rem", fontWeight: 600,
+                    border: `1px solid ${rateBasis === basis ? "var(--color-border-strong)" : "var(--color-border)"}`,
+                    background: rateBasis === basis ? "var(--color-table-hover)" : "transparent",
+                    color: "var(--color-text)", cursor: "pointer",
+                  }}
+                >
+                  {label}
+                </button>
+              ))}
+            </div>
+          </>
+        )}
         <div style={{ width: 1, alignSelf: "stretch", background: "var(--color-border)" }} />
         <div style={{ display: "flex", flexWrap: "wrap", gap: "0.4rem" }}>
           {typeRoles.map((role) => {
@@ -218,10 +251,12 @@ export default function RatingValidationExplorer({ points }: Props) {
                 </div>
                 <div style={{ color: "var(--color-text-muted)" }}>{activePoint.role} · Overall {activePoint.overall.toFixed(1)}</div>
                 <div style={{ fontWeight: 600 }}>
-                  {activePoint.warRate.toFixed(2)} WAR/100{activePoint.playerType === "hitter" ? "PA" : "IP"}
+                  {(getRate(activePoint) ?? 0).toFixed(2)} {warRateLabel}
                 </div>
                 <div style={{ color: "var(--color-text-muted)", fontSize: "0.75rem" }}>
-                  ({activePoint.war.toFixed(1)} WAR, {activePoint.playingTime.toFixed(0)} {activePoint.playerType === "hitter" ? "PA" : "IP"})
+                  {activePoint.playerType === "hitter" && rateBasis === "fieldingInnings"
+                    ? `(${activePoint.war.toFixed(1)} WAR, ${activePoint.fieldingInnings?.toFixed(0) ?? 0} defensive IP)`
+                    : `(${activePoint.war.toFixed(1)} WAR, ${activePoint.playingTime.toFixed(0)} ${activePoint.playerType === "hitter" ? "PA" : "IP"})`}
                 </div>
               </>
             ) : (
@@ -233,7 +268,7 @@ export default function RatingValidationExplorer({ points }: Props) {
           <ComposedChart margin={{ top: 10, right: 30, bottom: 10, left: 10 }}>
             <CartesianGrid strokeDasharray="3 3" stroke="var(--color-border)" />
             <XAxis type="number" dataKey="x" name={selected.label} domain={["auto", "auto"]} tick={{ fontSize: 12 }} label={{ value: selected.label, position: "insideBottom", offset: -5, fontSize: 12 }} />
-            <YAxis type="number" dataKey="warRate" name={warRateLabel} tick={{ fontSize: 12 }} width={50} label={{ value: warRateLabel, angle: -90, position: "insideLeft", fontSize: 12 }} />
+            <YAxis type="number" dataKey="y" name={warRateLabel} tick={{ fontSize: 12 }} width={50} label={{ value: warRateLabel, angle: -90, position: "insideLeft", fontSize: 12 }} />
             <ZAxis range={[70, 70]} />
             <Legend verticalAlign="top" height={32} />
             {typeRoles.filter((r) => roleFilter.has(r)).map((role) => (

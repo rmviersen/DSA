@@ -247,11 +247,15 @@ async function main() {
     console.log(`  ${labels[i].padEnd(10)} raw coef=${fit.coefficients[i].toFixed(3)} OPS+ pts/grade-pt   standardized=${fit.standardizedCoefficients[i].toFixed(3)}`);
   }
 
-  // Convert standardized coefficients into a weight vector comparable to
-  // the current rating_weights row -- clamp negatives to 0 (same floor
-  // used for the fielding relative multiplier: a grade should never be
-  // allowed to SUBTRACT value in this formula), then rescale to sum to 1.
-  const clamped = fit.standardizedCoefficients.map((c) => Math.max(0, c));
+  // Implied weight uses RAW coefficients, not standardized ones -- bug fixed
+  // 2026-09-02 (see compute-overall-blend-weights.ts's comment for the full
+  // story). Applying standardized-derived weights to raw values silently
+  // reintroduces each variable's own scale; raw coefficients are already in
+  // real units and are what's dimensionally correct to normalize and apply
+  // directly to raw grades. Low practical impact here specifically -- these
+  // six grades are all individual 20-80 scouting grades with comparable
+  // population SDs (7-11) -- but fixed for consistency regardless.
+  const clamped = fit.coefficients.map((c) => Math.max(0, c));
   const sum = clamped.reduce((s, c) => s + c, 0);
   const normalized = sum > 0 ? clamped.map((c) => c / sum) : clamped.map(() => 0);
 

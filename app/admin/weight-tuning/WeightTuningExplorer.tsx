@@ -53,7 +53,7 @@ export default function WeightTuningExplorer({ snapshots, history }: Props) {
 
   const maxWeight = useMemo(() => {
     if (!snapshot) return 1;
-    return Math.max(...snapshot.coefficients.flatMap((c) => [c.impliedWeight, c.currentWeight ?? 0]), 0.01);
+    return Math.max(...snapshot.coefficients.flatMap((c) => [c.impliedWeight, c.liveWeight ?? 0]), 0.01);
   }, [snapshot]);
 
   // R² history, one line per stream, x-axis = refresh_run_id (a real
@@ -112,14 +112,14 @@ export default function WeightTuningExplorer({ snapshots, history }: Props) {
             <div><div style={statLabelStyle}>n</div><div style={statValueStyle}>{snapshot.sampleSize}</div></div>
           </div>
 
-          {/* Coefficient table + implied-vs-current bars */}
+          {/* Coefficient table + implied-vs-live bars */}
           <div style={cardStyle}>
-            <h2 style={sectionTitleStyle}>{STREAMS.find((s) => s.key === stream)?.label} — implied vs. current weight</h2>
+            <h2 style={sectionTitleStyle}>{STREAMS.find((s) => s.key === stream)?.label} — implied vs. live weight</h2>
             <div style={{ overflowX: "auto" }}>
               <table style={{ width: "100%", borderCollapse: "collapse", fontSize: "0.875rem" }}>
                 <thead>
                   <tr style={{ background: "var(--color-table-header)", textAlign: "left" }}>
-                    {["Variable", "Standardized importance", "Implied weight", "Current weight", "Weight comparison"].map((h) => (
+                    {["Variable", "Standardized importance", "Implied weight", "Live weight (now)", "Weight when this ran", "Weight comparison"].map((h) => (
                       <th key={h} style={{ padding: "0.5rem 0.75rem", fontWeight: 700 }}>{h}</th>
                     ))}
                   </tr>
@@ -132,11 +132,17 @@ export default function WeightTuningExplorer({ snapshots, history }: Props) {
                         {c.standardizedCoefficient.toFixed(3)}
                       </td>
                       <td style={{ padding: "0.5rem 0.75rem", fontVariantNumeric: "tabular-nums", fontWeight: 700 }}>{c.impliedWeight.toFixed(3)}</td>
+                      <td style={{ padding: "0.5rem 0.75rem", fontVariantNumeric: "tabular-nums" }}>
+                        {c.liveWeight != null ? c.liveWeight.toFixed(3) : "—"}
+                      </td>
                       <td style={{ padding: "0.5rem 0.75rem", fontVariantNumeric: "tabular-nums", color: "var(--color-text-muted)" }}>
-                        {c.currentWeight != null ? c.currentWeight.toFixed(3) : "—"}
+                        {c.weightAtRunTime != null ? c.weightAtRunTime.toFixed(3) : "—"}
+                        {c.weightAtRunTime != null && c.liveWeight != null && Math.abs(c.weightAtRunTime - c.liveWeight) > 0.0005 && (
+                          <span title="This regression ran before the live weight last changed -- re-run to refresh this column too." style={{ marginLeft: "0.35rem" }}>⚠️</span>
+                        )}
                       </td>
                       <td style={{ padding: "0.5rem 0.75rem", minWidth: 160 }}>
-                        <WeightBar implied={c.impliedWeight} current={c.currentWeight} max={maxWeight} color={STREAM_COLORS[stream]} />
+                        <WeightBar implied={c.impliedWeight} current={c.liveWeight} max={maxWeight} color={STREAM_COLORS[stream]} />
                       </td>
                     </tr>
                   ))}
@@ -144,7 +150,7 @@ export default function WeightTuningExplorer({ snapshots, history }: Props) {
               </table>
             </div>
             <div style={{ fontSize: "0.75rem", color: "var(--color-text-muted)", marginTop: "0.5rem" }}>
-              Shaded bar = implied weight (this regression&apos;s standardized coefficients, clamped at 0, rescaled to sum to 1). Dark tick = today&apos;s live <code>rating_weights</code> value for comparison. Diagnostic only — nothing here writes to <code>rating_weights</code>.
+              Shaded bar = implied weight (this regression&apos;s raw coefficients, clamped at 0, rescaled to sum to 1 — standardized coefficients are shown separately above for judging relative importance, but aren&apos;t what&apos;s applied to raw values, see HANDOFF.md). Dark tick = <strong>live weight</strong>, looked up fresh from <code>rating_weights</code> every page load. &quot;Weight when this ran&quot; is a historical snapshot from whenever this regression last computed — a ⚠️ means <code>rating_weights</code> has changed since, so that column (only) is stale until the regression is re-run; the live column and bar are never stale. Diagnostic only — nothing here writes to <code>rating_weights</code>.
             </div>
           </div>
         </>

@@ -229,6 +229,47 @@ Rees: "Let's go with the WAR rate metric for our final approach given the higher
 - **Why WAR over FIP-, per Rees**: higher R² in both roles (0.462/0.344 vs. 0.421/0.276), and a belief that this engine's `war` field is already FIP-flavored (not pure runs-allowed) given a separate `ra9war` column exists alongside it — not independently confirmed which field is which, just the working assumption going in.
 - **Recomputed and verified sane**: SP/RP role benchmarks shifted by small, expected amounts (RP 50.3→51.0, SP 53.3→53.1 MLB-avg Overall), consistent with the modest net weight changes: Stuff down a bit for SP, Movement up for SP, Control up for both roles, Stamina meaningfully lower for RP than SP (0.081 vs 0.090) matching the real baseball logic that stamina matters less once you're already in short relief.
 
+### Real bug found and fixed: standardized coefficients were being used as literal weights (2026-09-02)
+
+Caught via a real anomaly Rees spotted: **Jeremy Porten** — the single highest Batting composite (70.0) of any hitter in the league, average Fielding (50), well-below-average Baserunning (25.4), a real 7.1 WAR season — was ranked outside the top 100 (rank 103). Also flagged: pitchers heavily overrepresented in the top 100 (72 of 100).
+
+**Root cause, confirmed with real numbers, not assumed**: every regression this session normalized *standardized* coefficients (clamp negatives to 0, rescale to sum to 1) and used that as the literal multiplier applied to *raw* composite/grade values. Standardized coefficients answer "how much does a 1-SD move in X affect Y" — the right lens for judging relative importance (still shown on the page for that reason), but applying them directly to raw values silently reintroduces each variable's own scale, which is exactly what standardizing was supposed to control for. Checked the actual population variances among real MLB hitters:
+
+| Composite | Weight (before fix) | Population SD | Weight × SD (real ranking influence) |
+|---|---|---|---|
+| Batting | 0.567 | 4.9 (compressed — average of 6 grades) | 2.78 |
+| Fielding | 0.271 | 8.2 | 2.22 |
+| Baserunning | 0.161 | 17.5 (barely compressed — one grade, `run`, is 71.5% of its own formula) | **2.82** |
+
+Despite Batting's weight being 3.5x Baserunning's, Baserunning's 3.5x larger variance gave it *slightly more* real influence on rankings — silently erasing the intended "batting is king" hierarchy. The fix: normalize **raw** (unstandardized) coefficients instead — already expressed in real per-unit terms, the dimensionally correct thing to apply to raw values. Fixed in all four `compute-*-weights.ts` scripts.
+
+**New active `rating_weights` row (id=6)**, all four domains recomputed under the corrected methodology:
+- **Batting/Fielding/Baserunning blend**: 0.567/0.271/0.161 → **0.708/0.245/0.047**. This is the one that mattered — Porten's rank went **103 → 15**, Overall 57.4 → 63.7.
+- **Hitting**: Contact 0.465, Power 0.377, Eye 0.090, Gap 0.046, Speed 0.022, Avoid Ks 0 (was 0.403/0.414/0.098/0.045/0.040/0 — modest shifts, these six inputs already had comparable variances to begin with).
+- **Pitching (WAR target, chosen approach)**: SP → stuff 0.257/movement 0.512/control 0.174/stamina 0.057 (was 0.297/0.420/0.193/0.090). RP → stuff 0.294/movement 0.462/control 0.189/stamina 0.055 (was 0.412/0.322/0.185/0.081). Movement's real importance was understated more than expected by the old method.
+- **Baserunning internal weights**: run 0.648, stlrt 0.244, steal 0.055, speed 0.054 (was 0.715/0.190/0.048/0.046 — modest shift, same reasoning as hitting).
+
+**A second, related staleness bug fixed in `compute-overall-blend-weights.ts` while working on this**: its "current weight" comparison hardcoded `Batting: 1` from before the real `batting` column existed, so it never picked up the real value even after batting's weight shipped. Now reads the real column.
+
+**A pre-existing side effect made more visible, not caused, by this fix**: top-100 pitcher share went from 72 to 82 (worse, not better) — because Batting's increased weight further compressed hitters' own Overall spread (SD 3.89 → 3.29) while pitching's spread was untouched (SD ~4.9, unchanged), widening the existing spread mismatch between the two. This is exactly the "the rescale needs to correct spread, not just the mean" finding from the prior investigation — reinforced, not new. Rescale is still queued, deliberately not attempted here.
+
+### `/admin/weight-tuning`: live weight vs. historical snapshot, shown separately (2026-09-02)
+
+Rees: "the current weight columns in the weight tuning currently reflects the old. I want to show the actual current weights that are being applied always, and then another column with the old weights." The page's "current weight" column was a snapshot captured whenever a script last ran — went stale the moment `rating_weights` changed again afterward (exactly what was happening after every weight-shipping step this session).
+
+- `lib/weight-tuning-query.ts`: `getLatestWeightTuningSnapshots()` now fetches the live active `rating_weights` row once per page load and maps each `(stream, variable_key)` to its real column (`liveWeightFor()`) — e.g. hitting keys map directly to `contact`/`power`/etc., `pitching_sp*` keys map to `sp_stuff`/`sp_movement`/etc., baserunning keys map to `baserunning_{key}_weight`. `WeightTuningCoefficientRow` now carries both `liveWeight` (always fresh) and `weightAtRunTime` (the old snapshot, renamed for clarity — informational only).
+- `WeightTuningExplorer.tsx`: table shows both columns; a ⚠️ appears on "weight when this ran" specifically when it's drifted from the live value, so staleness is visible rather than silent. The bar visualization now compares Implied vs. **live** weight (previously the stale snapshot).
+- **Cleanup needed to make the mapping possible**: `compute-baserunning-weights.ts`'s variable keys were auto-derived from display labels ("run_baserunning", "steal_tendency_stlrt") — unpredictable, couldn't map back to a column name. Changed to stable explicit keys (`speed`/`run`/`steal`/`stlrt`) matching the live column suffixes directly; old-keyed rows for that stream were deleted (not left orphaned) before re-running.
+
+### `/admin/rating-validation`: Fielding overlay against WAR/100 defensive innings (2026-09-02)
+
+Rees: wanted to see the Fielding regression against WAR/innings-in-the-field specifically, explicitly **not** to set any weight (he's comfortable with the current Fielding weight) — just a useful reference view. Also asked whether a better position-neutral defensive metric than ZR exists, giving his own example (a player could show "+10 at 3B but -7 at SS" on raw ZR for the same underlying ability).
+
+- **Checked first**: no position-adjusted defensive value field exists anywhere in this schema. `player_fielding_stats_snapshots` has only raw, per-position `zr`/`opps`/`plays` (one row per position a player fielded) — nothing like a real UZR/DRS "runs above average at that position" that would sidestep his exact concern. Confirmed, not assumed.
+- **Built the requested overlay** by extending the existing `/admin/rating-validation` page rather than a new one — it already has real scatter+regression infrastructure for "any variable vs. a WAR rate." Added a hitter-only toggle: **WAR/100 PA** (existing) vs. **WAR/100 Defensive Innings** (new, `player_fielding_stats_snapshots.ip` summed across every position a player fielded that season — note: that table's own "overall" split is `split_id=0`, not `1` like batting/pitching, a gotcha already known from `/org-minors`' ZR work).
+- **Honest framing, not a fix**: WAR/100 defensive innings still doesn't isolate defense — it's total WAR (offense included) over a defense-scoped exposure denominator, not a defense-only value metric. It answers "does more defensive exposure relative to this Fielding grade track with real value," not "how much does defense alone contribute." Real first look: Fielding's R² against this basis is 0.028 (slope -0.060) vs. Overall's own 0.011 — still weak, consistent with every other Fielding-vs-WAR check this session.
+- **Suggested next step, not built**: a real position-adjusted ZR (convert to runs-above-position-average using each position's own population mean, then layer a real positional adjustment on top) would directly solve his stated concern and was already sketched as "Step 2" in the original redesign options — flagged as a good candidate if this becomes more than a reference check.
+
 ### Not built yet (don't design against these)
 - Win/loss-based team power rankings (needs league-relative stat normalization, not started)
 - Ratings/computed values for pre-draft amateurs — same rating engine works fine on them once they have data, but the ingestion pipeline for their scouted grades is still manual/deferred
