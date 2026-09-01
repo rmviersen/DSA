@@ -73,13 +73,16 @@ export default function RatingValidationExplorer({ points }: Props) {
     [points, playerType, roleFilter]
   );
 
+  const warRateLabel = playerType === "hitter" ? "WAR / 100 PA" : "WAR / 100 IP";
+  const minimumCaption = playerType === "hitter" ? "100+ PA" : "75+ IP (SP), 30+ IP (RP)";
+
   // Regression stats for EVERY variable (not just the selected one) --
   // powers the always-visible comparison table so you can see which grade
   // actually predicts WAR best without clicking through each one.
   const variableStats = useMemo(() => {
     return variables.map((v) => {
       const vPoints = filtered
-        .map((p) => ({ x: v.getValue(p), y: p.war, raw: p }))
+        .map((p) => ({ x: v.getValue(p), y: p.warRate, raw: p }))
         .filter((d): d is { x: number; y: number; raw: ValidationPoint } => d.x != null);
       if (vPoints.length < 5) return { variable: v, n: vPoints.length, fit: null };
       const fit = fitLine(vPoints.map((d) => ({ x: d.x, y: d.y })));
@@ -149,13 +152,13 @@ export default function RatingValidationExplorer({ points }: Props) {
           })}
         </div>
         <div style={{ marginLeft: "auto", fontSize: "0.8125rem", color: "var(--color-text-muted)" }}>
-          {filtered.length} {playerType}s (2031 MLB, {playerType === "hitter" ? "50+ PA" : "20+ IP"})
+          {filtered.length} {playerType}s (2031 MLB, {minimumCaption})
         </div>
       </div>
 
       {/* Variable comparison table -- always shows every variable */}
       <div style={cardStyle}>
-        <h2 style={sectionTitleStyle}>Which inputs actually predict 2031 WAR?</h2>
+        <h2 style={sectionTitleStyle}>Which inputs actually predict {warRateLabel}?</h2>
         <div style={{ overflowX: "auto" }}>
           <table style={{ width: "100%", borderCollapse: "collapse", fontSize: "0.875rem" }}>
             <thead>
@@ -188,14 +191,14 @@ export default function RatingValidationExplorer({ points }: Props) {
           </table>
         </div>
         <div style={{ fontSize: "0.75rem", color: "var(--color-text-muted)", marginTop: "0.5rem" }}>
-          ★ Overall is the rating engine's composite; the rest are the raw grades that feed into it. Click a row to plot it below. Higher R² = that variable explains more of the real variation in 2031 WAR.
+          ★ Overall is the rating engine's composite; the rest are the raw grades (and, for Fielding, the derived composite) that feed into it. Click a row to plot it below. Higher R² = that variable explains more of the real variation in {warRateLabel}.
         </div>
       </div>
 
       {/* Scatter plot for the selected variable */}
       <div style={cardStyle}>
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", flexWrap: "wrap", gap: "0.75rem", marginBottom: "0.75rem" }}>
-          <h2 style={{ ...sectionTitleStyle, margin: 0 }}>{selected.label} vs. 2031 WAR</h2>
+          <h2 style={{ ...sectionTitleStyle, margin: 0 }}>{selected.label} vs. {warRateLabel}</h2>
           <div
             style={{
               minWidth: 260, minHeight: 64, padding: "0.5rem 0.85rem", borderRadius: 6,
@@ -215,7 +218,10 @@ export default function RatingValidationExplorer({ points }: Props) {
                 </div>
                 <div style={{ color: "var(--color-text-muted)" }}>{activePoint.role} · Overall {activePoint.overall.toFixed(1)}</div>
                 <div style={{ fontWeight: 600 }}>
-                  {activePoint.war.toFixed(1)} WAR · {activePoint.playingTime.toFixed(0)} {activePoint.playerType === "hitter" ? "PA" : "IP"}
+                  {activePoint.warRate.toFixed(2)} WAR/100{activePoint.playerType === "hitter" ? "PA" : "IP"}
+                </div>
+                <div style={{ color: "var(--color-text-muted)", fontSize: "0.75rem" }}>
+                  ({activePoint.war.toFixed(1)} WAR, {activePoint.playingTime.toFixed(0)} {activePoint.playerType === "hitter" ? "PA" : "IP"})
                 </div>
               </>
             ) : (
@@ -227,7 +233,7 @@ export default function RatingValidationExplorer({ points }: Props) {
           <ComposedChart margin={{ top: 10, right: 30, bottom: 10, left: 10 }}>
             <CartesianGrid strokeDasharray="3 3" stroke="var(--color-border)" />
             <XAxis type="number" dataKey="x" name={selected.label} domain={["auto", "auto"]} tick={{ fontSize: 12 }} label={{ value: selected.label, position: "insideBottom", offset: -5, fontSize: 12 }} />
-            <YAxis type="number" dataKey="war" name="WAR" tick={{ fontSize: 12 }} width={50} label={{ value: "2031 WAR", angle: -90, position: "insideLeft", fontSize: 12 }} />
+            <YAxis type="number" dataKey="warRate" name={warRateLabel} tick={{ fontSize: 12 }} width={50} label={{ value: warRateLabel, angle: -90, position: "insideLeft", fontSize: 12 }} />
             <ZAxis range={[70, 70]} />
             <Legend verticalAlign="top" height={32} />
             {typeRoles.filter((r) => roleFilter.has(r)).map((role) => (

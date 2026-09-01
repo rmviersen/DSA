@@ -9,15 +9,38 @@ import { makeSupabaseClient } from "./supabase-client";
 //
 // Scope, deliberately narrow for a first pass: real 2031 MLB WAR only
 // (level_id=1, split_id=1 -- confirmed the "overall" split; 2/3/21 are
-// situational splits with WAR always 0, not usable), for players with a
-// real, non-trivial share of playing time (PA>=50 for hitters, IP>=20 for
-// pitchers) -- a token late-season call-up's small-sample WAR is mostly
-// noise, not a fair test of whether Overall predicted their value. Compared
-// against Overall and each RAW grade that actually feeds the rating
-// engine's Overall formula (lib/rating-engine.ts) -- Potential is
-// deliberately excluded: it's a forward-looking ceiling projection, not a
-// claim about this year's production, so testing it against this year's
-// WAR wouldn't be a fair comparison the way Overall-vs-WAR is.
+// situational splits with WAR always 0, not usable). Compared against
+// Overall and each RAW grade that actually feeds the rating engine's
+// Overall formula (lib/rating-engine.ts) -- Potential is deliberately
+// excluded: it's a forward-looking ceiling projection, not a claim about
+// this year's production, so testing it against this year's WAR wouldn't
+// be a fair comparison the way Overall-vs-WAR is.
+//
+// Plotted/regressed as a RATE, not raw WAR (2026-08-31, Rees's refinement)
+// -- raw season WAR rewards playing time as much as talent, which isn't
+// what this page is trying to measure, and it can't be compared across
+// starters and relievers at all (a real ace SP racks up 3-4x an elite RP's
+// innings). Hitters: WAR per 100 PA, minimum 100 PA (excludes injured/
+// part-time/late-callup players whose small sample is mostly noise, not a
+// fair read on whether Overall predicted their value). Pitchers: WAR per
+// 100 IP, but with a role-dependent innings floor rather than one shared
+// number -- 75 IP for SP, 30 IP for RP -- since a real full-season
+// reliever accumulates far fewer innings than a real full-season starter;
+// a single shared threshold would either exclude most legitimate relievers
+// or admit token/injured starters. Once both are past their own floor,
+// they're compared on the SAME per-100-IP rate scale, which is what
+// actually equalizes them for this comparison.
+//
+// Fielding is included too (2026-08-31, Rees's follow-up) -- it's a real
+// weighted contributor to Overall (`overall = max(batting + fielding *
+// w.fielding, pitching)`, lib/rating-engine.ts line ~475), just not a
+// single raw grade like Contact/Power -- it's itself a derived composite,
+// `Math.max(catcherComposite, infieldComposite, outfieldComposite)`, each
+// built from different raw fields plus a position-specific bonus from the
+// active weight set. Computed here the same way the engine computes it
+// (not simplified), then tested as one more variable, matching how Overall
+// itself -- also a composite -- is tested rather than excluded for not
+// being a single raw grade.
 //
 // makeSupabaseClient() is deliberately NOT called at module top level here
 // (2026-08-31 fix) -- this file also exports plain constants
@@ -60,6 +83,7 @@ export const HITTER_VARIABLES = [
   { key: "eye", label: "Eye" },
   { key: "ks", label: "Avoid Ks" },
   { key: "speed", label: "Speed" },
+  { key: "fielding", label: "Fielding" },
 ] as const;
 export const PITCHER_VARIABLES = [
   { key: "stf", label: "Stuff" },
@@ -75,8 +99,9 @@ export interface ValidationPoint {
   role: string;
   playerType: "hitter" | "pitcher";
   overall: number;
-  war: number;
-  playingTime: number; // PA for hitters, IP for pitchers -- shown for context, not plotted
+  war: number; // raw season WAR -- shown for context in the detail panel, not plotted/regressed
+  warRate: number; // WAR per 100 PA (hitters) or per 100 IP (pitchers) -- the actual plotted/regressed value
+  playingTime: number; // PA for hitters, IP for pitchers
   grades: Record<string, number | null>;
 }
 
@@ -108,12 +133,23 @@ export async function getRatingValidationPoints(): Promise<ValidationPoint[]> {
   if (!statsRunRow) return [];
   const statsRunId = (statsRunRow as { refresh_run_id: number }).refresh_run_id;
 
+  console.log("Loading active rating weight set (for fielding's position bonuses)...");
+  const { data: weightRow } = await supabase.from("rating_weights").select("catcher_fielding_bonus, infield_fielding_bonus, outfield_fielding_bonus").eq("is_active", true).maybeSingle();
+  const weights = weightRow as { catcher_fielding_bonus: number; infield_fielding_bonus: number; outfield_fielding_bonus: number } | null;
+
   const [computed, ratings, battingRows, pitchingRows, players] = await Promise.all([
     fetchAll<{ player_id: number; overall: number | null; role: string | null }>((from, to) =>
       supabase.from("player_computed").select("player_id, overall, role").eq("refresh_run_id", computedRunId).range(from, to) as never
     ),
-    fetchAll<{ player_id: number; cntct: number | null; gap: number | null; pow: number | null; eye: number | null; ks: number | null; speed: number | null; stf: number | null; mov: number | null; ctrl: number | null; stm: number | null; pbabip: number | null }>((from, to) =>
-      supabase.from("player_ratings_snapshots").select("player_id, cntct, gap, pow, eye, ks, speed, stf, mov, ctrl, stm, pbabip").eq("refresh_run_id", computedRunId).range(from, to) as never
+    fetchAll<{
+      player_id: number; cntct: number | null; gap: number | null; pow: number | null; eye: number | null; ks: number | null; speed: number | null;
+      stf: number | null; mov: number | null; ctrl: number | null; stm: number | null; pbabip: number | null;
+      cblk: number | null; cfrm: number | null; carm: number | null; ifr: number | null; ife: number | null; ifa: number | null; tdp: number | null;
+      ofr: number | null; ofe: number | null; ofa: number | null;
+    }>((from, to) =>
+      supabase.from("player_ratings_snapshots")
+        .select("player_id, cntct, gap, pow, eye, ks, speed, stf, mov, ctrl, stm, pbabip, cblk, cfrm, carm, ifr, ife, ifa, tdp, ofr, ofe, ofa")
+        .eq("refresh_run_id", computedRunId).range(from, to) as never
     ),
     fetchAll<{ player_id: number; pa: number | null; war: number | null }>((from, to) =>
       supabase.from("player_batting_stats_snapshots").select("player_id, pa, war").eq("year", 2031).eq("level_id", 1).eq("split_id", 1).eq("refresh_run_id", statsRunId).range(from, to) as never
@@ -129,6 +165,19 @@ export async function getRatingValidationPoints(): Promise<ValidationPoint[]> {
   const computedByPlayer = new Map(computed.map((c) => [c.player_id, c]));
   const ratingsByPlayer = new Map(ratings.map((r) => [r.player_id, r]));
   const nameById = new Map(players.map((p) => [p.id, [p.first_name, p.last_name].filter(Boolean).join(" ") || `Player ${p.id}`]));
+
+  // Same formula as lib/rating-engine.ts's fielding composite -- `zero()`
+  // there just means "treat null as 0," reproduced inline here.
+  const z = (v: number | null) => v ?? 0;
+  function computeFielding(r: { cblk: number | null; cfrm: number | null; carm: number | null; ifr: number | null; ife: number | null; ifa: number | null; tdp: number | null; ofr: number | null; ofe: number | null; ofa: number | null }): number {
+    const cBonus = weights?.catcher_fielding_bonus ?? 0;
+    const infBonus = weights?.infield_fielding_bonus ?? 0;
+    const ofBonus = weights?.outfield_fielding_bonus ?? 0;
+    const cRating = (z(r.cblk) + z(r.cfrm) + z(r.carm)) / 3 + cBonus;
+    const infRating = (z(r.ifr) * 2 + z(r.ife) + z(r.ifa) + z(r.tdp)) / 5 + infBonus;
+    const ofRating = (z(r.ofr) * 2 + z(r.ofe) + z(r.ofa)) / 4 + ofBonus;
+    return Math.max(cRating, infRating, ofRating);
+  }
 
   // Sum within this one refresh run only (a real mid-season trade can still
   // produce 2 team-stint rows in the same final snapshot).
@@ -148,8 +197,9 @@ export async function getRatingValidationPoints(): Promise<ValidationPoint[]> {
   }
 
   const PITCHER_ROLES = new Set(["SP", "RP"]);
-  const MIN_PA = 50;
-  const MIN_IP = 20;
+  const MIN_PA = 100;
+  const MIN_IP_SP = 75;
+  const MIN_IP_RP = 30;
 
   const points: ValidationPoint[] = [];
   for (const [playerId, pc] of computedByPlayer) {
@@ -163,14 +213,17 @@ export async function getRatingValidationPoints(): Promise<ValidationPoint[]> {
       const bat = battingByPlayer.get(playerId);
       if (!bat || bat.pa < MIN_PA) continue;
       points.push({
-        playerId, playerName, role: pc.role, playerType, overall: pc.overall, war: bat.war, playingTime: bat.pa,
-        grades: { cntct: r.cntct, gap: r.gap, pow: r.pow, eye: r.eye, ks: r.ks, speed: r.speed },
+        playerId, playerName, role: pc.role, playerType, overall: pc.overall,
+        war: bat.war, warRate: (bat.war / bat.pa) * 100, playingTime: bat.pa,
+        grades: { cntct: r.cntct, gap: r.gap, pow: r.pow, eye: r.eye, ks: r.ks, speed: r.speed, fielding: computeFielding(r) },
       });
     } else {
       const pit = pitchingByPlayer.get(playerId);
-      if (!pit || pit.ip < MIN_IP) continue;
+      const minIp = pc.role === "SP" ? MIN_IP_SP : MIN_IP_RP;
+      if (!pit || pit.ip < minIp) continue;
       points.push({
-        playerId, playerName, role: pc.role, playerType, overall: pc.overall, war: pit.war, playingTime: pit.ip,
+        playerId, playerName, role: pc.role, playerType, overall: pc.overall,
+        war: pit.war, warRate: (pit.war / pit.ip) * 100, playingTime: pit.ip,
         grades: { stf: r.stf, mov: r.mov, ctrl: r.ctrl, stm: r.stm, pbabip: r.pbabip },
       });
     }

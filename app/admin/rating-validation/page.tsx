@@ -37,10 +37,13 @@ export default async function RatingValidationPage() {
       <h1 style={pageTitleStyle}>Rating Validation</h1>
       <p style={{ color: "var(--color-text-muted)", margin: "0 0 1.5rem", maxWidth: 760 }}>
         Does the rating engine&apos;s Overall actually predict real production? Compares Overall — and
-        every individual grade that feeds into it — against real 2031 MLB WAR for {points.length} players
-        with meaningful playing time. Only one season of real outcomes exists so far, so treat this as a
-        directional first look, not a final verdict — it gets more reliable every season as more real
-        results accumulate.
+        every individual grade that feeds into it — against real 2031 MLB WAR *rate* (WAR per 100 PA for
+        hitters, per 100 IP for pitchers, so starters and relievers land on the same scale) for{" "}
+        {points.length} players with a real, non-trivial share of playing time (100+ PA for hitters; 75+ IP
+        for starters, 30+ IP for relievers — excludes injured/backup/token-appearance players whose small
+        sample wouldn&apos;t fairly test whether Overall predicted their value). Only one season of real
+        outcomes exists so far, so treat this as a directional first look, not a final verdict — it gets
+        more reliable every season as more real results accumulate.
       </p>
       <RatingValidationExplorer points={points} />
     </div>
