@@ -16,10 +16,21 @@ import { persistWeightTuningRun } from "../lib/weight-tuning-persist.js";
 // SS/CF. This is a genuinely different, unconfounded regression, not the
 // same mistake with different inputs.
 //
-// Speed and Fielding are deliberately excluded -- OPS+ is a pure hitting-
-// shape metric (on-base + power), it doesn't capture baserunning or
-// defensive value at all, so regressing it against Speed or Fielding
-// wouldn't test anything real about either.
+// Speed IS included (fixed 2026-09-02 -- an earlier version of this script
+// excluded it on the reasoning that OPS+ doesn't capture baserunning value,
+// which is true but beside the point: Speed is already one of Batting's own
+// weighted inputs today (`battingRaw = ... + speed * w.speed`), for a real,
+// separate reason Rees confirmed directly -- faster batters beat out more
+// infield hits and stretch more doubles into triples, both of which DO show
+// up in OPS+ (OBP and SLG respectively). Speed's STEALING-adjacent value is
+// what's baserunning-only and correctly lives in the separate Baserunning
+// composite instead (see compute-baserunning-weights.ts) -- that's a
+// different mechanism from this one, not a duplicate of it.
+//
+// Fielding is still deliberately excluded -- it's never been one of
+// Batting's own weighted inputs (it's added as its own separate composite
+// in Overall), so it doesn't belong in a regression re-deriving Batting's
+// internal weights.
 //
 // OPS+ doesn't exist anywhere in this schema yet (confirmed 2026-09-01 --
 // player_batting_stats_snapshots has only raw counting stats, no OBP/SLG/
@@ -193,8 +204,8 @@ async function main() {
   console.log(`League baseline (real 2031 MLB hitters, unadjusted): OBP=${league.obp.toFixed(3)} SLG=${league.slg.toFixed(3)}`);
 
   console.log("Loading hit-tool grades...");
-  const ratings = await fetchAll<{ player_id: number; cntct: number | null; gap: number | null; pow: number | null; eye: number | null; ks: number | null }>((from, to) =>
-    supabase.from("player_ratings_snapshots").select("player_id, cntct, gap, pow, eye, ks").eq("refresh_run_id", computedRunId).range(from, to) as never
+  const ratings = await fetchAll<{ player_id: number; cntct: number | null; gap: number | null; pow: number | null; eye: number | null; ks: number | null; speed: number | null }>((from, to) =>
+    supabase.from("player_ratings_snapshots").select("player_id, cntct, gap, pow, eye, ks, speed").eq("refresh_run_id", computedRunId).range(from, to) as never
   );
   const ratingsByPlayer = new Map(ratings.map((r) => [r.player_id, r]));
 
@@ -205,7 +216,7 @@ async function main() {
   const roleByPlayer = new Map(computed.map((c) => [c.player_id, c.role]));
   const PITCHER_ROLES = new Set(["SP", "RP", "CL"]);
 
-  interface Row { playerId: number; opsPlus: number; opsPlusRaw: number; cntct: number; gap: number; pow: number; eye: number; ks: number; pa: number }
+  interface Row { playerId: number; opsPlus: number; opsPlusRaw: number; cntct: number; gap: number; pow: number; eye: number; ks: number; speed: number; pa: number }
   const rows: Row[] = [];
   for (const [playerId, adjusted] of byPlayerAdjusted) {
     const pa = paByPlayer.get(playerId) ?? 0;
@@ -213,22 +224,22 @@ async function main() {
     const role = roleByPlayer.get(playerId);
     if (!role || PITCHER_ROLES.has(role)) continue;
     const r = ratingsByPlayer.get(playerId);
-    if (!r || r.cntct == null || r.gap == null || r.pow == null || r.eye == null || r.ks == null) continue;
+    if (!r || r.cntct == null || r.gap == null || r.pow == null || r.eye == null || r.ks == null || r.speed == null) continue;
     const { obp, slg } = obpSlg(adjusted);
     const opsPlus = 100 * (obp / league.obp + slg / league.slg - 1);
     const rawCats = byPlayerRaw.get(playerId)!;
     const rawSplit = obpSlg(rawCats);
     const opsPlusRaw = 100 * (rawSplit.obp / league.obp + rawSplit.slg / league.slg - 1);
-    rows.push({ playerId, opsPlus, opsPlusRaw, cntct: r.cntct, gap: r.gap, pow: r.pow, eye: r.eye, ks: r.ks, pa });
+    rows.push({ playerId, opsPlus, opsPlusRaw, cntct: r.cntct, gap: r.gap, pow: r.pow, eye: r.eye, ks: r.ks, speed: r.speed, pa });
   }
   console.log(`  ${rows.length} qualifying hitters (>=${MIN_PA} PA, real grades) for the regression`);
   const avgAbsDelta = rows.reduce((s, r) => s + Math.abs(r.opsPlus - r.opsPlusRaw), 0) / rows.length;
   const maxDelta = rows.reduce((m, r) => Math.max(m, Math.abs(r.opsPlus - r.opsPlusRaw)), 0);
   console.log(`  Park adjustment moved OPS+ by an average of ${avgAbsDelta.toFixed(2)} points per player (max ${maxDelta.toFixed(2)})`);
-  if (rows.length < 30) throw new Error(`Only ${rows.length} qualifying hitters -- too small to trust a 5-variable regression. Aborting.`);
+  if (rows.length < 30) throw new Error(`Only ${rows.length} qualifying hitters -- too small to trust a 6-variable regression. Aborting.`);
 
-  const fit = fitMultipleLinear(rows.map((r) => ({ x: [r.cntct, r.gap, r.pow, r.eye, r.ks], y: r.opsPlus })));
-  const labels = ["Contact", "Gap", "Power", "Eye", "Avoid Ks"];
+  const fit = fitMultipleLinear(rows.map((r) => ({ x: [r.cntct, r.gap, r.pow, r.eye, r.ks, r.speed], y: r.opsPlus })));
+  const labels = ["Contact", "Gap", "Power", "Eye", "Avoid Ks", "Speed"];
 
   console.log(`\nRegression: OPS+ ~ Contact + Gap + Power + Eye + AvoidKs  (n=${rows.length}, R²=${fit.rSquared.toFixed(3)})`);
   console.log(`Intercept: ${fit.intercept.toFixed(2)}`);
@@ -245,11 +256,11 @@ async function main() {
   const normalized = sum > 0 ? clamped.map((c) => c / sum) : clamped.map(() => 0);
 
   console.log("\nLoading the live active weight set (for the current-weight comparison column)...");
-  const { data: weightRow } = await supabase.from("rating_weights").select("contact, gap, power, eye, avoid_ks").eq("is_active", true).maybeSingle();
-  const current = weightRow as { contact: number; gap: number; power: number; eye: number; avoid_ks: number } | null;
+  const { data: weightRow } = await supabase.from("rating_weights").select("contact, gap, power, eye, avoid_ks, speed").eq("is_active", true).maybeSingle();
+  const current = weightRow as { contact: number; gap: number; power: number; eye: number; avoid_ks: number; speed: number } | null;
   const currentByKey: Record<string, number | null> = {
     Contact: current?.contact ?? null, Gap: current?.gap ?? null, Power: current?.power ?? null,
-    Eye: current?.eye ?? null, "Avoid Ks": current?.avoid_ks ?? null,
+    Eye: current?.eye ?? null, "Avoid Ks": current?.avoid_ks ?? null, Speed: current?.speed ?? null,
   };
 
   console.log("\nImplied weight vector if normalized to sum to 1 (diagnostic -- not written to rating_weights):");
