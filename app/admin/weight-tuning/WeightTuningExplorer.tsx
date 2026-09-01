@@ -21,6 +21,7 @@ const statValueStyle: React.CSSProperties = { fontSize: "1.375rem", fontWeight: 
 
 const STREAM_COLORS: Record<Stream, string> = {
   hitting: "#0b3049", baserunning: "#57904a", pitching: "#a8763a", overall_blend: "#8a5a9e",
+  pitching_sp: "#a8763a", pitching_rp: "#c99a5c",
 };
 
 interface Props {
