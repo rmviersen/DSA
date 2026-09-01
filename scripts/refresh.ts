@@ -246,6 +246,18 @@ async function main() {
     }).eq("id", refreshRunId);
     console.log(`Refresh run ${refreshRunId} succeeded.`);
 
+    // Point-in-time player_snapshots (2026-09-02, Rees's ask -- "run as a
+    // snapshot going forward" for accurate historical reference). Captures
+    // org/age/level/service-days/league_id/active-roster/last-team as they
+    // stand right now, before anything derived gets computed from them.
+    console.log("Snapshotting player state for this run...");
+    try {
+      execFileSync("npx", ["tsx", "scripts/snapshot-players.ts"], { stdio: "inherit", shell: true });
+    } catch (err) {
+      console.error(`snapshot-players.ts failed after a successful refresh -- raw data is fine, but this run's player_snapshots wasn't captured: ${err}`);
+      process.exitCode = 1;
+    }
+
     // Every refresh should leave behind a dated player_computed/team_computed
     // snapshot -- that's the whole prerequisite for "change since date X"
     // reports. Previously this was a separate manual step run occasionally,

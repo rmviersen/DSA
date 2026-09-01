@@ -2970,6 +2970,63 @@ export type Database = {
           },
         ]
       }
+      player_snapshots: {
+        Row: {
+          age: number | null
+          captured_at: string
+          id: number
+          is_active: boolean | null
+          last_team_id: number | null
+          league_id: number | null
+          level: number | null
+          mlb_service_days: number | null
+          organization_id: number | null
+          player_id: number
+          refresh_run_id: number
+        }
+        Insert: {
+          age?: number | null
+          captured_at?: string
+          id?: never
+          is_active?: boolean | null
+          last_team_id?: number | null
+          league_id?: number | null
+          level?: number | null
+          mlb_service_days?: number | null
+          organization_id?: number | null
+          player_id: number
+          refresh_run_id: number
+        }
+        Update: {
+          age?: number | null
+          captured_at?: string
+          id?: never
+          is_active?: boolean | null
+          last_team_id?: number | null
+          league_id?: number | null
+          level?: number | null
+          mlb_service_days?: number | null
+          organization_id?: number | null
+          player_id?: number
+          refresh_run_id?: number
+        }
+        Relationships: [
+          {
+            foreignKeyName: "player_snapshots_player_id_fkey"
+            columns: ["player_id"]
+            isOneToOne: false
+            referencedRelation: "players"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "player_snapshots_refresh_run_id_fkey"
+            columns: ["refresh_run_id"]
+            isOneToOne: false
+            referencedRelation: "refresh_runs"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       players: {
         Row: {
           age: number | null
