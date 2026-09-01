@@ -365,19 +365,21 @@ export function computeRatings(
     : isCFRole ? w.cf_batting_multiplier
     : 1;
 
-  // Age-gating for the Contact/Control floor gates (2026-08-27, Rees): a
-  // young player's CURRENT Contact/Control grade often just reflects where
-  // he is in development, not a real ceiling problem -- three real cases
-  // that drove this (Gant 22, Vasquez 23, Joyner 24) were all getting their
-  // current Overall crushed by the two-tier gate below despite being nowhere
-  // near a finished product. "Developed" (age > developed_age_threshold)
-  // still gets the gate on BOTH current and potential, same as before this
-  // change -- confirmed against Suzuki (age 33), the one case where the
-  // current-side penalty is actually deserved. Unknown/null age defaults to
-  // developed (the conservative side -- ?? Infinity always fails the "<=
-  // threshold" developing check). Deliberately matches the prospect-pool age
-  // cutoff (age <= 25) added the same day, via the same rating_weights value.
-  const isDeveloped = (r.age ?? Infinity) > w.developed_age_threshold;
+  // Per-TOOL "developed" gating for the Contact/Control floor gates,
+  // reworked 2026-09-04 (Rees's ask). Originally gated on AGE (age >
+  // developed_age_threshold) -- a reasonable proxy, but an imprecise one:
+  // it was catching low-minors players whose current Contact/Control sits
+  // below the gate threshold purely because that specific tool hasn't
+  // finished developing yet, regardless of the player's actual age (an
+  // org-filler in his late 20s stuck in A-ball is still "developing" a
+  // tool his own Potential says has real room left to grow). The direct,
+  // per-tool signal is more accurate than age ever was as a proxy for it:
+  // a tool only deserves today's real penalty once it's actually finished
+  // developing, i.e. current has caught up to its own Potential ceiling.
+  // Computed independently for Contact and Control below (each against its
+  // OWN blended current/potential pair), not as one shared flag -- a
+  // player can plausibly have a fully-realized bat but a still-developing
+  // arm, or vice versa.
 
   // Projected Potential L/R splits (2026-08-28, Rees's spec) -- see
   // projectPotentialSplit's comment for the full method and its limits.
@@ -405,24 +407,22 @@ export function computeRatings(
   // weren't meaningfully different -- caught in 73 real hitters after the
   // projected-split work landed, all developed veterans with Contact sitting
   // right on a threshold). The potential-side gate is UNCONDITIONAL -- it
-  // always applies regardless of age. Revised 2026-08-27 (same day, second
-  // pass): a developing player's current-side gate is no longer fully
-  // exempted -- instead it reuses the SAME gate value as Potential (the
-  // "future rating"), rather than being independently computed from his own
-  // (still-immature) current grade. This fixes a real interaction found in
-  // testing: Potential can never be graded below current-demonstrated
-  // ability (see the file header's harmonization decision #2), so a
-  // fully-exempt, ungated current Overall was sometimes silently
-  // floor-masking the entire Potential-side penalty right back out (Vasquez,
-  // age 23 -- his ungated current Pitching came in higher than his gated
-  // Potential estimate, so Potential got floored back up to match it,
-  // erasing the discount). Deriving BOTH current and potential from the same
-  // potential-grade-based gate keeps them aligned instead of colliding. A
-  // developed player (age > developed_age_threshold) is unaffected -- his
-  // current-side gate still comes from his own current grade independently,
-  // same as before this revision (confirmed against Suzuki, age 33).
+  // always applies, full stop. Reworked 2026-09-04 (Rees's ask, replacing
+  // the age-based version): the current-side gate now applies only once
+  // Contact itself is FULLY DEVELOPED -- current has caught up to its own
+  // Potential ceiling -- rather than reading age as a proxy for that. A
+  // still-growing tool (current < potential) reuses Potential's gate value
+  // instead of being penalized for not having arrived yet; this is exactly
+  // the case a low-minors player's weak-but-still-developing Contact was
+  // getting wrongly punished for under the old age check. This fixes the
+  // same interaction the age version handled too: Potential can never be
+  // graded below current-demonstrated ability (file header's harmonization
+  // decision #2), so a fully-exempt, ungated current Overall would
+  // otherwise silently floor-mask the Potential-side penalty right back out
+  // for an undeveloped tool.
   const contactGateP = gate(potCntctBlend, w.contact_gate_mid_threshold, w.contact_gate_mid_multiplier, w.contact_gate_low_threshold, w.contact_gate_low_multiplier);
-  const contactGate = isDeveloped
+  const isContactDeveloped = cntctBlend >= potCntctBlend;
+  const contactGate = isContactDeveloped
     ? gate(cntctBlend, w.contact_gate_mid_threshold, w.contact_gate_mid_multiplier, w.contact_gate_low_threshold, w.contact_gate_low_multiplier)
     : contactGateP;
 
@@ -505,16 +505,16 @@ export function computeRatings(
   // split, not the flat pot_ctrl field -- see Contact gate's comment for the
   // full rationale). Control is confirmed a standalone raw grade (unlike
   // Movement, which is itself a composite of PBABIP and HRA), so it's gated
-  // directly with no blending. Same age-gating as Contact above -- see
-  // contactGate's comment for the full rationale (a developing player's
-  // current gate reuses Potential's gate value instead of being
-  // independently computed or fully exempted).
+  // directly with no blending. Same per-tool "fully developed" gating as
+  // Contact above (reworked 2026-09-04, replacing the age-based version) --
+  // see contactGate's comment for the full rationale.
   // atThresholdPenalized: false (2026-08-28) -- see gate()'s comment. A
   // Control grade sitting exactly at control_gate_mid_threshold (40) is now
   // exempt, not penalized; Contact's two calls below keep the default
   // (true) inclusive-at-threshold behavior, unchanged.
   const controlGateP = gate(potCtrlBlend, w.control_gate_mid_threshold, w.control_gate_mid_multiplier, w.control_gate_low_threshold, w.control_gate_low_multiplier, false);
-  const controlGate = isDeveloped
+  const isControlDeveloped = ctrlBlend >= potCtrlBlend;
+  const controlGate = isControlDeveloped
     ? gate(ctrlBlend, w.control_gate_mid_threshold, w.control_gate_mid_multiplier, w.control_gate_low_threshold, w.control_gate_low_multiplier, false)
     : controlGateP;
 

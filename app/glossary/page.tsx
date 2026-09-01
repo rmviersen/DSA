@@ -189,6 +189,45 @@ export default async function GlossaryPage() {
         <p>Every formula behind the ratings, current values, and the diagnostic tables used to tune them.</p>
       </header>
 
+      {/* ================= ROLE REPRESENTATION (WEIGHT-TESTING) ================= */}
+      <section style={{ marginBottom: "2.5rem" }}>
+        <h2 style={sectionTitleStyle}>Role Representation — Weight-Testing Diagnostic</h2>
+        <p style={bodyTextStyle}>
+          Is a role over- or under-valued by the active weights? Each table compares a role&apos;s share of the top{" "}
+          {ROLE_REP_LIMIT} against that same role&apos;s share of the full population it&apos;s drawn from.{" "}
+          <strong>Index</strong> = 100 means proportional representation; meaningfully above/below means the weights
+          are pulling it up/down.
+        </p>
+        <p style={noteStyle}>
+          Read the Index next to the Role bucket definitions further down, not in isolation — a narrow bucket (e.g. SS)
+          over-indexes almost by construction, since only a genuinely small, elite population clears its bar. DH is
+          the mirror case (the pure fallback bucket). Neither is evidence of a weighting problem by itself — what&apos;s
+          worth a closer look is a role whose bucket definition is <em>not</em> unusually narrow or wide but still
+          shows a large Index.
+        </p>
+        <h3 style={subTitleStyle}>By Overall (top {ROLE_REP_LIMIT}, league-wide)</h3>
+        <RoleRepresentationTable rows={roleRepByOverall} baselineLabel="of all ranked players" limit={ROLE_REP_LIMIT} />
+        <h3 style={subTitleStyle}>By Prospect Potential (top {ROLE_REP_LIMIT} of the prospect pool)</h3>
+        <p style={noteStyle}>Baseline is each role&apos;s share of the prospect pool, not the full league.</p>
+        <RoleRepresentationTable rows={roleRepByProspectPotential} baselineLabel="of the prospect pool" limit={ROLE_REP_LIMIT} />
+      </section>
+
+      {/* ================= ROLE × LEVEL BENCHMARKS ================= */}
+      <section style={{ marginBottom: "2.5rem" }}>
+        <h2 style={sectionTitleStyle}>Role × Level Benchmarks</h2>
+        <p style={bodyTextStyle}>
+          Average <strong>calibrated</strong> Overall/Batting/Fielding of every player currently at each level, by
+          Role. MLB is restricted to the real active roster (excludes DFA&apos;d players and international/complex
+          signees mistagged at level 1, which get their own column one rung below Rookie).
+        </p>
+        <h3 style={subTitleStyle}>Overall</h3>
+        <RoleLevelBenchmarkTable rows={benchmarks} />
+        <h3 style={subTitleStyle}>Batting</h3>
+        <RoleLevelBenchmarkTable rows={battingBenchmarks} />
+        <h3 style={subTitleStyle}>Fielding</h3>
+        <RoleLevelBenchmarkTable rows={fieldingBenchmarks} />
+      </section>
+
       {/* ================= RATING SYSTEM OVERVIEW ================= */}
       <section style={{ marginBottom: "2.5rem" }}>
         <h2 style={sectionTitleStyle}>Rating System Overview</h2>
@@ -311,7 +350,6 @@ export default async function GlossaryPage() {
                   <WeightRow label="Contact mid / low mult." value={`${weights.contact_gate_mid_multiplier} / ${weights.contact_gate_low_multiplier}`} />
                   <WeightRow label="Control mid / low threshold" value={`${weights.control_gate_mid_threshold} / ${weights.control_gate_low_threshold}`} />
                   <WeightRow label="Control mid / low mult." value={`${weights.control_gate_mid_multiplier} / ${weights.control_gate_low_multiplier}`} />
-                  <WeightRow label="Developed age threshold" value={weights.developed_age_threshold} />
                 </tbody>
               </table>
             </div>
@@ -364,9 +402,11 @@ export default async function GlossaryPage() {
         <p style={bodyTextStyle}>
           <strong>ContactGate</strong>: 1.0 above the mid threshold; a penalty multiplier below it, harsher below the
           low threshold (values in the Floor gates table above) — a real hit-tool problem drags the whole number
-          down instead of averaging away. A player at or under the developed-age threshold uses Potential&apos;s
-          gate value on the current side too, so a still-developing hitter&apos;s current-side grade isn&apos;t
-          penalized for a weakness he hasn&apos;t grown out of yet.
+          down instead of averaging away. The potential side always applies. The current side applies only once
+          Contact is <strong>fully developed</strong> — current Contact has caught up to Potential Contact — so a
+          low-minors player whose Contact hasn&apos;t finished developing isn&apos;t penalized today for a weakness
+          his own Potential says he&apos;ll grow out of; a player whose current Contact already sits at his ceiling
+          gets the real, independently-computed penalty.
         </p>
       </section>
 
@@ -619,45 +659,6 @@ export default async function GlossaryPage() {
           </table>
         </div>
         <p style={noteStyle}>Recomputed fresh every refresh, alongside the rest of the rating engine.</p>
-      </section>
-
-      {/* ================= ROLE REPRESENTATION (WEIGHT-TESTING) ================= */}
-      <section style={{ marginBottom: "2.5rem" }}>
-        <h2 style={sectionTitleStyle}>Role Representation — Weight-Testing Diagnostic</h2>
-        <p style={bodyTextStyle}>
-          Is a role over- or under-valued by the active weights? Each table compares a role&apos;s share of the top{" "}
-          {ROLE_REP_LIMIT} against that same role&apos;s share of the full population it&apos;s drawn from.{" "}
-          <strong>Index</strong> = 100 means proportional representation; meaningfully above/below means the weights
-          are pulling it up/down.
-        </p>
-        <p style={noteStyle}>
-          Read the Index next to the Role bucket definitions above, not in isolation — a narrow bucket (e.g. SS)
-          over-indexes almost by construction, since only a genuinely small, elite population clears its bar. DH is
-          the mirror case (the pure fallback bucket). Neither is evidence of a weighting problem by itself — what&apos;s
-          worth a closer look is a role whose bucket definition is <em>not</em> unusually narrow or wide but still
-          shows a large Index.
-        </p>
-        <h3 style={subTitleStyle}>By Overall (top {ROLE_REP_LIMIT}, league-wide)</h3>
-        <RoleRepresentationTable rows={roleRepByOverall} baselineLabel="of all ranked players" limit={ROLE_REP_LIMIT} />
-        <h3 style={subTitleStyle}>By Prospect Potential (top {ROLE_REP_LIMIT} of the prospect pool)</h3>
-        <p style={noteStyle}>Baseline is each role&apos;s share of the prospect pool, not the full league.</p>
-        <RoleRepresentationTable rows={roleRepByProspectPotential} baselineLabel="of the prospect pool" limit={ROLE_REP_LIMIT} />
-      </section>
-
-      {/* ================= ROLE × LEVEL BENCHMARKS ================= */}
-      <section style={{ marginBottom: "2.5rem" }}>
-        <h2 style={sectionTitleStyle}>Role × Level Benchmarks</h2>
-        <p style={bodyTextStyle}>
-          Average <strong>calibrated</strong> Overall/Batting/Fielding of every player currently at each level, by
-          Role. MLB is restricted to the real active roster (excludes DFA&apos;d players and international/complex
-          signees mistagged at level 1, which get their own column one rung below Rookie).
-        </p>
-        <h3 style={subTitleStyle}>Overall</h3>
-        <RoleLevelBenchmarkTable rows={benchmarks} />
-        <h3 style={subTitleStyle}>Batting</h3>
-        <RoleLevelBenchmarkTable rows={battingBenchmarks} />
-        <h3 style={subTitleStyle}>Fielding</h3>
-        <RoleLevelBenchmarkTable rows={fieldingBenchmarks} />
       </section>
 
       {/* ================= MINOR LEAGUE SYSTEM / TEAM RANKINGS ================= */}
