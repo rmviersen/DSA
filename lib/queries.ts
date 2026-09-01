@@ -531,7 +531,17 @@ export interface ActiveWeightSet {
   id: number;
   label: string;
   contact: number; power: number; eye: number; gap: number; avoid_ks: number; speed: number;
-  fielding: number; stuff: number; movement: number; control: number; stamina: number; pbabip: number;
+  // Top-level Overall/Potential blend weights (2026-09-02) -- batting/
+  // fielding/baserunning below are multiplied by these, not implicit 1s.
+  batting: number; fielding: number; baserunning: number;
+  // Retired flat pitching weights -- historical rows only, superseded by the
+  // sp_/rp_ split below. Kept in the type for older weight-set rows.
+  stuff: number; movement: number; control: number; stamina: number; pbabip: number;
+  sp_stuff: number; sp_movement: number; sp_control: number; sp_stamina: number;
+  rp_stuff: number; rp_movement: number; rp_control: number; rp_stamina: number;
+  relief_value_multiplier: number;
+  baserunning_speed_weight: number; baserunning_run_weight: number;
+  baserunning_steal_weight: number; baserunning_stlrt_weight: number;
   qp_multiplier: number; qp_threshold: number; qpp_threshold: number;
   sp_rp_stamina_threshold: number; sp_rp_min_pitches: number;
   catcher_batting_multiplier: number; ss_batting_multiplier: number; cf_batting_multiplier: number;
@@ -551,6 +561,33 @@ export async function getActiveWeightSet(): Promise<ActiveWeightSet | null> {
   const { data, error } = await supabase.from("rating_weights").select("*").eq("is_active", true).maybeSingle();
   if (error) throw error;
   return data as ActiveWeightSet | null;
+}
+
+export interface CalibrationAnchor {
+  hitterMean: number | null; hitterSd: number | null;
+  pitcherMean: number | null; pitcherSd: number | null;
+  refreshRunId: number;
+}
+
+// Powers the Glossary page's calibration note (2026-09-03) -- the per-type
+// mean/SD compute-ratings.ts derived from the real MLB roster on its most
+// recent run, written to refresh_runs at compute time. Recomputed fresh
+// every refresh (never hand-tuned), so this always reflects what the live
+// Overall/Potential/Prospect Potential numbers were actually calibrated
+// against, not a stale snapshot.
+export async function getCalibrationAnchor(): Promise<CalibrationAnchor> {
+  const refreshRunId = await latestRefreshRunId();
+  const { data, error } = await supabase
+    .from("refresh_runs")
+    .select("hitter_overall_mean, hitter_overall_sd, pitcher_overall_mean, pitcher_overall_sd")
+    .eq("id", refreshRunId).maybeSingle();
+  if (error) throw error;
+  const row = data as { hitter_overall_mean: number | null; hitter_overall_sd: number | null; pitcher_overall_mean: number | null; pitcher_overall_sd: number | null } | null;
+  return {
+    hitterMean: row?.hitter_overall_mean ?? null, hitterSd: row?.hitter_overall_sd ?? null,
+    pitcherMean: row?.pitcher_overall_mean ?? null, pitcherSd: row?.pitcher_overall_sd ?? null,
+    refreshRunId,
+  };
 }
 
 export interface HandednessSplitsDisplay {
