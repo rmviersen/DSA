@@ -1,6 +1,7 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
+import { useRouter } from "next/navigation";
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer } from "recharts";
 import { STREAMS, type Stream, type WeightTuningSnapshot, type WeightTuningHistoryPoint } from "../../../lib/weight-tuning-query";
 
@@ -23,6 +24,7 @@ const STREAM_COLORS: Record<Stream, string> = {
   hitting: "#0b3049", baserunning: "#57904a", pitching: "#a8763a", overall_blend: "#8a5a9e",
   pitching_sp: "#a8763a", pitching_rp: "#c99a5c",
   pitching_sp_war: "#7a4f22", pitching_rp_war: "#b0824a",
+  fielding_defensive: "#3f6b4a",
 };
 
 interface Props {
@@ -47,6 +49,20 @@ function WeightBar({ implied, current, max, color }: { implied: number; current:
 }
 
 export default function WeightTuningExplorer({ snapshots, history }: Props) {
+  // Bug fix (2026-09-02, Rees's report): on first client-side navigation to
+  // this page, only the streams that existed the LAST time this route's RSC
+  // payload was cached showed as clickable -- newer streams (added
+  // repeatedly this session) appeared greyed out until a manual refresh.
+  // This is Next.js's client-side Router Cache serving a stale server
+  // render for this dynamic page rather than a data bug (the server query
+  // itself was already correct and complete every time it was checked
+  // directly). router.refresh() is the documented way to force a fresh
+  // server re-render on mount, bypassing that cache -- worth doing here
+  // specifically because this page's available streams keep changing
+  // within a session, unlike most other pages on the site.
+  const router = useRouter();
+  useEffect(() => { router.refresh(); }, [router]);
+
   const availableStreams = STREAMS.filter((s) => snapshots[s.key] != null);
   const [stream, setStream] = useState<Stream>(availableStreams[0]?.key ?? "hitting");
   const snapshot = snapshots[stream];
@@ -105,6 +121,14 @@ export default function WeightTuningExplorer({ snapshots, history }: Props) {
 
       {snapshot && (
         <>
+          {stream === "fielding_defensive" && (
+            <div style={{ ...cardStyle, borderLeft: `3px solid ${STREAM_COLORS.fielding_defensive}`, fontSize: "0.875rem" }}>
+              <strong>Reference only.</strong> This isn&apos;t used to set <code>rating_weights.fielding</code> — it&apos;s shown for context.
+              It also doesn&apos;t isolate defense the way a real position-adjusted metric would: the target is total WAR (offense
+              included) over defensive innings played, not a defense-only value. No position-adjusted alternative (e.g. real
+              runs-above-position-average) exists anywhere in this schema yet — only raw, position-specific ZR.
+            </div>
+          )}
           {/* Stat summary */}
           <div style={{ ...cardStyle, display: "flex", gap: "2rem" }}>
             <div><div style={statLabelStyle}>Target</div><div style={{ ...statValueStyle, fontSize: "1.0625rem" }}>{snapshot.targetMetric}</div></div>

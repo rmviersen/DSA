@@ -18,9 +18,54 @@ async function fetchAll<T>(query: (from: number, to: number) => Promise<{ data: 
   return all;
 }
 
-async function main() {
-  const supabase = makeSupabaseClient();
+// Not a real players.level value -- international/complex signees are
+// actually stored at level=1 with a negative league_id (same convention
+// org-minors-query.ts's `isInternational` uses), not a distinct level code
+// of their own. Remapped to a synthetic level 7 ("below Rookie") wherever
+// level matters for ETA/benchmarks, so they get their own rung on the
+// ladder instead of either polluting the MLB row or being silently
+// dropped (Rees 2026-08-24 -- they were falling into the latter between
+// the is_active fix and this remap).
+const INTERNATIONAL_LEVEL = 7;
+function effectiveLevel(level: number | null | undefined, leagueId: number | null | undefined): number | null {
+  if (level === 1 && leagueId != null && leagueId < 0) return INTERNATIONAL_LEVEL;
+  return level ?? null;
+}
 
+// Pace tiers (years per level climbed), by how far a player's POTENTIAL
+// clears their role's own MLB bar -- a bigger cushion above the bar means
+// a more likely fast-track; just barely clearing it means the full,
+// normal development runway. Starting values per Rees 2026-08-24, tune
+// from here once seen against real players.
+function paceYearsPerLevel(marginAboveBar: number): number {
+  if (marginAboveBar >= 15) return 0.8; // fast-tracked, true impact-caliber ceiling
+  if (marginAboveBar >= 8) return 1.0; // normal development pace
+  return 1.3; // fringe -- just clears the bar, needs the full runway
+}
+
+// --- Shared, NOT run-scoped ------------------------------------------
+// Everything here is either a global setting (the active weight set) or a
+// genuine career-spanning total that by definition has to look across
+// every refresh, not just one -- loaded ONCE regardless of how many
+// refresh runs get (re)computed in a single invocation of this script,
+// both for speed (players alone is ~46k rows) and because none of it
+// actually varies by which run is being processed.
+//
+// One real, deliberate simplification worth being explicit about (2026-09-02,
+// added for the full-history backfill): `players` is a CURRENT-STATE
+// reference table, not time-series (see HANDOFF.md's schema design notes) --
+// there is no historical snapshot of what a player's age/org/level/service-
+// days actually were as of some OLD refresh_run_id. Backfilling old runs
+// under a new weight set necessarily recomputes their Batting/Fielding/
+// Baserunning/Pitching/Overall/Potential from that run's OWN ratings
+// snapshot (which IS point-in-time and correct), but blends in TODAY's
+// player-table state for anything that depends on it (prospect-pool
+// eligibility, org, ETA role/level benchmarks, career workload). That's an
+// approximation, not a perfect historical reconstruction -- acceptable
+// because the actual ask driving this (Rees, 2026-09-02) is "make sure the
+// CORE VALUATIONS reflect the new weighting model across history," not
+// "reconstruct exactly what the site would have shown on that old date."
+async function loadSharedContext(supabase: ReturnType<typeof makeSupabaseClient>) {
   console.log("Loading active weight set...");
   const { data: weightRow, error: weightErr } = await supabase.from("rating_weights").select("*").eq("is_active", true).single();
   if (weightErr || !weightRow) throw new Error(`No active weight set found: ${weightErr?.message}`);
@@ -33,7 +78,9 @@ async function main() {
   // elsewhere in this pipeline e.g. contracts vs. ratings). Missing
   // entirely (table never populated yet) or missing a specific role both
   // fall back to a multiplier of 1 inside computeRatings -- today's flat
-  // w.fielding behavior, unchanged.
+  // w.fielding behavior, unchanged. Retired as of 2026-09-02 (see
+  // HANDOFF.md) -- every role reads back 1.0 regardless, kept wired in
+  // rather than ripped out since it's a harmless no-op.
   console.log("Loading role-calibrated fielding weights (if any exist yet)...");
   const { data: fieldingWeightRows } = await supabase
     .from("fielding_role_weights").select("refresh_run_id, role, relative_multiplier").order("refresh_run_id", { ascending: false });
@@ -48,56 +95,18 @@ async function main() {
     console.log("  None found yet -- every role uses the flat w.fielding baseline this run.");
   }
 
-  console.log("Finding latest succeeded refresh run with ratings...");
-  const { data: runRow, error: runErr } = await supabase
-    .from("refresh_runs")
-    .select("id, game_date")
-    .eq("status", "succeeded")
-    .eq("ratings_included", true)
-    .order("id", { ascending: false })
-    .limit(1)
-    .single();
-  if (runErr || !runRow) throw new Error(`No succeeded refresh run with ratings found: ${runErr?.message}`);
-  const refreshRunId = (runRow as { id: number; game_date: string | null }).id;
-  console.log(`Computing against refresh_run_id ${refreshRunId}`);
-
-  // ETA "is the season over" check (2026-08-31, Rees's spec) -- game_date is
-  // "YYYY-MM-DD", sliced not Date-parsed to stay timezone-safe. Once the
-  // in-game calendar is into October, the real regular season has ended and
-  // the league's in its playoffs (confirmed against the actual current run:
-  // game_date 2031-10-31) -- there is no more real chance of a call-up
-  // "this year," so a same-year ETA stops meaning "could happen any day now"
-  // and starts reading as "should already have happened," which is
-  // backwards. See estimateEta below for where this is applied.
-  const gameDateMonth = (runRow as { game_date: string | null }).game_date
-    ? Number((runRow as { game_date: string | null }).game_date!.slice(5, 7))
-    : null;
-  const isOffseason = gameDateMonth !== null && gameDateMonth >= 10;
-  console.log(`game_date=${(runRow as { game_date: string | null }).game_date}, isOffseason=${isOffseason}`);
-
-  console.log("Loading ratings snapshot...");
-  const ratings = await fetchAll<RatingsInput & { player_id: number }>((from, to) =>
-    supabase.from("player_ratings_snapshots").select("*").eq("refresh_run_id", refreshRunId).range(from, to) as never
-  );
-  console.log(`  ${ratings.length} ratings rows`);
-  // Used by the player-comp section further down to look up an established
-  // candidate's raw CURRENT grades by id (the `ratings` array above is only
-  // ever iterated in bulk elsewhere in this file).
-  const ratingsByPlayer = new Map(ratings.map((r) => [r.player_id, r]));
-
   // --- Player-comp career workload, 2026-08-31 (Rees's spec) ----------
   // Career MLB AB/IP for EVERY player who's ever appeared at level_id=1,
-  // summed across ALL refresh runs -- not scoped to refreshRunId, unlike
-  // almost everything else in this file, because a career total by
-  // definition has to look further back than "the current refresh." Same
-  // dedup need as lib/player-detail-query.ts's latestPerStint (a player's
-  // early-career years only exist under the old one-time backfill run, and
-  // a season that got re-pulled under a later run shouldn't be double
-  // counted) -- reimplemented locally rather than imported, since that
-  // helper lives in a browser-reachable lib module and this is a standalone
-  // node script. ~76k total rows across both tables as of 2026-08-31 --
-  // fetchAll's normal pagination handles that fine, this is a one-time cost
-  // per script run, not per-refresh.
+  // summed across ALL refresh runs -- not scoped to any one refreshRunId,
+  // because a career total by definition has to look further back than any
+  // single refresh. Same dedup need as lib/player-detail-query.ts's
+  // latestPerStint (a player's early-career years only exist under the old
+  // one-time backfill run, and a season that got re-pulled under a later
+  // run shouldn't be double counted) -- reimplemented locally rather than
+  // imported, since that helper lives in a browser-reachable lib module and
+  // this is a standalone node script. ~76k total rows across both tables as
+  // of 2026-08-31 -- fetchAll's normal pagination handles that fine, this is
+  // a one-time cost per script invocation, not per-refresh-run.
   console.log("Loading career MLB workload (for the player-comp established-player pool)...");
   function latestPerStint<T extends { player_id: number; year: number; stint: number | null; refresh_run_id: number }>(rowsIn: T[]): T[] {
     const best = new Map<string, T>();
@@ -137,19 +146,44 @@ async function main() {
   const playerById = new Map(players.map((p) => [p.id, p]));
   console.log(`  ${players.length} players`);
 
-  // Not a real players.level value -- international/complex signees are
-  // actually stored at level=1 with a negative league_id (same convention
-  // org-minors-query.ts's `isInternational` uses), not a distinct level code
-  // of their own. Remapped to a synthetic level 7 ("below Rookie") wherever
-  // level matters for ETA/benchmarks, so they get their own rung on the
-  // ladder instead of either polluting the MLB row or being silently
-  // dropped (Rees 2026-08-24 -- they were falling into the latter between
-  // the is_active fix and this remap).
-  const INTERNATIONAL_LEVEL = 7;
-  function effectiveLevel(level: number | null | undefined, leagueId: number | null | undefined): number | null {
-    if (level === 1 && leagueId != null && leagueId < 0) return INTERNATIONAL_LEVEL;
-    return level ?? null;
+  return { weights, fieldingWeights, players, playerById, careerAbByPlayer, careerIpByPlayer };
+}
+
+type SharedContext = Awaited<ReturnType<typeof loadSharedContext>>;
+
+// --- Everything below is scoped to ONE refresh_run_id -----------------
+async function computeRatingsForRun(supabase: ReturnType<typeof makeSupabaseClient>, refreshRunId: number, shared: SharedContext) {
+  const { weights, fieldingWeights, players, playerById, careerAbByPlayer, careerIpByPlayer } = shared;
+
+  console.log(`Computing against refresh_run_id ${refreshRunId}`);
+
+  // ETA "is the season over" check (2026-08-31, Rees's spec) -- game_date is
+  // "YYYY-MM-DD", sliced not Date-parsed to stay timezone-safe. Once the
+  // in-game calendar is into October, the real regular season has ended and
+  // the league's in its playoffs (confirmed against the actual current run:
+  // game_date 2031-10-31) -- there is no more real chance of a call-up
+  // "this year," so a same-year ETA stops meaning "could happen any day now"
+  // and starts reading as "should already have happened," which is
+  // backwards. See estimateEta below for where this is applied.
+  const { data: runRow } = await supabase.from("refresh_runs").select("game_date").eq("id", refreshRunId).maybeSingle();
+  const gameDate = (runRow as { game_date: string | null } | null)?.game_date ?? null;
+  const gameDateMonth = gameDate ? Number(gameDate.slice(5, 7)) : null;
+  const isOffseason = gameDateMonth !== null && gameDateMonth >= 10;
+  console.log(`game_date=${gameDate}, isOffseason=${isOffseason}`);
+
+  console.log("Loading ratings snapshot...");
+  const ratings = await fetchAll<RatingsInput & { player_id: number }>((from, to) =>
+    supabase.from("player_ratings_snapshots").select("*").eq("refresh_run_id", refreshRunId).range(from, to) as never
+  );
+  console.log(`  ${ratings.length} ratings rows`);
+  if (ratings.length === 0) {
+    console.warn(`  No ratings rows for refresh_run_id ${refreshRunId} -- skipping (nothing to compute).`);
+    return;
   }
+  // Used by the player-comp section further down to look up an established
+  // candidate's raw CURRENT grades by id (the `ratings` array above is only
+  // ever iterated in bulk elsewhere in this file).
+  const ratingsByPlayer = new Map(ratings.map((r) => [r.player_id, r]));
 
   // "Current year" -- no field gives us this directly, so we use the most
   // recent season we actually have stats for in this refresh. Falls back to
@@ -287,17 +321,6 @@ async function main() {
     [...roleLevelBar.entries()].map(([role, byLevel]) =>
       `${role}[${[1, 2, 3, 4, 5, 6, 7].map((l) => byLevel.get(l)?.toFixed(1) ?? "—").join("/")}]`
     ).join(", "));
-
-  // Pace tiers (years per level climbed), by how far a player's POTENTIAL
-  // clears their role's own MLB bar -- a bigger cushion above the bar means
-  // a more likely fast-track; just barely clearing it means the full,
-  // normal development runway. Starting values per Rees 2026-08-24, tune
-  // from here once seen against real players.
-  function paceYearsPerLevel(marginAboveBar: number): number {
-    if (marginAboveBar >= 15) return 0.8; // fast-tracked, true impact-caliber ceiling
-    if (marginAboveBar >= 8) return 1.0; // normal development pace
-    return 1.3; // fringe -- just clears the bar, needs the full runway
-  }
 
   // Reworked 2026-08-24 (Rees's follow-up spec, same day as the original
   // role-aware version above): the first version measured distance-to-the-
@@ -740,8 +763,55 @@ async function main() {
   }));
   await writeBatched("player_projected_splits", projectedSplitRows);
 
-  console.log(`Done. Top 5 by computed Overall:`);
+  console.log(`Done with refresh_run_id ${refreshRunId}. Top 5 by computed Overall:`);
   byOverallDesc.slice(0, 5).forEach((c, i) => console.log(`  ${i + 1}. player ${c.player_id} — Overall ${c.overall.toFixed(2)}`));
+}
+
+async function main() {
+  const supabase = makeSupabaseClient();
+  const shared = await loadSharedContext(supabase);
+
+  // --all (2026-09-02, Rees's ask: "run a full refresh of all of the data
+  // ... including old runs to update the historical valuations ... so we
+  // can accurately see the impacts" of the new weighting system across
+  // history, not just the current refresh). Default behavior (no flag) is
+  // unchanged: only the latest succeeded+ratings run.
+  const backfillAll = process.argv.includes("--all");
+
+  let refreshRunIds: number[];
+  if (backfillAll) {
+    console.log("--all: finding every succeeded refresh run with ratings...");
+    const { data: runRows, error } = await supabase
+      .from("refresh_runs").select("id").eq("status", "succeeded").eq("ratings_included", true).order("id", { ascending: true });
+    if (error || !runRows || runRows.length === 0) throw new Error(`No succeeded refresh runs with ratings found: ${error?.message}`);
+    refreshRunIds = (runRows as { id: number }[]).map((r) => r.id);
+    console.log(`  ${refreshRunIds.length} runs to recompute: ${refreshRunIds.join(", ")}`);
+  } else {
+    console.log("Finding latest succeeded refresh run with ratings...");
+    const { data: runRow, error } = await supabase
+      .from("refresh_runs").select("id").eq("status", "succeeded").eq("ratings_included", true)
+      .order("id", { ascending: false }).limit(1).single();
+    if (error || !runRow) throw new Error(`No succeeded refresh run with ratings found: ${error?.message}`);
+    refreshRunIds = [(runRow as { id: number }).id];
+  }
+
+  let failures = 0;
+  for (const refreshRunId of refreshRunIds) {
+    console.log(`\n=== refresh_run_id ${refreshRunId} (${refreshRunIds.indexOf(refreshRunId) + 1}/${refreshRunIds.length}) ===`);
+    try {
+      await computeRatingsForRun(supabase, refreshRunId, shared);
+    } catch (err) {
+      // One bad historical run shouldn't kill an entire multi-run backfill --
+      // logged and counted, not silently swallowed (see the nonzero exit
+      // code below).
+      console.error(`  refresh_run_id ${refreshRunId} failed: ${err}`);
+      failures++;
+    }
+  }
+  if (backfillAll) {
+    console.log(`\nBackfill complete: ${refreshRunIds.length - failures}/${refreshRunIds.length} runs succeeded.`);
+  }
+  if (failures > 0) process.exitCode = 1;
 }
 
 main().catch((err) => {

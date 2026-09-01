@@ -13,10 +13,11 @@ import { makeSupabaseClient } from "./supabase-client";
 // export, not just a type, from this module would otherwise pull a
 // server-only env var read into the browser bundle).
 
-export type Stream = "hitting" | "baserunning" | "pitching" | "overall_blend" | "pitching_sp" | "pitching_rp" | "pitching_sp_war" | "pitching_rp_war";
+export type Stream = "hitting" | "baserunning" | "pitching" | "overall_blend" | "pitching_sp" | "pitching_rp" | "pitching_sp_war" | "pitching_rp_war" | "fielding_defensive";
 export const STREAMS: { key: Stream; label: string }[] = [
   { key: "hitting", label: "Hitting" },
   { key: "baserunning", label: "Baserunning" },
+  { key: "fielding_defensive", label: "Fielding (Defensive IP)" },
   { key: "pitching_sp", label: "Pitching (SP, FIP-)" },
   { key: "pitching_rp", label: "Pitching (RP, FIP-)" },
   { key: "pitching_sp_war", label: "Pitching (SP, WAR)" },
@@ -84,6 +85,8 @@ function liveWeightFor(stream: Stream, key: string, live: Record<string, number 
       return live[`rp_${key}`] ?? null;
     case "overall_blend":
       return live[key] ?? null; // batting/fielding/baserunning
+    case "fielding_defensive":
+      return live.fielding ?? null; // reference-only stream, shown for context, not a target to apply
     case "pitching":
       return null; // retired stream, no live column mapping needed
   }
@@ -108,6 +111,7 @@ export async function getLatestWeightTuningSnapshots(): Promise<Record<Stream, W
   const result: Record<Stream, WeightTuningSnapshot | null> = {
     hitting: null, baserunning: null, pitching: null, overall_blend: null,
     pitching_sp: null, pitching_rp: null, pitching_sp_war: null, pitching_rp_war: null,
+    fielding_defensive: null,
   };
   const latestRunRowByStream = new Map<Stream, { id: number; refresh_run_id: number; target_metric: string; r_squared: number; sample_size: number; computed_at: string }>();
   for (const r of (runs ?? []) as { id: number; refresh_run_id: number; stream: Stream; target_metric: string; r_squared: number; sample_size: number; computed_at: string }[]) {
