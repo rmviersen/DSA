@@ -270,6 +270,20 @@ Rees: wanted to see the Fielding regression against WAR/innings-in-the-field spe
 - **Honest framing, not a fix**: WAR/100 defensive innings still doesn't isolate defense — it's total WAR (offense included) over a defense-scoped exposure denominator, not a defense-only value metric. It answers "does more defensive exposure relative to this Fielding grade track with real value," not "how much does defense alone contribute." Real first look: Fielding's R² against this basis is 0.028 (slope -0.060) vs. Overall's own 0.011 — still weak, consistent with every other Fielding-vs-WAR check this session.
 - **Suggested next step, not built**: a real position-adjusted ZR (convert to runs-above-position-average using each position's own population mean, then layer a real positional adjustment on top) would directly solve his stated concern and was already sketched as "Step 2" in the original redesign options — flagged as a good candidate if this becomes more than a reference check.
 
+### Full historical backfill under the corrected weight set (2026-09-02)
+
+Rees: "run a full refresh of all of the data (including old runs) ... so we can accurately see the impacts, then we can move on to the rescaling." Ran `npm run compute-ratings -- --all` (see the `compute-ratings.ts` refactor above) against all 18 historical succeeded+ratings refresh runs (3 through 27). All 18 succeeded (a handful of transient `fetch failed` errors on individual upsert batches, all auto-recovered by the existing retry logic — none left a run in a failed state). Verified: every historical `player_computed` row now shows `weights_id=6` (the corrected weight set), and the latest run's own numbers are unchanged from the pre-backfill single-run verification (top-5 Overall identical) — confirms the refactor didn't alter the computation itself, only which runs it's applied to.
+
+### Site-wide stale-page bug fixed (2026-09-02)
+
+Rees reported this on multiple pages (Weight Tuning, Top Players): data looked stale on first client-side navigation, requiring a manual refresh to show current values. Root cause confirmed: Next.js's client-side Router Cache holds a dynamically-rendered page's RSC payload for 30s by default after a `<Link>` navigation — normally invisible, but this session kept changing what several pages return (new weight-tuning streams, new weight sets) faster than that cache expired, making it very visible. Fixed **site-wide** in `next.config.mjs` via `experimental.staleTimes: { dynamic: 0 }`, rather than patching each affected page individually (a per-page `router.refresh()`-on-mount fix had already been added to `WeightTuningExplorer.tsx` before finding the general cause — left in place, harmless now that it's redundant, not removed).
+
+### Top Players / Draft: team abbreviation + Role column (2026-09-02)
+
+Both changes only needed changes to the one shared `fetchComputedPlayers()` query (used by `getTopPlayers`, `getTopProspects`, and `getTopDraftees` alike) plus `PlayerTable.tsx` (shared by `/players` and `/draft`), so all three pages picked them up together:
+- **Team abbreviation**: `teams` has no abbreviation column — reused the exact pattern `getTopProspectsDetailed` already established (real codes live on `team_batting_stats_snapshots.abbr`, one row per team per year; order by year descending so a relocated/rebranded team's *current* abbreviation wins the dedup, not an arbitrary old one).
+- **Role column**: `PlayerRow.role` (the rating engine's role bucket — SP/RP/C/1B/INF/SS/COF/CF/DH) already existed on the type and was already used for the page's role filter buttons, just never rendered as its own visible column until now.
+
 ### Not built yet (don't design against these)
 - Win/loss-based team power rankings (needs league-relative stat normalization, not started)
 - Ratings/computed values for pre-draft amateurs — same rating engine works fine on them once they have data, but the ingestion pipeline for their scouted grades is still manual/deferred

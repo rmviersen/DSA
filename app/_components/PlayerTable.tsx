@@ -23,7 +23,7 @@ const fmtInt = (n: number | null) => (n === null || n === undefined ? "—" : Ma
 const ROLE_ORDER = ["SP", "RP", "C", "1B", "INF", "SS", "COF", "CF", "DH"];
 
 type SortKey =
-  | "name" | "pos" | "team" | "age"
+  | "name" | "pos" | "role" | "team" | "age"
   | "cntct" | "pow" | "eye" | "speed" | "stf" | "mov" | "ctrl" | "stm"
   | "overall" | "potential" | "ab" | "ip" | "war" | "prospect_potential" | "prospect_rank";
 
@@ -81,7 +81,8 @@ export function PlayerTable({ rows, showTeam, showProspectCols }: { rows: Player
       switch (sortKey) {
         case "name": av = `${a.last_name}, ${a.first_name}`; bv = `${b.last_name}, ${b.first_name}`; break;
         case "pos": av = a.pos ?? ""; bv = b.pos ?? ""; break;
-        case "team": av = a.team_nickname ?? ""; bv = b.team_nickname ?? ""; break;
+        case "role": av = a.role ?? ""; bv = b.role ?? ""; break;
+        case "team": av = a.team_abbr ?? ""; bv = b.team_abbr ?? ""; break;
         case "age": av = a.age ?? -1; bv = b.age ?? -1; break;
         case "cntct": av = a.cntct ?? -1; bv = b.cntct ?? -1; break;
         case "pow": av = a.pow ?? -1; bv = b.pow ?? -1; break;
@@ -115,7 +116,7 @@ export function PlayerTable({ rows, showTeam, showProspectCols }: { rows: Player
     </th>
   );
 
-  const colCount = 14 + (showTeam ? 1 : 0) + (showProspectCols ? 2 : 0);
+  const colCount = 15 + (showTeam ? 1 : 0) + (showProspectCols ? 2 : 0);
 
   return (
     <div>
@@ -177,6 +178,7 @@ export function PlayerTable({ rows, showTeam, showProspectCols }: { rows: Player
             <tr>
               {th("Name", "name")}
               {th("Pos", "pos")}
+              {th("Role", "role")}
               {showTeam && th("Team", "team")}
               {th("Age", "age")}
               {th("Cntct", "cntct")}
@@ -213,7 +215,8 @@ export function PlayerTable({ rows, showTeam, showProspectCols }: { rows: Player
                   <a href={statsPlusPlayerUrl(r.player_id)} target="_blank" rel="noopener noreferrer" title="View on StatsPlus" style={{ marginLeft: 4, fontSize: 11, opacity: 0.7 }}>↗</a>
                 </td>
                 <td>{r.pos ?? "—"}</td>
-                {showTeam && <td>{r.team_name ? `${r.team_name} ${r.team_nickname}` : "—"}</td>}
+                <td>{r.role ?? "—"}</td>
+                {showTeam && <td>{r.team_abbr ?? "—"}</td>}
                 <td>{r.age ?? "—"}</td>
                 <td style={gradeStyle(r.cntct)}>{fmtInt(r.cntct)}</td>
                 <td style={gradeStyle(r.pow)}>{fmtInt(r.pow)}</td>

@@ -195,6 +195,7 @@ export interface PlayerRow extends RatingsSlice {
   last_name: string;
   team_name: string | null;
   team_nickname: string | null;
+  team_abbr: string | null;
   age: number | null;
   overall: number;
   potential: number;
@@ -307,6 +308,18 @@ async function fetchComputedPlayers(opts: { orgId?: number; prospectsOnly?: bool
   );
   const teamById = new Map(teams.map((t) => [t.id, t]));
 
+  // team_id -> abbreviation, same pattern getTopProspectsDetailed already
+  // uses below -- teams itself has no abbr column; team_batting_stats_
+  // snapshots does (StatsPlus's own "OKC"/"NY"-style codes). Ordered by
+  // year descending so a relocated/rebranded team's CURRENT abbreviation
+  // wins the dedup, not an arbitrary old one (see that other call site's
+  // comment for the real Kingston->OKC case this was caught on).
+  const abbrRows = await fetchAll<{ team_id: number; abbr: string }>((from, to) =>
+    supabase.from("team_batting_stats_snapshots").select("team_id,abbr").eq("refresh_run_id", refreshRunId).order("year", { ascending: false }).range(from, to) as never
+  );
+  const abbrByTeamId = new Map<number, string>();
+  abbrRows.forEach((r) => { if (!abbrByTeamId.has(r.team_id)) abbrByTeamId.set(r.team_id, r.abbr); });
+
   const ratingsById = new Map<number, RatingsSlice>();
   const { data: ratingsData, error: ratingsErr } = await supabase
     .from("player_ratings_snapshots")
@@ -394,6 +407,7 @@ async function fetchComputedPlayers(opts: { orgId?: number; prospectsOnly?: bool
         player_id: c.player_id,
         first_name: p.first_name, last_name: p.last_name, age: p.age,
         team_name: team?.name ?? null, team_nickname: team?.nickname ?? null,
+        team_abbr: p.team_id ? (abbrByTeamId.get(p.team_id) ?? null) : null,
         overall: c.overall, potential: c.potential, prospect_potential: c.prospect_potential,
         prospect_rank: c.prospect_rank, org_rank: c.org_rank, prospect_org_rank: c.prospect_org_rank,
         prospect_role_rank: c.prospect_role_rank, role: c.role, ph: c.ph,
