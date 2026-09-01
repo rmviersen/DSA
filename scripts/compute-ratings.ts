@@ -511,12 +511,91 @@ async function computeRatingsForRun(supabase: ReturnType<typeof makeSupabaseClie
   const distanceToSimilarity = (distance: number) =>
     Math.max(0, Math.min(100, 100 - (distance / COMP_DISTANCE_FOR_ZERO_SIMILARITY) * 100));
 
+  // --- Hitter/pitcher rescale, 2026-09-01 (Rees's ask) ----------------
+  // The raw formula's Overall/Potential/Prospect Potential are NOT on the
+  // same ruler for hitters vs. pitchers -- confirmed with real data before
+  // building this: pitchers' raw Overall runs both higher AND ~48% wider
+  // (mean 52.08/SD 4.89 vs. hitters' 50.69/3.30, latest run at the time this
+  // was written) than hitters'. Sorting/ranking on the raw value directly
+  // is what put 72 pitchers in a top-100 combined list and dropped Jeremy
+  // Porten (elite bat, ordinary glove) outside the top 100 despite a 7.1 WAR
+  // season -- not a weighting bug (that one's already fixed), a genuine
+  // "two different rulers read as one" problem.
+  //
+  // Fix: a per-TYPE z-score rescale, anchored on each type's own real
+  // Overall distribution --
+  //   CalibratedX = max(20, 50 + 10 * (RawX - typeMean) / typeSD)
+  // -- applied identically to that type's Overall, Potential, AND Prospect
+  // Potential (never fit separately per metric), so "Potential 65" and
+  // "Overall 65" still describe the same real talent level within a type,
+  // while a hitter's 65 and a pitcher's 65 now ALSO describe the same real
+  // talent level relative to their own population. Floor-clamped at 20
+  // (matches the original 20-80 design), deliberately NOT ceiling-clamped
+  // at 80 (Rees 2026-09-01: "top players should be differentiated") -- a
+  // true outlier is allowed to read above 80.
+  //
+  // typeMean/typeSD are recomputed FRESH every run, from THIS run's own
+  // computed values, restricted to the real MLB roster reference population
+  // (league_id=200, mlb_service_days>0 -- same reference population every
+  // hitter/pitcher-scale comparison this session has used). Deliberately
+  // NOT a hand-tuned/versioned rating_weights row: this is a plain
+  // descriptive statistic of "today's real population," not a judgment
+  // call, so it has to auto-update every time weights or ratings data
+  // change, never go stale the way a manually-shipped constant would.
+  // Persisted onto refresh_runs (hitter/pitcher_overall_mean/sd) purely so
+  // there's a visible history of how the anchor itself drifts over time.
+  const REFERENCE_LEAGUE_ID = 200;
+  const referencePool = computed.filter((c) => {
+    const p = playerById.get(c.player_id);
+    return p?.league_id === REFERENCE_LEAGUE_ID && (p?.mlb_service_days ?? 0) > 0;
+  });
+  function sampleMeanSd(values: number[]): { mean: number; sd: number } {
+    const n = values.length;
+    const mean = values.reduce((s, v) => s + v, 0) / n;
+    const variance = n > 1 ? values.reduce((s, v) => s + (v - mean) ** 2, 0) / (n - 1) : 0;
+    return { mean, sd: Math.sqrt(variance) };
+  }
+  // Fallback to the full (not reference-restricted) population of that type
+  // if the reference pool comes back too thin to trust (e.g. a sparse early
+  // historical run) -- a real anchor, even if computed on a broader pool,
+  // beats a wildly noisy or NaN one.
+  const MIN_REFERENCE_POOL = 20;
+  function typeStats(ph: "H" | "P"): { mean: number; sd: number } {
+    let pool = referencePool.filter((c) => c.ph === ph).map((c) => c.overall);
+    if (pool.length < MIN_REFERENCE_POOL) pool = computed.filter((c) => c.ph === ph).map((c) => c.overall);
+    const { mean, sd } = sampleMeanSd(pool);
+    return { mean, sd: sd > 0 ? sd : 1 }; // sd=1 degenerate guard -- never divide by zero
+  }
+  const hitterStats = typeStats("H");
+  const pitcherStats = typeStats("P");
+  console.log(`Calibration anchor -- Hitters: mean=${hitterStats.mean.toFixed(3)} sd=${hitterStats.sd.toFixed(3)} (n=${referencePool.filter((c) => c.ph === "H").length}); ` +
+    `Pitchers: mean=${pitcherStats.mean.toFixed(3)} sd=${pitcherStats.sd.toFixed(3)} (n=${referencePool.filter((c) => c.ph === "P").length})`);
+
+  function calibrate(raw: number, ph: "H" | "P" | null): number {
+    const stats = ph === "P" ? pitcherStats : hitterStats; // null ph (rare degenerate case) treated as hitter, matching sp_rp's own "" fallback elsewhere
+    return Math.max(20, 50 + (10 * (raw - stats.mean)) / stats.sd);
+  }
+  const calibratedByPlayer = new Map(computed.map((c) => [c.player_id, {
+    overall: calibrate(c.overall, c.ph),
+    potential: calibrate(c.potential, c.ph),
+    prospectPotential: calibrate(c.prospect_potential, c.ph),
+  }]));
+
+  await supabase.from("refresh_runs").update({
+    hitter_overall_mean: hitterStats.mean, hitter_overall_sd: hitterStats.sd,
+    pitcher_overall_mean: pitcherStats.mean, pitcher_overall_sd: pitcherStats.sd,
+  }).eq("id", refreshRunId);
+
   // --- ranks ---------------------------------------------------------
-  // League-wide, by our computed Overall / Potential.
-  const byOverallDesc = [...computed].sort((a, b) => b.overall - a.overall);
+  // League-wide, by CALIBRATED Overall / Potential -- this is the actual
+  // fix for pitchers dominating combined leaderboards; everything upstream
+  // of this point (ETA benchmarks, player comps) stays on the raw formula
+  // output, which is mathematically unaffected by a per-type linear rescale
+  // since every role bucket is exclusively one type or the other.
+  const byOverallDesc = [...computed].sort((a, b) => calibratedByPlayer.get(b.player_id)!.overall - calibratedByPlayer.get(a.player_id)!.overall);
   const rankByPlayer = new Map(byOverallDesc.map((c, i) => [c.player_id, i + 1]));
 
-  const byPotentialDesc = [...computed].sort((a, b) => b.potential - a.potential);
+  const byPotentialDesc = [...computed].sort((a, b) => calibratedByPlayer.get(b.player_id)!.potential - calibratedByPlayer.get(a.player_id)!.potential);
   const potentialRankByPlayer = new Map(byPotentialDesc.map((c, i) => [c.player_id, i + 1]));
 
   // Prospect pool: still rookie-eligible (RLB's "MLD < 45", mapped to
@@ -542,10 +621,12 @@ async function computeRatingsForRun(supabase: ReturnType<typeof makeSupabaseClie
     if ((p.age ?? Infinity) > PROSPECT_AGE_CUTOFF) return false;
     return p.organization_id !== null || (p.last_team_id !== null && p.last_team_id !== 0);
   });
-  const byProspectPotentialDesc = [...prospectPool].sort((a, b) => b.prospect_potential - a.prospect_potential);
+  const byProspectPotentialDesc = [...prospectPool].sort((a, b) => calibratedByPlayer.get(b.player_id)!.prospectPotential - calibratedByPlayer.get(a.player_id)!.prospectPotential);
   const prospectRankByPlayer = new Map(byProspectPotentialDesc.map((c, i) => [c.player_id, i + 1]));
 
-  // Org rank: by Overall, scoped to each org.
+  // Org rank: by CALIBRATED Overall, scoped to each org -- an org's depth
+  // chart mixes hitters and pitchers just like the leaguewide list does, so
+  // this needs the same fix.
   const orgRankByPlayer = new Map<number, number>();
   const byOrg = new Map<number, typeof computed>();
   for (const c of computed) {
@@ -555,7 +636,7 @@ async function computeRatingsForRun(supabase: ReturnType<typeof makeSupabaseClie
     byOrg.get(orgId)!.push(c);
   }
   for (const [, group] of byOrg) {
-    const sorted = [...group].sort((a, b) => b.overall - a.overall);
+    const sorted = [...group].sort((a, b) => calibratedByPlayer.get(b.player_id)!.overall - calibratedByPlayer.get(a.player_id)!.overall);
     sorted.forEach((c, i) => orgRankByPlayer.set(c.player_id, i + 1));
   }
 
@@ -569,7 +650,7 @@ async function computeRatingsForRun(supabase: ReturnType<typeof makeSupabaseClie
     prospectByOrg.get(orgId)!.push(c);
   }
   for (const [, group] of prospectByOrg) {
-    const sorted = [...group].sort((a, b) => b.prospect_potential - a.prospect_potential);
+    const sorted = [...group].sort((a, b) => calibratedByPlayer.get(b.player_id)!.prospectPotential - calibratedByPlayer.get(a.player_id)!.prospectPotential);
     sorted.forEach((c, i) => prospectOrgRankByPlayer.set(c.player_id, i + 1));
   }
 
@@ -587,7 +668,12 @@ async function computeRatingsForRun(supabase: ReturnType<typeof makeSupabaseClie
     prospectByRole.get(c.role)!.push(c);
   }
   for (const [, group] of prospectByRole) {
-    const sorted = [...group].sort((a, b) => b.prospect_potential - a.prospect_potential);
+    // Scoped to a single role, which is always exclusively one type (SP/RP
+    // are pitcher-only, the other 7 roles are hitter-only) -- calibration
+    // is a linear transform, so this sorts identically whether raw or
+    // calibrated, but calibrated is used anyway for one consistent rule:
+    // every rank field on this table comes from calibrated values.
+    const sorted = [...group].sort((a, b) => calibratedByPlayer.get(b.player_id)!.prospectPotential - calibratedByPlayer.get(a.player_id)!.prospectPotential);
     sorted.forEach((c, i) => prospectRoleRankByPlayer.set(c.player_id, i + 1));
   }
 
@@ -699,7 +785,17 @@ async function computeRatingsForRun(supabase: ReturnType<typeof makeSupabaseClie
     batting: c.batting, batting_p: c.batting_p, fielding: c.fielding, baserunning: c.baserunning,
     pitching: c.pitching, pitching_p: c.pitching_p, qp: c.qp, qpp: c.qpp,
     c_rating: c.c_rating, inf_rating: c.inf_rating, of_rating: c.of_rating,
-    overall: c.overall, potential: c.potential, prospect_potential: c.prospect_potential,
+    // overall/potential/prospect_potential are the CALIBRATED, hitter/pitcher-
+    // comparable values as of 2026-09-01 -- every existing display consumer
+    // (Top Players, org depth charts, team rankings, role/level benchmarks,
+    // the market-rate curve, player detail pages) reads these column names
+    // already, so they all get the fix with no changes of their own. The
+    // formula's untransformed output is preserved in the _raw columns for
+    // the few consumers that specifically need it (rating-validation-query.ts).
+    overall: calibratedByPlayer.get(c.player_id)!.overall,
+    potential: calibratedByPlayer.get(c.player_id)!.potential,
+    prospect_potential: calibratedByPlayer.get(c.player_id)!.prospectPotential,
+    overall_raw: c.overall, potential_raw: c.potential, prospect_potential_raw: c.prospect_potential,
     ph: c.ph, role: c.role, sp_rp: c.sp_rp, tbl_pos: c.tbl_pos, platoon: c.platoon,
     rank: rankByPlayer.get(c.player_id) ?? null,
     potential_rank: potentialRankByPlayer.get(c.player_id) ?? null,
@@ -763,8 +859,8 @@ async function computeRatingsForRun(supabase: ReturnType<typeof makeSupabaseClie
   }));
   await writeBatched("player_projected_splits", projectedSplitRows);
 
-  console.log(`Done with refresh_run_id ${refreshRunId}. Top 5 by computed Overall:`);
-  byOverallDesc.slice(0, 5).forEach((c, i) => console.log(`  ${i + 1}. player ${c.player_id} — Overall ${c.overall.toFixed(2)}`));
+  console.log(`Done with refresh_run_id ${refreshRunId}. Top 5 by calibrated Overall:`);
+  byOverallDesc.slice(0, 5).forEach((c, i) => console.log(`  ${i + 1}. player ${c.player_id} (${c.ph}) — Overall ${calibratedByPlayer.get(c.player_id)!.overall.toFixed(2)} (raw ${c.overall.toFixed(2)})`));
 }
 
 async function main() {

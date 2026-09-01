@@ -1889,6 +1889,7 @@ export type Database = {
           org_rank: number | null
           org_war_rank: number | null
           overall: number | null
+          overall_raw: number | null
           ph: string | null
           pitching: number | null
           pitching_p: number | null
@@ -1898,9 +1899,11 @@ export type Database = {
           pos_rank: number | null
           potential: number | null
           potential_rank: number | null
+          potential_raw: number | null
           prospect_org_ph_rank: number | null
           prospect_org_rank: number | null
           prospect_potential: number | null
+          prospect_potential_raw: number | null
           prospect_rank: number | null
           prospect_role_rank: number | null
           qp: number | null
@@ -1931,6 +1934,7 @@ export type Database = {
           org_rank?: number | null
           org_war_rank?: number | null
           overall?: number | null
+          overall_raw?: number | null
           ph?: string | null
           pitching?: number | null
           pitching_p?: number | null
@@ -1940,9 +1944,11 @@ export type Database = {
           pos_rank?: number | null
           potential?: number | null
           potential_rank?: number | null
+          potential_raw?: number | null
           prospect_org_ph_rank?: number | null
           prospect_org_rank?: number | null
           prospect_potential?: number | null
+          prospect_potential_raw?: number | null
           prospect_rank?: number | null
           prospect_role_rank?: number | null
           qp?: number | null
@@ -1973,6 +1979,7 @@ export type Database = {
           org_rank?: number | null
           org_war_rank?: number | null
           overall?: number | null
+          overall_raw?: number | null
           ph?: string | null
           pitching?: number | null
           pitching_p?: number | null
@@ -1982,9 +1989,11 @@ export type Database = {
           pos_rank?: number | null
           potential?: number | null
           potential_rank?: number | null
+          potential_raw?: number | null
           prospect_org_ph_rank?: number | null
           prospect_org_rank?: number | null
           prospect_potential?: number | null
+          prospect_potential_raw?: number | null
           prospect_rank?: number | null
           prospect_role_rank?: number | null
           qp?: number | null
@@ -3423,11 +3432,15 @@ export type Database = {
           draft_pool_count: number | null
           free_agent_count: number | null
           game_date: string | null
+          hitter_overall_mean: number | null
+          hitter_overall_sd: number | null
           id: number
           international_count: number | null
           minor_league_count: number | null
           mlb_count: number | null
           notes: string | null
+          pitcher_overall_mean: number | null
+          pitcher_overall_sd: number | null
           ratings_included: boolean
           retired_count: number | null
           started_at: string
@@ -3438,11 +3451,15 @@ export type Database = {
           draft_pool_count?: number | null
           free_agent_count?: number | null
           game_date?: string | null
+          hitter_overall_mean?: number | null
+          hitter_overall_sd?: number | null
           id?: never
           international_count?: number | null
           minor_league_count?: number | null
           mlb_count?: number | null
           notes?: string | null
+          pitcher_overall_mean?: number | null
+          pitcher_overall_sd?: number | null
           ratings_included?: boolean
           retired_count?: number | null
           started_at?: string
@@ -3453,11 +3470,15 @@ export type Database = {
           draft_pool_count?: number | null
           free_agent_count?: number | null
           game_date?: string | null
+          hitter_overall_mean?: number | null
+          hitter_overall_sd?: number | null
           id?: never
           international_count?: number | null
           minor_league_count?: number | null
           mlb_count?: number | null
           notes?: string | null
+          pitcher_overall_mean?: number | null
+          pitcher_overall_sd?: number | null
           ratings_included?: boolean
           retired_count?: number | null
           started_at?: string

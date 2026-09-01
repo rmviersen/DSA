@@ -155,8 +155,16 @@ export async function getRatingValidationPoints(): Promise<ValidationPoint[]> {
   const weights = weightRow as { catcher_fielding_bonus: number; infield_fielding_bonus: number; outfield_fielding_bonus: number } | null;
 
   const [computed, ratings, battingRows, pitchingRows, players, fieldingRows] = await Promise.all([
+    // Selected (aliased) from overall_raw, not overall (2026-09-01) -- this
+    // page exists to judge the rating ENGINE's formula against real
+    // production, not the display scale. `overall` now holds the hitter/
+    // pitcher-calibrated value (see compute-ratings.ts), which would fold a
+    // second, unrelated transform into what's supposed to be a clean read
+    // on the raw formula's fit. Aliased back to `overall` in the select so
+    // every downstream reference in this file (pc.overall etc.) needs no
+    // changes of its own.
     fetchAll<{ player_id: number; overall: number | null; role: string | null }>((from, to) =>
-      supabase.from("player_computed").select("player_id, overall, role").eq("refresh_run_id", computedRunId).range(from, to) as never
+      supabase.from("player_computed").select("player_id, overall:overall_raw, role").eq("refresh_run_id", computedRunId).range(from, to) as never
     ),
     fetchAll<{
       player_id: number; cntct: number | null; gap: number | null; pow: number | null; eye: number | null; ks: number | null; speed: number | null;
