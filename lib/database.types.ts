@@ -3206,6 +3206,7 @@ export type Database = {
           baserunning_speed_weight: number
           baserunning_steal_weight: number
           baserunning_stlrt_weight: number
+          batting: number
           catcher_batting_multiplier: number
           catcher_fielding_bonus: number
           cf_batting_multiplier: number
@@ -3250,6 +3251,7 @@ export type Database = {
           baserunning_speed_weight?: number
           baserunning_steal_weight?: number
           baserunning_stlrt_weight?: number
+          batting?: number
           catcher_batting_multiplier?: number
           catcher_fielding_bonus?: number
           cf_batting_multiplier?: number
@@ -3294,6 +3296,7 @@ export type Database = {
           baserunning_speed_weight?: number
           baserunning_steal_weight?: number
           baserunning_stlrt_weight?: number
+          batting?: number
           catcher_batting_multiplier?: number
           catcher_fielding_bonus?: number
           cf_batting_multiplier?: number

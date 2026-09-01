@@ -78,6 +78,11 @@ export interface RatingsInput {
 export interface WeightSet {
   id: number;
   contact: number; power: number; eye: number; gap: number; avoid_ks: number; speed: number;
+  // Overall/Potential top-level blend weight for the Batting composite
+  // (2026-09-02) -- parallel to fielding/baserunning below. Defaults to 1
+  // (today's historical implicit-unweighted behavior) until a real weight
+  // set explicitly sets it, per scripts/compute-overall-blend-weights.ts.
+  batting: number;
   fielding: number; stuff: number; movement: number; control: number; stamina: number; pbabip: number;
   // Baserunning composite (2026-09-01) -- internal weights tuned via
   // scripts/compute-baserunning-weights.ts (regressed against real UBR/100
@@ -567,9 +572,12 @@ export function computeRatings(
   // formula change. w.baserunning defaults to 0, so this term is a strict
   // no-op today -- Overall/Potential/ph are bit-for-bit unchanged from
   // before Baserunning existed until that weight is deliberately set.
-  const overall = Math.max(batting + fielding * fieldingWeight + baserunning * w.baserunning, pitching);
-  const potential = Math.max(battingP + fielding * fieldingWeight + baserunning * w.baserunning, pitchingP);
-  const ph: "H" | "P" = batting + fielding * fieldingWeight + baserunning * w.baserunning > pitching ? "H" : "P";
+  // Batting's own top-level blend weight (2026-09-02) -- previously
+  // implicit 1 (nothing multiplied it) here, now explicit and parallel to
+  // Fielding/Baserunning's, per scripts/compute-overall-blend-weights.ts.
+  const overall = Math.max(batting * w.batting + fielding * fieldingWeight + baserunning * w.baserunning, pitching);
+  const potential = Math.max(battingP * w.batting + fielding * fieldingWeight + baserunning * w.baserunning, pitchingP);
+  const ph: "H" | "P" = batting * w.batting + fielding * fieldingWeight + baserunning * w.baserunning > pitching ? "H" : "P";
 
   const isBustRisk = r.prone === "Fragile" || r.prone === "Wrecked";
   const riskAdjusted = isBustRisk ? potential - 5 : potential;
