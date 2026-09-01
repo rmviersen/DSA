@@ -30,6 +30,7 @@ const NAV_ITEMS: NavItem[] = [
   { label: "Reports", children: [
     { href: "/admin/market-rates", label: "Market Rates" },
     { href: "/admin/rating-validation", label: "Rating Validation" },
+    { href: "/admin/weight-tuning", label: "Weight Tuning" },
   ] },
   { href: "/players", label: "Top Players" },
   // Points at the guest-facing /TBL/prospects (cards, no side-by-side

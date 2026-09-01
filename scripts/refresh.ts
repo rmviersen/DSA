@@ -286,6 +286,46 @@ async function main() {
       process.exitCode = 1;
     }
 
+    // Ballpark factors (2026-09-01) -- StatsPlus only publishes CURRENT
+    // factors (confirmed: no year selector, no per-season history anywhere
+    // on the site), so this is a snapshot-forward-only capture, same as
+    // every other snapshot table -- accurate from here on, not
+    // retroactively fixable for seasons before this existed.
+    console.log("Capturing ballpark factors for this run...");
+    try {
+      execFileSync("npx", ["tsx", "scripts/scrape-ballpark-factors.ts"], { stdio: "inherit", shell: true });
+    } catch (err) {
+      console.error(`scrape-ballpark-factors.ts failed after a successful refresh -- raw data is fine, but this run's ballpark_factor_snapshots wasn't captured: ${err}`);
+      process.exitCode = 1;
+    }
+
+    // Weight-tuning regressions (2026-09-02, "visualize and track our
+    // regressions" -- /admin/weight-tuning). Each writes its own
+    // weight_tuning_runs/weight_tuning_coefficients row tagged to THIS
+    // refresh_run_id, independent try/catch per script so one failing
+    // doesn't block the others or the rest of the refresh.
+    console.log("Computing hitting weight-tuning regression for this run...");
+    try {
+      execFileSync("npx", ["tsx", "scripts/compute-hitting-weights.ts"], { stdio: "inherit", shell: true });
+    } catch (err) {
+      console.error(`compute-hitting-weights.ts failed after a successful refresh -- raw data is fine, but this run's hitting regression wasn't saved: ${err}`);
+      process.exitCode = 1;
+    }
+    console.log("Computing baserunning weight-tuning regression for this run...");
+    try {
+      execFileSync("npx", ["tsx", "scripts/compute-baserunning-weights.ts"], { stdio: "inherit", shell: true });
+    } catch (err) {
+      console.error(`compute-baserunning-weights.ts failed after a successful refresh -- raw data is fine, but this run's baserunning regression wasn't saved: ${err}`);
+      process.exitCode = 1;
+    }
+    console.log("Computing pitching weight-tuning regression for this run...");
+    try {
+      execFileSync("npx", ["tsx", "scripts/compute-pitching-weights.ts"], { stdio: "inherit", shell: true });
+    } catch (err) {
+      console.error(`compute-pitching-weights.ts failed after a successful refresh -- raw data is fine, but this run's pitching regression wasn't saved: ${err}`);
+      process.exitCode = 1;
+    }
+
     // Trade-value engine, market-rate piece (2026-08-31) -- accumulates any
     // newly-signed clean free-agent contracts into market_rate_training_
     // contracts. Cheap and append-only (a no-op for a contract already on

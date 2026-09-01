@@ -673,7 +673,7 @@ async function main() {
     refresh_run_id: refreshRunId,
     player_id: c.player_id,
     weights_id: c.weights_id,
-    batting: c.batting, batting_p: c.batting_p, fielding: c.fielding,
+    batting: c.batting, batting_p: c.batting_p, fielding: c.fielding, baserunning: c.baserunning,
     pitching: c.pitching, pitching_p: c.pitching_p, qp: c.qp, qpp: c.qpp,
     c_rating: c.c_rating, inf_rating: c.inf_rating, of_rating: c.of_rating,
     overall: c.overall, potential: c.potential, prospect_potential: c.prospect_potential,

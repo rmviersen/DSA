@@ -33,6 +33,15 @@ export interface RatingsInput {
   cntct: number | null; gap: number | null; pow: number | null; eye: number | null; ks: number | null;
   pot_cntct: number | null; pot_gap: number | null; pot_pow: number | null; pot_eye: number | null; pot_ks: number | null;
   speed: number | null;
+  // Baserunning composite inputs (2026-09-01, Rees's ask) -- `run` (general
+  // baserunning instincts/decision-making), `steal` (stealing skill), and
+  // `stlrt` (stealing tendency/aggressiveness) are real, fully-populated
+  // 20-80 grades that existed in player_ratings_snapshots but were read by
+  // nothing in this engine until now. `speed` stays in Batting too (a
+  // deliberate, accepted overlap -- Rees: faster batters beat out more
+  // grounders/take extra bases, a real batting-outcome effect distinct from
+  // the Baserunning composite's own value).
+  run: number | null; steal: number | null; stlrt: number | null;
   cblk: number | null; cfrm: number | null; carm: number | null;
   ifr: number | null; ife: number | null; ifa: number | null; tdp: number | null;
   ofr: number | null; ofe: number | null; ofa: number | null;
@@ -70,6 +79,16 @@ export interface WeightSet {
   id: number;
   contact: number; power: number; eye: number; gap: number; avoid_ks: number; speed: number;
   fielding: number; stuff: number; movement: number; control: number; stamina: number; pbabip: number;
+  // Baserunning composite (2026-09-01) -- internal weights tuned via
+  // scripts/compute-baserunning-weights.ts (regressed against real UBR/100
+  // PA, R²=0.553). `baserunning` itself is the composite's TOP-LEVEL blend
+  // weight into Overall/Potential, defaulted to 0 (a mathematical no-op)
+  // on purpose -- Rees: tune Batting/Fielding/Baserunning separately first,
+  // decide the cross-component blend weight later. The composite is still
+  // computed and stored every run so it can be inspected/validated before
+  // that decision is made, same as Fielding's c_rating/inf_rating/of_rating.
+  baserunning_speed_weight: number; baserunning_run_weight: number; baserunning_steal_weight: number; baserunning_stlrt_weight: number;
+  baserunning: number;
   qp_multiplier: number; qp_threshold: number; qpp_threshold: number;
   sp_rp_stamina_threshold: number; sp_rp_min_pitches: number;
   catcher_batting_multiplier: number; ss_batting_multiplier: number; cf_batting_multiplier: number;
@@ -100,7 +119,7 @@ export interface HandednessSplits {
 
 export interface ComputedRatings {
   weights_id: number;
-  batting: number; batting_p: number; fielding: number;
+  batting: number; batting_p: number; fielding: number; baserunning: number;
   pitching: number; pitching_p: number; qp: number; qpp: number;
   c_rating: number; inf_rating: number; of_rating: number;
   overall: number; potential: number; prospect_potential: number;
@@ -411,10 +430,24 @@ export function computeRatings(
   // Overall if these are pulled out and premium positions get rewarded via
   // a Batting multiplier -- like the catcher one above -- instead). Default
   // values (15/5/0) reproduce the original formula exactly.
-  const cRating = (zero(r.cblk) + zero(r.cfrm) + zero(r.carm)) / 3 + w.catcher_fielding_bonus;
+  // Framing double-weighted (2026-09-01, Rees's ask) to match how range is
+  // already double-weighted in infRating/ofRating below -- same reasoning,
+  // framing is the catcher-specific skill that most directly drives value.
+  const cRating = (zero(r.cblk) + zero(r.cfrm) * 2 + zero(r.carm)) / 4 + w.catcher_fielding_bonus;
   const infRating = (zero(r.ifr) * 2 + zero(r.ife) + zero(r.ifa) + zero(r.tdp)) / 5 + w.infield_fielding_bonus;
   const ofRating = (zero(r.ofr) * 2 + zero(r.ofe) + zero(r.ofa)) / 4 + w.outfield_fielding_bonus;
   const fielding = Math.max(cRating, infRating, ofRating);
+
+  // Baserunning composite (2026-09-01) -- weights come straight from
+  // scripts/compute-baserunning-weights.ts's regression against real
+  // UBR/100 PA (R²=0.553): `run` dominant (~0.72), `stlrt` a real secondary
+  // driver (~0.19), `speed`/`steal` mostly redundant with `run` once it's in
+  // the model (~0.05 each). Defaults sum to ~1, so no extra normalization
+  // here. NOT yet part of Overall/Potential's blend (see w.baserunning's
+  // comment) -- computed and stored every run regardless, so it can be
+  // validated against real outcomes before that decision is made.
+  const baserunning = zero(r.speed) * w.baserunning_speed_weight + zero(r.run) * w.baserunning_run_weight +
+    zero(r.steal) * w.baserunning_steal_weight + zero(r.stlrt) * w.baserunning_stlrt_weight;
 
   const qp = countAtLeast(w.qp_threshold, r.fst, r.chg, r.crv, r.sld, r.snk, r.splt, r.cutt, r.frk, r.circhg, r.scr, r.kncrv, r.knbl);
   const qpp = countAtLeast(w.qpp_threshold, r.pot_fst, r.pot_chg, r.pot_crv, r.pot_sld, r.pot_snk, r.pot_splt, r.pot_cutt, r.pot_frk, r.pot_circhg, r.pot_scr, r.pot_kncrv, r.pot_knbl);
@@ -527,9 +560,16 @@ export function computeRatings(
   // of the max() below doesn't involve fielding at all).
   const fieldingWeight = w.fielding * (fieldingWeights?.[role] ?? 1);
 
-  const overall = Math.max(batting + fielding * fieldingWeight, pitching);
-  const potential = Math.max(battingP + fielding * fieldingWeight, pitchingP);
-  const ph: "H" | "P" = batting + fielding * fieldingWeight > pitching ? "H" : "P";
+  // Baserunning's blend into Overall/Potential (2026-09-01) -- wired in as
+  // `baserunning * w.baserunning` from day one, same pattern as Fielding's
+  // role weight, so the eventual cross-component blend decision (Batting vs.
+  // Fielding vs. Baserunning) is just changing w.baserunning's value, not a
+  // formula change. w.baserunning defaults to 0, so this term is a strict
+  // no-op today -- Overall/Potential/ph are bit-for-bit unchanged from
+  // before Baserunning existed until that weight is deliberately set.
+  const overall = Math.max(batting + fielding * fieldingWeight + baserunning * w.baserunning, pitching);
+  const potential = Math.max(battingP + fielding * fieldingWeight + baserunning * w.baserunning, pitchingP);
+  const ph: "H" | "P" = batting + fielding * fieldingWeight + baserunning * w.baserunning > pitching ? "H" : "P";
 
   const isBustRisk = r.prone === "Fragile" || r.prone === "Wrecked";
   const riskAdjusted = isBustRisk ? potential - 5 : potential;
@@ -576,7 +616,7 @@ export function computeRatings(
 
   return {
     weights_id: w.id,
-    batting, batting_p: battingP, fielding,
+    batting, batting_p: battingP, fielding, baserunning,
     pitching, pitching_p: pitchingP, qp, qpp,
     c_rating: cRating, inf_rating: infRating, of_rating: ofRating,
     overall, potential, prospect_potential: prospectPotential,

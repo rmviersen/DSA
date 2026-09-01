@@ -14,6 +14,75 @@ export type Database = {
   }
   public: {
     Tables: {
+      ballpark_factor_snapshots: {
+        Row: {
+          average: number | null
+          avg_lhb: number | null
+          avg_rhb: number | null
+          capacity: number | null
+          captured_at: string
+          doubles: number | null
+          home_runs: number | null
+          hr_lhb: number | null
+          hr_rhb: number | null
+          id: number
+          refresh_run_id: number
+          stadium_type: string | null
+          surface: string | null
+          team_id: number
+          triples: number | null
+        }
+        Insert: {
+          average?: number | null
+          avg_lhb?: number | null
+          avg_rhb?: number | null
+          capacity?: number | null
+          captured_at?: string
+          doubles?: number | null
+          home_runs?: number | null
+          hr_lhb?: number | null
+          hr_rhb?: number | null
+          id?: never
+          refresh_run_id: number
+          stadium_type?: string | null
+          surface?: string | null
+          team_id: number
+          triples?: number | null
+        }
+        Update: {
+          average?: number | null
+          avg_lhb?: number | null
+          avg_rhb?: number | null
+          capacity?: number | null
+          captured_at?: string
+          doubles?: number | null
+          home_runs?: number | null
+          hr_lhb?: number | null
+          hr_rhb?: number | null
+          id?: never
+          refresh_run_id?: number
+          stadium_type?: string | null
+          surface?: string | null
+          team_id?: number
+          triples?: number | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "ballpark_factor_snapshots_refresh_run_id_fkey"
+            columns: ["refresh_run_id"]
+            isOneToOne: false
+            referencedRelation: "refresh_runs"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "ballpark_factor_snapshots_team_id_fkey"
+            columns: ["team_id"]
+            isOneToOne: false
+            referencedRelation: "teams"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       contract_extension_snapshots: {
         Row: {
           allstar_bonus: number | null
@@ -1803,6 +1872,7 @@ export type Database = {
       }
       player_computed: {
         Row: {
+          baserunning: number | null
           batting: number | null
           batting_p: number | null
           c_rating: number | null
@@ -1844,6 +1914,7 @@ export type Database = {
           weights_id: number | null
         }
         Insert: {
+          baserunning?: number | null
           batting?: number | null
           batting_p?: number | null
           c_rating?: number | null
@@ -1885,6 +1956,7 @@ export type Database = {
           weights_id?: number | null
         }
         Update: {
+          baserunning?: number | null
           batting?: number | null
           batting_p?: number | null
           c_rating?: number | null
@@ -3129,6 +3201,11 @@ export type Database = {
       rating_weights: {
         Row: {
           avoid_ks: number
+          baserunning: number
+          baserunning_run_weight: number
+          baserunning_speed_weight: number
+          baserunning_steal_weight: number
+          baserunning_stlrt_weight: number
           catcher_batting_multiplier: number
           catcher_fielding_bonus: number
           cf_batting_multiplier: number
@@ -3168,6 +3245,11 @@ export type Database = {
         }
         Insert: {
           avoid_ks: number
+          baserunning?: number
+          baserunning_run_weight?: number
+          baserunning_speed_weight?: number
+          baserunning_steal_weight?: number
+          baserunning_stlrt_weight?: number
           catcher_batting_multiplier?: number
           catcher_fielding_bonus?: number
           cf_batting_multiplier?: number
@@ -3207,6 +3289,11 @@ export type Database = {
         }
         Update: {
           avoid_ks?: number
+          baserunning?: number
+          baserunning_run_weight?: number
+          baserunning_speed_weight?: number
+          baserunning_steal_weight?: number
+          baserunning_stlrt_weight?: number
           catcher_batting_multiplier?: number
           catcher_fielding_bonus?: number
           cf_batting_multiplier?: number
@@ -3928,6 +4015,85 @@ export type Database = {
             columns: ["team_b_id"]
             isOneToOne: false
             referencedRelation: "teams"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      weight_tuning_coefficients: {
+        Row: {
+          current_weight: number | null
+          id: number
+          implied_weight: number
+          raw_coefficient: number
+          standardized_coefficient: number
+          variable_key: string
+          variable_label: string
+          weight_tuning_run_id: number
+        }
+        Insert: {
+          current_weight?: number | null
+          id?: never
+          implied_weight: number
+          raw_coefficient: number
+          standardized_coefficient: number
+          variable_key: string
+          variable_label: string
+          weight_tuning_run_id: number
+        }
+        Update: {
+          current_weight?: number | null
+          id?: never
+          implied_weight?: number
+          raw_coefficient?: number
+          standardized_coefficient?: number
+          variable_key?: string
+          variable_label?: string
+          weight_tuning_run_id?: number
+        }
+        Relationships: [
+          {
+            foreignKeyName: "weight_tuning_coefficients_weight_tuning_run_id_fkey"
+            columns: ["weight_tuning_run_id"]
+            isOneToOne: false
+            referencedRelation: "weight_tuning_runs"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      weight_tuning_runs: {
+        Row: {
+          computed_at: string
+          id: number
+          r_squared: number
+          refresh_run_id: number
+          sample_size: number
+          stream: string
+          target_metric: string
+        }
+        Insert: {
+          computed_at?: string
+          id?: never
+          r_squared: number
+          refresh_run_id: number
+          sample_size: number
+          stream: string
+          target_metric: string
+        }
+        Update: {
+          computed_at?: string
+          id?: never
+          r_squared?: number
+          refresh_run_id?: number
+          sample_size?: number
+          stream?: string
+          target_metric?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "weight_tuning_runs_refresh_run_id_fkey"
+            columns: ["refresh_run_id"]
+            isOneToOne: false
+            referencedRelation: "refresh_runs"
             referencedColumns: ["id"]
           },
         ]
