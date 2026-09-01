@@ -105,6 +105,12 @@ export interface WeightSet {
   baserunning: number;
   qp_multiplier: number; qp_threshold: number; qpp_threshold: number;
   sp_rp_stamina_threshold: number; sp_rp_min_pitches: number;
+  // Role-value discount (2026-09-03) -- applied to a reliever's Pitching/
+  // Pitching Potential to reflect real roster-construction value, not
+  // discoverable from a rate-stat regression alone. See pitchingRaw's
+  // comment in computeRatings for the full rationale. 1.0 on every
+  // historical weight-set row (a no-op, preserving old snapshots exactly).
+  relief_value_multiplier: number;
   catcher_batting_multiplier: number; ss_batting_multiplier: number; cf_batting_multiplier: number;
   catcher_fielding_bonus: number; infield_fielding_bonus: number; outfield_fielding_bonus: number;
   contact_gate_mid_threshold: number; contact_gate_mid_multiplier: number;
@@ -512,11 +518,25 @@ export function computeRatings(
     ? gate(ctrlBlend, w.control_gate_mid_threshold, w.control_gate_mid_multiplier, w.control_gate_low_threshold, w.control_gate_low_multiplier, false)
     : controlGateP;
 
+  // Role-value discount, 2026-09-03 (Rees's ask): the SP bonus/qp_multiplier
+  // above already push SPs' Stuff and quality-pitches count above RPs' on
+  // average (confirmed with real data -- SP mean Potential-Pitching 43.5 vs
+  // RP's 36.1), but RPs' spread is 27% WIDER (SD 8.5 vs SP's 6.7), so the
+  // best relief prospects' right tail still reached into starter territory
+  // with nothing accounting for the fact that a shutdown reliever's per-
+  // inning quality still isn't worth as much as a real rotation piece --
+  // role scarcity, which a regression fit against a RATE stat (WAR/100 IP)
+  // structurally cannot produce on its own no matter how it's weighted.
+  // Same pattern as catcher/ss/cf_batting_multiplier and the fielding
+  // bonuses -- a deliberate, tunable "role matters beyond the raw rate
+  // stat" adjustment, not something meant to be discoverable by regression.
+  const roleValueMultiplier = isRoleRP ? w.relief_value_multiplier : 1;
+
   const pitchingRaw =
     (isSP ? stfBlend + 5 : stfBlend) * pStuff +
     movBlend * pMovement + pbabipBlend * w.pbabip + ctrlBlend * pControl +
     zero(r.stm) * pStamina + qp * w.qp_multiplier;
-  const pitching = pitchingRaw * controlGate;
+  const pitching = pitchingRaw * controlGate * roleValueMultiplier;
 
   // Same projected-split treatment as Batting above (2026-08-28). HRA is
   // computed too (for storage/inspection, per Rees's explicit ask) even
@@ -534,7 +554,7 @@ export function computeRatings(
   const pitchingPRaw =
     ((isSP ? potStfBlend + 5 : potStfBlend) * pStuff +
     potMovBlend * pMovement + potPbabipBlend * w.pbabip + potCtrlBlend * pControl +
-    zero(r.stm) * pStamina + qpp * w.qp_multiplier) * controlGateP;
+    zero(r.stm) * pStamina + qpp * w.qp_multiplier) * controlGateP * roleValueMultiplier;
   const pitchingP = Math.max(pitching, pitchingPRaw - 3);
 
   // --- SP/RP: on-field role classification from stamina/pitch-mix, distinct

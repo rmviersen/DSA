@@ -3303,6 +3303,7 @@ export type Database = {
           qp_multiplier: number
           qp_threshold: number
           qpp_threshold: number
+          relief_value_multiplier: number
           rp_control: number
           rp_movement: number
           rp_stamina: number
@@ -3356,6 +3357,7 @@ export type Database = {
           qp_multiplier: number
           qp_threshold?: number
           qpp_threshold?: number
+          relief_value_multiplier?: number
           rp_control?: number
           rp_movement?: number
           rp_stamina?: number
@@ -3409,6 +3411,7 @@ export type Database = {
           qp_multiplier?: number
           qp_threshold?: number
           qpp_threshold?: number
+          relief_value_multiplier?: number
           rp_control?: number
           rp_movement?: number
           rp_stamina?: number

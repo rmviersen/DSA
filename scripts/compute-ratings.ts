@@ -529,10 +529,23 @@ async function computeRatingsForRun(supabase: ReturnType<typeof makeSupabaseClie
   // Potential (never fit separately per metric), so "Potential 65" and
   // "Overall 65" still describe the same real talent level within a type,
   // while a hitter's 65 and a pitcher's 65 now ALSO describe the same real
-  // talent level relative to their own population. Floor-clamped at 20
-  // (matches the original 20-80 design), deliberately NOT ceiling-clamped
-  // at 80 (Rees 2026-09-01: "top players should be differentiated") -- a
-  // true outlier is allowed to read above 80.
+  // talent level relative to their own population. Deliberately NOT
+  // ceiling-clamped at 80 (Rees 2026-09-01: "top players should be
+  // differentiated") -- a true outlier is allowed to read above 80.
+  //
+  // Floor lowered from 20 to 0 (Rees 2026-09-03): a floor of 20 triggers
+  // for any hitter below raw Overall ~40.8 (mean - 3 SD, using the narrow
+  // reference-population SD) -- since that SD only measures the tight
+  // spread among real MLB regulars, applying it all the way down to
+  // complex-league teenagers flattened a large swath of the low-level
+  // population to an identical "20," making them impossible to tell apart.
+  // 0 (mean - 5 SD) moves that threshold down to raw ~34.2, capturing most
+  // of the real low-level population's differentiation -- still a floor,
+  // not full symmetry with the no-ceiling call above, because a genuinely
+  // negative-looking "Overall" reads as broken/an error, which unbounded
+  // was fine for the top (a rare, real outlier reading above 80 looks like
+  // a good problem to have) but not a good look at the bottom, where a
+  // large fraction of every refresh's rows would routinely hit it.
   //
   // typeMean/typeSD are recomputed FRESH every run, from THIS run's own
   // computed values, restricted to the real MLB roster reference population
@@ -573,7 +586,7 @@ async function computeRatingsForRun(supabase: ReturnType<typeof makeSupabaseClie
 
   function calibrate(raw: number, ph: "H" | "P" | null): number {
     const stats = ph === "P" ? pitcherStats : hitterStats; // null ph (rare degenerate case) treated as hitter, matching sp_rp's own "" fallback elsewhere
-    return Math.max(20, 50 + (10 * (raw - stats.mean)) / stats.sd);
+    return Math.max(0, 50 + (10 * (raw - stats.mean)) / stats.sd);
   }
   const calibratedByPlayer = new Map(computed.map((c) => [c.player_id, {
     overall: calibrate(c.overall, c.ph),
