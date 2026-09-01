@@ -3,7 +3,8 @@
 import { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer } from "recharts";
-import { STREAMS, type Stream, type WeightTuningSnapshot, type WeightTuningHistoryPoint } from "../../../lib/weight-tuning-query";
+import { STREAMS, type Stream, type WeightTuningSnapshot, type WeightTuningHistoryPoint, type RatingDistributionPoint } from "../../../lib/weight-tuning-query";
+import DistributionExplorer from "./DistributionExplorer";
 
 // Same visual language as RatingValidationExplorer.tsx/MarketRateExplorer.tsx
 // (pill toggles, card style, tabular-nums stat blocks) -- reused
@@ -30,6 +31,7 @@ const STREAM_COLORS: Record<Stream, string> = {
 interface Props {
   snapshots: Record<Stream, WeightTuningSnapshot | null>;
   history: WeightTuningHistoryPoint[];
+  distributionPoints: RatingDistributionPoint[];
 }
 
 // One horizontal bar per variable comparing implied vs. current weight on a
@@ -48,7 +50,7 @@ function WeightBar({ implied, current, max, color }: { implied: number; current:
   );
 }
 
-export default function WeightTuningExplorer({ snapshots, history }: Props) {
+export default function WeightTuningExplorer({ snapshots, history, distributionPoints }: Props) {
   // Bug fix (2026-09-02, Rees's report): on first client-side navigation to
   // this page, only the streams that existed the LAST time this route's RSC
   // payload was cached showed as clickable -- newer streams (added
@@ -204,6 +206,14 @@ export default function WeightTuningExplorer({ snapshots, history }: Props) {
           </ResponsiveContainer>
         )}
       </div>
+
+      {/* Overall/Potential distribution by role (2026-09-02, Rees's ask --
+          a real "before" picture on record ahead of the hitter/pitcher
+          rescale, and the fastest way to check "after" against it once
+          that ships). Own component, own data (real Overall/Potential per
+          role, not a regression) -- kept separate from the weight-tuning
+          streams above rather than forced into that table+bar layout. */}
+      <DistributionExplorer points={distributionPoints} />
     </div>
   );
 }

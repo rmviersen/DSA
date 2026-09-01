@@ -293,6 +293,15 @@ Rees: "I want to have players run as a snapshot going forward ... so we can run 
 - **Same honest limitation as ballpark factors**: only accurate going forward. There's no way to reconstruct what a player's org/age/level actually were at any of the 18 runs the backfill just processed — this doesn't retroactively fix that.
 - **Deliberately not yet wired into `compute-ratings.ts`'s historical-backfill path.** The only run with a snapshot today is the current one, for which today's `players` state is already correct anyway (no drift exists yet) -- there's nothing to gain from wiring it in until several more real refreshes have accumulated snapshots that actually differ from current state. Worth doing as a follow-up once that's true, not now.
 
+### `/admin/weight-tuning`: Overall/Potential distribution curves by role (2026-09-02)
+
+Rees: wants a real "before" picture on record ahead of the hitter/pitcher rescale ("this will help me visualize the rescaling once we begin"). New section at the bottom of the page, own component (`DistributionExplorer.tsx`), own data (`getRatingDistributionPoints()` in `lib/weight-tuning-query.ts` -- real Overall/Potential/role for real MLB roster players, same reference population as every hitter/pitcher-scale comparison this session, not a regression).
+
+- Overall/Potential toggle, all 9 role buckets individually selectable (multi-select overlay, plus All/None), one line per selected role.
+- Binned histogram (bin width 2) rendered as a connected line rather than a real KDE -- no density-estimation library anywhere else in this app, and a real KDE's bandwidth-selection question isn't worth solving for a chart whose job is "does this look like N similar bumps or 2 separated ones," not precise density estimates.
+- **Each curve normalized to a % of that role's own population, not raw counts** -- roles range from ~59 (CF) to ~394 (SP) players in the real-MLB population; raw counts would make the smaller roles look like flat lines regardless of their actual shape.
+- Bin edges computed from every role's data for the current metric, not just the currently-selected roles -- toggling a role on/off never shifts the x-axis under curves already on screen (only switching Overall/Potential recomputes the bins, since the two scales differ).
+
 ### Not built yet (don't design against these)
 - Win/loss-based team power rankings (needs league-relative stat normalization, not started)
 - Ratings/computed values for pre-draft amateurs — same rating engine works fine on them once they have data, but the ingestion pipeline for their scouted grades is still manual/deferred

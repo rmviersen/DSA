@@ -1,4 +1,4 @@
-import { getLatestWeightTuningSnapshots, getWeightTuningHistory } from "../../../lib/weight-tuning-query";
+import { getLatestWeightTuningSnapshots, getWeightTuningHistory, getRatingDistributionPoints } from "../../../lib/weight-tuning-query";
 import WeightTuningExplorer from "./WeightTuningExplorer";
 
 export const dynamic = "force-dynamic";
@@ -19,7 +19,9 @@ const pageTitleStyle = {
 } as const;
 
 export default async function WeightTuningPage() {
-  const [snapshots, history] = await Promise.all([getLatestWeightTuningSnapshots(), getWeightTuningHistory()]);
+  const [snapshots, history, distributionPoints] = await Promise.all([
+    getLatestWeightTuningSnapshots(), getWeightTuningHistory(), getRatingDistributionPoints(),
+  ]);
 
   const hasAny = snapshots.hitting || snapshots.baserunning || snapshots.pitching_sp || snapshots.pitching_rp
     || snapshots.pitching_sp_war || snapshots.pitching_rp_war || snapshots.overall_blend || snapshots.fielding_defensive;
@@ -50,7 +52,7 @@ export default async function WeightTuningPage() {
         <code>rating_weights</code> automatically — these are diagnostic, tracked over time so a real trend can
         be told apart from one season&apos;s noise.
       </p>
-      <WeightTuningExplorer snapshots={snapshots} history={history} />
+      <WeightTuningExplorer snapshots={snapshots} history={history} distributionPoints={distributionPoints} />
     </div>
   );
 }

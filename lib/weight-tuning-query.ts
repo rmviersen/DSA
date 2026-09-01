@@ -144,6 +144,63 @@ export async function getLatestWeightTuningSnapshots(): Promise<Record<Stream, W
   return result;
 }
 
+export interface RatingDistributionPoint {
+  role: string;
+  overall: number;
+  potential: number;
+}
+
+// Real Overall/Potential distribution per role (2026-09-02, Rees's ask --
+// visualize the shape of each role's rating distribution at the bottom of
+// this page, ahead of the hitter/pitcher rescale so the "before" picture is
+// on record and the "after" can be compared against it directly). Scoped to
+// real MLB roster players (league_id=200, mlb_service_days>0), the same
+// reference population every hitter/pitcher-scale comparison this session
+// has used -- a prospect/minor-league population would need its own
+// level-aware analysis, not folded in here.
+export async function getRatingDistributionPoints(): Promise<RatingDistributionPoint[]> {
+  const supabase = makeSupabaseClient();
+
+  const { data: computedRunRow } = await supabase
+    .from("player_computed").select("refresh_run_id").order("refresh_run_id", { ascending: false }).limit(1).maybeSingle();
+  if (!computedRunRow) return [];
+  const refreshRunId = (computedRunRow as { refresh_run_id: number }).refresh_run_id;
+
+  const PAGE_SIZE = 1000;
+  async function fetchAll<T>(query: (from: number, to: number) => Promise<{ data: T[] | null; error: unknown }>): Promise<T[]> {
+    const all: T[] = [];
+    let from = 0;
+    while (true) {
+      const { data, error } = await query(from, from + PAGE_SIZE - 1);
+      if (error) throw error;
+      if (!data || data.length === 0) break;
+      all.push(...data);
+      if (data.length < PAGE_SIZE) break;
+      from += PAGE_SIZE;
+    }
+    return all;
+  }
+
+  const [computed, players] = await Promise.all([
+    fetchAll<{ player_id: number; overall: number | null; potential: number | null; role: string | null }>((from, to) =>
+      supabase.from("player_computed").select("player_id, overall, potential, role").eq("refresh_run_id", refreshRunId).range(from, to) as never
+    ),
+    fetchAll<{ id: number; league_id: number | null; mlb_service_days: number | null }>((from, to) =>
+      supabase.from("players").select("id, league_id, mlb_service_days").range(from, to) as never
+    ),
+  ]);
+  const playerMeta = new Map(players.map((p) => [p.id, p]));
+
+  const points: RatingDistributionPoint[] = [];
+  for (const c of computed) {
+    if (c.overall == null || c.potential == null || !c.role) continue;
+    const meta = playerMeta.get(c.player_id);
+    if (!meta || meta.league_id !== 200 || (meta.mlb_service_days ?? 0) <= 0) continue;
+    points.push({ role: c.role, overall: c.overall, potential: c.potential });
+  }
+  return points;
+}
+
 // Full R²-over-time history per stream, for the "track" half of the ask --
 // one point per refresh_run_id these scripts have ever run against.
 export async function getWeightTuningHistory(): Promise<WeightTuningHistoryPoint[]> {
