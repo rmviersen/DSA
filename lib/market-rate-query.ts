@@ -4,7 +4,17 @@ import { makeSupabaseClient } from "./supabase-client";
 // queries.ts on purpose, same reasoning as org-minors-query.ts/admin-
 // queries.ts: a self-contained addition, no reason to risk touching a file
 // anything else might be mid-editing.
-const supabase = makeSupabaseClient();
+//
+// makeSupabaseClient() is deliberately called INSIDE each function below,
+// not at module top level (2026-08-31 fix, after the identical top-level
+// pattern in rating-validation-query.ts crashed the browser the moment a
+// client component imported a real runtime value -- not just a type -- from
+// that file, pulling the whole module, including the top-level Supabase
+// client creation, into the client bundle). This file only exports types
+// today, so MarketRateExplorer.tsx's `import type` currently erases the
+// import safely either way -- but doing it per-function here too means a
+// future edit that exports a real constant from this file (as happened in
+// rating-validation-query.ts) can't reintroduce that exact crash.
 
 export interface MarketRateCurve {
   playerType: "hitter" | "pitcher";
@@ -44,6 +54,7 @@ export interface TrainingContractPoint {
 }
 
 export async function getLatestMarketRateCurves(): Promise<MarketRateCurve[]> {
+  const supabase = makeSupabaseClient();
   const { data: latestRow } = await supabase
     .from("market_rate_curves").select("refresh_run_id").order("refresh_run_id", { ascending: false }).limit(1).maybeSingle();
   if (!latestRow) return [];
@@ -66,6 +77,7 @@ export async function getLatestMarketRateCurves(): Promise<MarketRateCurve[]> {
 }
 
 export async function getLatestRoleMultipliers(): Promise<RoleMultiplier[]> {
+  const supabase = makeSupabaseClient();
   const { data: latestRow } = await supabase
     .from("market_rate_role_multipliers").select("refresh_run_id").order("refresh_run_id", { ascending: false }).limit(1).maybeSingle();
   if (!latestRow) return [];
@@ -91,6 +103,7 @@ export async function getLatestRoleMultipliers(): Promise<RoleMultiplier[]> {
 // sibling tables joined by key, not a relationship Supabase can embed), so
 // names are fetched separately and joined in JS.
 export async function getTrainingContracts(): Promise<TrainingContractPoint[]> {
+  const supabase = makeSupabaseClient();
   const { data, error } = await supabase
     .from("market_rate_training_contracts")
     .select("player_id, overall, role, player_type, aav, season_year, years");

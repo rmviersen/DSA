@@ -27,7 +27,10 @@ const NAV_ITEMS: NavItem[] = [
   // internal analysis pages as they ship. First entry: the market-rate
   // curve tuning view. Add more report pages here as they're built -- no
   // other nav code needs to change.
-  { label: "Reports", children: [{ href: "/admin/market-rates", label: "Market Rates" }] },
+  { label: "Reports", children: [
+    { href: "/admin/market-rates", label: "Market Rates" },
+    { href: "/admin/rating-validation", label: "Rating Validation" },
+  ] },
   { href: "/players", label: "Top Players" },
   // Points at the guest-facing /TBL/prospects (cards, no side-by-side
   // System Rankings table) instead of the internal /prospects combined

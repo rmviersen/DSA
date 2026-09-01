@@ -1,6 +1,7 @@
 import "dotenv/config";
 import { makeSupabaseClient } from "../lib/supabase-client.js";
 import { PITCHER_ROLES, computeLeagueMinimumSalary, type PlayerType } from "../lib/contract-classification.js";
+import { fitLine } from "../lib/regression.js";
 
 // Fits "what does the open market actually pay for this talent level" from
 // the ACCUMULATED training pool in market_rate_training_contracts (built and
@@ -38,32 +39,11 @@ async function fetchAll<T>(query: (from: number, to: number) => Promise<{ data: 
   return all;
 }
 
-// Ordinary least squares, y = intercept + slope * x -- plus R² and the
-// residual standard deviation (both in log-AAV space, the space the fit
-// actually happens in), surfaced on /admin/market-rates for Rees to judge
-// how much to trust a given curve at a glance rather than just seeing the
-// coefficients.
-function fitLine(points: { x: number; y: number }[]): { intercept: number; slope: number; rSquared: number; residualStdDev: number } {
-  const n = points.length;
-  const meanX = points.reduce((s, p) => s + p.x, 0) / n;
-  const meanY = points.reduce((s, p) => s + p.y, 0) / n;
-  let num = 0, den = 0;
-  for (const p of points) {
-    num += (p.x - meanX) * (p.y - meanY);
-    den += (p.x - meanX) ** 2;
-  }
-  const slope = den === 0 ? 0 : num / den;
-  const intercept = meanY - slope * meanX;
-  let ssRes = 0, ssTot = 0;
-  for (const p of points) {
-    const predicted = intercept + slope * p.x;
-    ssRes += (p.y - predicted) ** 2;
-    ssTot += (p.y - meanY) ** 2;
-  }
-  const rSquared = ssTot === 0 ? 0 : 1 - ssRes / ssTot;
-  const residualStdDev = n > 2 ? Math.sqrt(ssRes / (n - 2)) : 0;
-  return { intercept, slope, rSquared, residualStdDev };
-}
+// fitLine (OLS + R² + residual SD) now lives in lib/regression.ts, shared
+// with app/admin/rating-validation's client-side regressions (2026-08-31) --
+// used here in log-AAV space, the space this particular fit actually
+// happens in, surfaced on /admin/market-rates for Rees to judge how much to
+// trust a given curve at a glance rather than just seeing the coefficients.
 
 // Shrinkage toward 1.0 (no role adjustment) by sample size -- a role with a
 // small clean sample produces a noisy raw ratio that shouldn't be trusted at
