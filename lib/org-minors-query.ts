@@ -1,5 +1,6 @@
 import { makeSupabaseClient } from "./supabase-client";
 import { getRoleLevelBenchmarks } from "./queries";
+import { effectiveLevel, levelLabel as canonicalLevelLabel, CANONICAL_LEVELS } from "./display-helpers";
 
 const supabase = makeSupabaseClient();
 
@@ -25,7 +26,10 @@ async function latestRefreshRunId(): Promise<number> {
   return (data as { refresh_run_id: number }).refresh_run_id;
 }
 
-const LEVEL_LABELS: Record<number, string> = { 1: "MLB", 2: "AAA", 3: "AA", 4: "A+", 5: "A-", 6: "Rookie" };
+// Raw players.level query filter -- NOT canonical levels. level=4 alone
+// covers both real A+ and A leagues (see effectiveLevel's comment); fetching
+// by raw level here still correctly pulls both, since the split only
+// matters once league_id is also read, below.
 const MINOR_LEVELS = [2, 3, 4, 5, 6];
 
 // Discovered 2026-08-19: StatsPlus has no separate team entity for
@@ -139,7 +143,6 @@ export interface TeamPositionCounts {
 }
 
 const INTERNATIONAL_TEAM_ID_OFFSET = -1_000_000; // keeps synthetic ids well clear of any real team id
-const INTERNATIONAL_LEVEL = 7; // matches queries.ts's effectiveLevel() remap
 
 // Row order updated 2026-08-28: SP, RP, C, 1B, INF, SS, CF, COF, DH is now
 // the one canonical role order used everywhere on this page (also
@@ -352,8 +355,9 @@ export async function getOrgMinorsPlayers(orgId: number): Promise<{ rows: Minors
     const p = leaguePlayerById.get(c.player_id);
     if (!p || p.level === null || p.team_id === null) continue;
     if (p.level === 1 && p.is_active !== true) continue; // real MLB roster only
-    if (p.level === 1 && p.league_id !== null && p.league_id < 0) continue; // exclude international signees at every org, not just this one
-    const key = `${p.level}|${c.role}`;
+    const effLevel = effectiveLevel(p.level, p.league_id);
+    if (effLevel === null || effLevel === 8) continue; // exclude international signees at every org, not just this one
+    const key = `${effLevel}|${c.role}`;
     const byTeam = leagueByTeamLevelRole.get(key) ?? new Map<number, number[]>();
     const arr = byTeam.get(p.team_id) ?? [];
     arr.push(c.overall);
@@ -392,26 +396,32 @@ export async function getOrgMinorsPlayers(orgId: number): Promise<{ rows: Minors
     const potential = c?.potential ?? null;
     const role = c?.role ?? null;
 
-    const isInternational = p.level === 1 && p.league_id !== null && p.league_id < 0;
+    // effLevel is the CANONICAL level (see display-helpers.ts's
+    // effectiveLevel) -- corrects the 2026-09-04 finding that raw
+    // players.level=4 secretly covers two real leagues (A+ and A). Every
+    // level-semantic use below (display, promote/demote, benchmark lookups,
+    // team/role grouping) reads effLevel, never raw p.level.
+    const effLevel = effectiveLevel(p.level, p.league_id);
+    const isInternational = effLevel === 8;
     const effectiveTeamId = isInternational ? internationalTeamId : p.team_id;
     const team = p.team_id ? teamById.get(p.team_id) : undefined;
     const teamName = team?.name ?? null;
     const teamNickname = isInternational ? "International Academy" : (team?.nickname ?? null);
-    const levelLabel = isInternational ? "Int'l" : (p.level !== null ? (LEVEL_LABELS[p.level] ?? `Lvl ${p.level}`) : "—");
+    const levelLabel = isInternational ? "Int'l" : canonicalLevelLabel(effLevel);
 
     // v2 promote/demote (2026-08-28) -- see the levelFlag field comment on
     // MinorsPlayerRow above for the full rationale.
     let levelFlag: MinorsPlayerRow["levelFlag"] = null;
-    if (!isInternational && p.level !== null && role && overall !== null) {
+    if (!isInternational && effLevel !== null && role && overall !== null) {
       const byLevel = benchByRole.get(role);
-      const ownAvg = byLevel?.get(p.level) ?? null;
+      const ownAvg = byLevel?.get(effLevel) ?? null;
 
-      if (p.level > 1) {
-        const aboveAvg = byLevel?.get(p.level - 1) ?? null; // level 1 = MLB = the top rung, no level "above" it
+      if (effLevel > 1) {
+        const aboveAvg = byLevel?.get(effLevel - 1) ?? null; // level 1 = MLB = the top rung, no level "above" it
         if (aboveAvg !== null && overall >= aboveAvg) levelFlag = "promote";
       }
-      if (levelFlag === null && p.level < 6) { // level 6 = Rookie = the bottom rung, no level "below" it
-        const belowAvg = byLevel?.get(p.level + 1) ?? null;
+      if (levelFlag === null && effLevel < 7) { // level 7 = Rookie = the bottom real rung, no level "below" it
+        const belowAvg = byLevel?.get(effLevel + 1) ?? null;
         if (ownAvg !== null && belowAvg !== null && overall < (ownAvg + belowAvg) / 2) levelFlag = "demote";
       }
     }
@@ -419,7 +429,7 @@ export async function getOrgMinorsPlayers(orgId: number): Promise<{ rows: Minors
     const wai = warAbIpById.get(p.id);
     return {
       player_id: p.id, first_name: p.first_name, last_name: p.last_name, age: p.age,
-      level: p.level, levelLabel, team_id: effectiveTeamId, team_name: teamName, team_nickname: teamNickname,
+      level: effLevel, levelLabel, team_id: effectiveTeamId, team_name: teamName, team_nickname: teamNickname,
       pos, role, ph: c?.ph ?? null, overall, potential, prospect_potential: c?.prospect_potential ?? null, eta: c?.eta ?? null,
       war: wai?.war ?? null, ab: wai?.ab ?? null, ip: wai?.ip ?? null,
       available: isAvailable(p),
@@ -462,8 +472,8 @@ export async function getOrgMinorsPlayers(orgId: number): Promise<{ rows: Minors
   // competitive roster with staffing minimums the way an affiliate is).
   const roleHealth: RoleHealthRow[] = ROLE_HEALTH_ROWS.map(({ label, roles, min, topN, forcePct }) => ({
     label,
-    byLevel: Object.entries(LEVEL_LABELS).map(([lvlStr, lvlLabel]) => {
-      const level = Number(lvlStr);
+    byLevel: CANONICAL_LEVELS.filter((l) => l !== 8).map((level) => {
+      const lvlLabel = canonicalLevelLabel(level);
       const inRole = rows.filter((r) => r.level === level && r.levelLabel !== "Int'l" && r.role && roles.includes(r.role));
       const count = inRole.filter((r) => r.available).length;
       // Shown alongside `count` (2026-08-28, Rees's ask) so a red/amber cell

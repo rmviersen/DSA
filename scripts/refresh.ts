@@ -42,10 +42,18 @@ async function insertBatched(supabase: ReturnType<typeof makeSupabaseClient>, ta
 }
 
 // Fixed, league-wide set of level league_ids — confirmed empirically 2026-08-18
-// by cross-referencing players.league_id against players.level for every org:
-// 200=MLB, 201=AAA, 202=AA, 203/204=A+ (two parallel A+ leagues), 205=A-,
-// 206=Rookie. Omitting lid entirely silently scopes stats calls to MLB only —
-// there is no "all levels" shortcut, so every level has to be pulled separately.
+// by cross-referencing players.league_id against players.level for every org.
+// CORRECTED 2026-09-04: 203/204 were originally assumed to be "two parallel
+// A+ leagues" -- they're actually two genuinely DIFFERENT real levels (203=
+// A+, 204=A) that both happen to share players.level=4, discovered when Rees
+// named real OKC affiliates (Wellington=A+=203, Napanee=A=204). See
+// display-helpers.ts's effectiveLevel for the full finding and every
+// consumer that needed fixing. 200=MLB, 201=AAA, 202=AA, 203=A+, 204=A,
+// 205=A-, 206=Rookie. Omitting lid entirely silently scopes stats calls to
+// MLB only — there is no "all levels" shortcut, so every level has to be
+// pulled separately (this list itself was already correct -- all 7 IDs
+// were already being pulled -- only the comment's characterization of what
+// 203/204 represent was wrong).
 const LEAGUE_IDS = [200, 201, 202, 203, 204, 205, 206];
 
 async function main() {

@@ -2,13 +2,13 @@ import {
   getRoleLevelBenchmarks, getActiveWeightSet, getRoleRepresentation, getHandednessSplits, getCalibrationAnchor,
   type RoleRepresentationRow, type RoleLevelBenchmarkRow,
 } from "../../lib/queries";
-import { levelLabel } from "../../lib/display-helpers";
+import { levelLabel, CANONICAL_LEVELS } from "../../lib/display-helpers";
 
 export const dynamic = "force-dynamic";
 
-// Includes the synthetic International tier (7) alongside the six real
-// players.level values -- see effectiveLevel() in lib/queries.ts.
-const LEVELS = [1, 2, 3, 4, 5, 6, 7];
+// MLB/AAA/AA/A+/A/A-/Rookie/International -- see effectiveLevel() in
+// lib/display-helpers.ts for the full canonical-level mapping.
+const LEVELS = CANONICAL_LEVELS;
 
 // How many players deep the Role Representation tables look (Rees's call).
 const ROLE_REP_LIMIT = 100;

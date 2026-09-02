@@ -12,12 +12,16 @@ import { gradeStyle, percentileStyle, statsPlusPlayerUrl } from "@/lib/display-h
 
 type SortKey = "name" | "team" | "level" | "age" | "pos" | "role" | "overall" | "potential" | "ab" | "ip" | "war" | "flag";
 
-const LEVEL_ORDER: Record<string, number> = { MLB: 0, AAA: 1, AA: 2, "A+": 3, "A-": 4, Rookie: 5 };
+// Corrected 2026-09-04 -- players.level=4 secretly covers two real leagues
+// (A+ and A), missed here until Rees named real OKC affiliates (Wellington=
+// A+, Napanee=A). See display-helpers.ts's effectiveLevel for the full
+// finding; levelLabel strings on rows now correctly distinguish the two.
+const LEVEL_ORDER: Record<string, number> = { MLB: 0, AAA: 1, AA: 2, "A+": 3, A: 4, "A-": 5, Rookie: 6 };
 
 // Same order as LEVEL_ORDER plus "Int'l" (the International Academy box,
 // which LEVEL_ORDER doesn't need since it's never sorted against a real
 // level number) -- used for the new Level filter buttons (2026-08-28).
-const LEVEL_FILTER_ORDER = ["MLB", "AAA", "AA", "A+", "A-", "Rookie", "Int'l"];
+const LEVEL_FILTER_ORDER = ["MLB", "AAA", "AA", "A+", "A", "A-", "Rookie", "Int'l"];
 
 // Canonical role order (2026-08-28, Rees's spec) -- used for the role
 // filter buttons, the roster tables' Role column sort, AND the RAG table's

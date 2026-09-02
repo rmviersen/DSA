@@ -5,7 +5,7 @@
 // under /players/[id], which is admin-only automatically (middleware.ts's
 // GUEST_ALLOWED_PATHS doesn't include it, same as /players and /org-minors).
 import { makeSupabaseClient } from "./supabase-client";
-import { levelLabel } from "./display-helpers";
+import { levelLabel, effectiveLevel } from "./display-helpers";
 
 const supabase = makeSupabaseClient();
 
@@ -232,10 +232,10 @@ export async function getPlayerDetail(playerId: number): Promise<PlayerDetail | 
 
   const { data: batDataAll, error: batErr } = await supabase
     .from("player_batting_stats_snapshots")
-    .select("year,level_id,team_id,g,ab,h,d,t,hr,r,rbi,bb,k,sb,cs,war,stint,refresh_run_id")
+    .select("year,level_id,league_id,team_id,g,ab,h,d,t,hr,r,rbi,bb,k,sb,cs,war,stint,refresh_run_id")
     .eq("player_id", playerId).eq("split_id", 1);
   if (batErr) throw batErr;
-  const batData = latestPerStint((batDataAll ?? []) as { year: number; level_id: number | null; team_id: number | null; stint: number | null; refresh_run_id: number; g: number | null; ab: number | null; h: number | null; d: number | null; t: number | null; hr: number | null; r: number | null; rbi: number | null; bb: number | null; k: number | null; sb: number | null; cs: number | null; war: number | null }[]);
+  const batData = latestPerStint((batDataAll ?? []) as { year: number; level_id: number | null; league_id: number | null; team_id: number | null; stint: number | null; refresh_run_id: number; g: number | null; ab: number | null; h: number | null; d: number | null; t: number | null; hr: number | null; r: number | null; rbi: number | null; bb: number | null; k: number | null; sb: number | null; cs: number | null; war: number | null }[]);
   // Column names here are the pitching table's OWN convention, not the
   // batting table's -- confirmed against database.types.ts 2026-08-29 after
   // this query silently returned nothing (its error was being swallowed):
@@ -245,10 +245,10 @@ export async function getPlayerDetail(playerId: number): Promise<PlayerDetail | 
   // different meaning).
   const { data: pitDataAll, error: pitErr } = await supabase
     .from("player_pitching_stats_snapshots")
-    .select("year,level_id,team_id,g,gs,ip,er,w,l,s,k,bb,ha,hra,war,stint,refresh_run_id")
+    .select("year,level_id,league_id,team_id,g,gs,ip,er,w,l,s,k,bb,ha,hra,war,stint,refresh_run_id")
     .eq("player_id", playerId).eq("split_id", 1);
   if (pitErr) throw pitErr;
-  const pitData = latestPerStint((pitDataAll ?? []) as { year: number; level_id: number | null; team_id: number | null; stint: number | null; refresh_run_id: number; g: number | null; gs: number | null; ip: number | null; er: number | null; w: number | null; l: number | null; s: number | null; k: number | null; bb: number | null; ha: number | null; hra: number | null; war: number | null }[]);
+  const pitData = latestPerStint((pitDataAll ?? []) as { year: number; level_id: number | null; league_id: number | null; team_id: number | null; stint: number | null; refresh_run_id: number; g: number | null; gs: number | null; ip: number | null; er: number | null; w: number | null; l: number | null; s: number | null; k: number | null; bb: number | null; ha: number | null; hra: number | null; war: number | null }[]);
 
   const historyTeamIds = [...(batData ?? []), ...(pitData ?? [])].map((r) => (r as { team_id: number | null }).team_id);
   const teamIds = [...new Set([p.team_id, p.draft_team_id, ...historyTeamIds])].filter((x): x is number => x !== null);
@@ -262,7 +262,8 @@ export async function getPlayerDetail(playerId: number): Promise<PlayerDetail | 
   // Same international-signee convention as org-minors-query.ts: level=1
   // with a negative league_id is a not-yet-rostered amateur signee parked
   // under their org's own MLB team_id, not a real active-roster player.
-  const isInternational = p.level === 1 && p.league_id !== null && p.league_id < 0;
+  const effLevel = effectiveLevel(p.level, p.league_id);
+  const isInternational = effLevel === 8;
   const team = p.team_id !== null ? teamById.get(p.team_id) : undefined;
   const draftTeam = p.draft_team_id !== null ? teamById.get(p.draft_team_id) : undefined;
 
@@ -346,7 +347,7 @@ export async function getPlayerDetail(playerId: number): Promise<PlayerDetail | 
         // refresh_run_id excluded 2026-08-30 alongside year/level_id/stint --
         // now present on every row (see latestPerStint above) and is
         // definitely not a stat to sum across stints.
-        if (typeof v === "number" && k !== "year" && k !== "level_id" && k !== "stint" && k !== "refresh_run_id") {
+        if (typeof v === "number" && k !== "year" && k !== "level_id" && k !== "league_id" && k !== "stint" && k !== "refresh_run_id") {
           (existing[k] as unknown as number) = ((existing[k] as unknown as number) ?? 0) + v;
         }
       }
@@ -354,18 +355,18 @@ export async function getPlayerDetail(playerId: number): Promise<PlayerDetail | 
     return [...byKey.values()];
   }
 
-  const battingHistory: SeasonStatLine[] = sumStints((batData ?? []) as { year: number; level_id: number | null; team_id: number | null; stint: number | null; g: number | null; ab: number | null; h: number | null; d: number | null; t: number | null; hr: number | null; r: number | null; rbi: number | null; bb: number | null; k: number | null; sb: number | null; cs: number | null; war: number | null }[])
+  const battingHistory: SeasonStatLine[] = sumStints((batData ?? []) as { year: number; level_id: number | null; league_id: number | null; team_id: number | null; stint: number | null; g: number | null; ab: number | null; h: number | null; d: number | null; t: number | null; hr: number | null; r: number | null; rbi: number | null; bb: number | null; k: number | null; sb: number | null; cs: number | null; war: number | null }[])
     .sort((a, b) => b.year - a.year)
     .map((row) => ({
-      year: row.year, levelLabel: levelLabel(row.level_id), teamName: row.team_id !== null ? (teamById.get(row.team_id)?.nickname ?? null) : null,
+      year: row.year, levelLabel: levelLabel(effectiveLevel(row.level_id, row.league_id)), teamName: row.team_id !== null ? (teamById.get(row.team_id)?.nickname ?? null) : null,
       g: row.g, ab: row.ab, h: row.h, d: row.d, t: row.t, hr: row.hr, r: row.r, rbi: row.rbi, bb: row.bb, k: row.k, sb: row.sb, cs: row.cs,
       gs: null, ip: null, er: null, w: null, l: null, sv: null, war: row.war,
     }));
 
-  const pitchingHistory: SeasonStatLine[] = sumStints((pitData ?? []) as { year: number; level_id: number | null; team_id: number | null; stint: number | null; g: number | null; gs: number | null; ip: number | null; er: number | null; w: number | null; l: number | null; s: number | null; k: number | null; bb: number | null; ha: number | null; hra: number | null; war: number | null }[])
+  const pitchingHistory: SeasonStatLine[] = sumStints((pitData ?? []) as { year: number; level_id: number | null; league_id: number | null; team_id: number | null; stint: number | null; g: number | null; gs: number | null; ip: number | null; er: number | null; w: number | null; l: number | null; s: number | null; k: number | null; bb: number | null; ha: number | null; hra: number | null; war: number | null }[])
     .sort((a, b) => b.year - a.year)
     .map((row) => ({
-      year: row.year, levelLabel: levelLabel(row.level_id), teamName: row.team_id !== null ? (teamById.get(row.team_id)?.nickname ?? null) : null,
+      year: row.year, levelLabel: levelLabel(effectiveLevel(row.level_id, row.league_id)), teamName: row.team_id !== null ? (teamById.get(row.team_id)?.nickname ?? null) : null,
       g: row.g, ab: null, h: row.ha, d: null, t: null, hr: row.hra, r: null, rbi: null, bb: row.bb, k: row.k, sb: null, cs: null,
       gs: row.gs, ip: row.ip, er: row.er, w: row.w, l: row.l, sv: row.s, war: row.war,
     }));
@@ -376,7 +377,7 @@ export async function getPlayerDetail(playerId: number): Promise<PlayerDetail | 
     pos: r ? str(r.pos) : null,
     teamName: isInternational ? "International Academy" : (team?.name ?? null),
     teamNickname: isInternational ? "International Academy" : (team?.nickname ?? null),
-    isInternational, levelLabel: isInternational ? "Int'l" : levelLabel(p.level),
+    isInternational, levelLabel: isInternational ? "Int'l" : levelLabel(effLevel),
     draftYear: p.draft_year, draftRound: p.draft_round, draftOverallPick: p.draft_overall_pick,
     draftTeamName: draftTeam?.nickname ?? null,
     isRetired: p.retired ?? false, isFreeAgent: p.free_agent ?? false, isHallOfFame: p.hall_of_fame ?? false,

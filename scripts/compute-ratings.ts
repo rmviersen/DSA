@@ -1,6 +1,7 @@
 import "dotenv/config";
 import { makeSupabaseClient } from "../lib/supabase-client.js";
 import { computeRatings, type RatingsInput, type WeightSet, type HandednessSplits } from "../lib/rating-engine.js";
+import { effectiveLevel } from "../lib/display-helpers.js";
 
 const PAGE_SIZE = 1000;
 
@@ -18,19 +19,13 @@ async function fetchAll<T>(query: (from: number, to: number) => Promise<{ data: 
   return all;
 }
 
-// Not a real players.level value -- international/complex signees are
-// actually stored at level=1 with a negative league_id (same convention
-// org-minors-query.ts's `isInternational` uses), not a distinct level code
-// of their own. Remapped to a synthetic level 7 ("below Rookie") wherever
-// level matters for ETA/benchmarks, so they get their own rung on the
-// ladder instead of either polluting the MLB row or being silently
-// dropped (Rees 2026-08-24 -- they were falling into the latter between
-// the is_active fix and this remap).
-const INTERNATIONAL_LEVEL = 7;
-function effectiveLevel(level: number | null | undefined, leagueId: number | null | undefined): number | null {
-  if (level === 1 && leagueId != null && leagueId < 0) return INTERNATIONAL_LEVEL;
-  return level ?? null;
-}
+// effectiveLevel() imported from lib/display-helpers.js -- the one shared
+// (level, league_id) -> canonical-level mapping (2026-09-04 correction: what
+// used to be a single "level 7 = International" remap here also missed a
+// real gap at level=4, which secretly contains two distinct real leagues,
+// A+ and A -- see that function's comment for the full finding). The bottom
+// of the canonical ladder (International) is now level 8, not 7.
+const INTERNATIONAL_LEVEL = 8;
 
 // Pace tiers (years per level climbed), by how far a player's POTENTIAL
 // clears their role's own MLB bar -- a bigger cushion above the bar means
@@ -317,9 +312,9 @@ async function computeRatingsForRun(supabase: ReturnType<typeof makeSupabaseClie
     for (const [level, { sum, n }] of byLevel) avgByLevel.set(level, sum / n);
     roleLevelBar.set(role, avgByLevel);
   }
-  console.log(`Role/level ETA benchmarks (avg Overall): ` +
+  console.log(`Role/level ETA benchmarks (avg Overall, MLB/AAA/AA/A+/A/A-/Rookie/Intl): ` +
     [...roleLevelBar.entries()].map(([role, byLevel]) =>
-      `${role}[${[1, 2, 3, 4, 5, 6, 7].map((l) => byLevel.get(l)?.toFixed(1) ?? "—").join("/")}]`
+      `${role}[${[1, 2, 3, 4, 5, 6, 7, 8].map((l) => byLevel.get(l)?.toFixed(1) ?? "—").join("/")}]`
     ).join(", "));
 
   // Reworked 2026-08-24 (Rees's follow-up spec, same day as the original

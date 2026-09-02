@@ -33,20 +33,48 @@ export function roundGrade(n: number | null): number | null {
   return n === null || n === undefined ? null : Math.round(n / 5) * 5;
 }
 
-// Confirmed 2026-08-18 by cross-referencing team pages' displayed level labels
-// (e.g. "BELLEVILLE BULLS (AAA)", "COBOURG COUGARS (U28, AA)") against the
-// players.level codes on their rosters.
+// Corrected 2026-09-04 -- the original 2026-08-18 cross-reference (team
+// pages' displayed level labels against players.level codes) missed a real
+// gap: players.level=4 secretly contains TWO distinct real leagues, not one.
+// Surfaced by Rees naming three actual OKC affiliates -- Wellington (A+) and
+// Napanee (A) both show players.level=4, indistinguishable without also
+// reading league_id; Trenton (A-) is players.level=5, already correct.
+// Confirmed universal, not an OKC quirk: every one of the 32 orgs has
+// exactly one team in each of league_id 203 (A+) and 204 (A). Every other
+// level (2/3/5/6) was already a single, clean real level. This renumbers
+// the scale to 1-8 to make room for the split -- anywhere the OLD 1-7
+// numbering was used for iteration/interpolation needs to move to this one.
+export const CANONICAL_LEVELS = [1, 2, 3, 4, 5, 6, 7, 8] as const;
+
 const LEVEL_LABELS: Record<number, string> = {
-  0: "—", 1: "MLB", 2: "AAA", 3: "AA", 4: "A+", 5: "A-", 6: "Rookie",
-  // Not a real players.level value -- a synthetic tier used where
-  // international/complex signees need their own rung below Rookie (see
-  // isInternational in org-minors-query.ts and getRoleLevelBenchmarks in
-  // queries.ts). Those players are actually stored at level=1 with a
-  // negative league_id, not a distinct level code of their own.
-  7: "International",
+  0: "—", 1: "MLB", 2: "AAA", 3: "AA", 4: "A+", 5: "A", 6: "A-", 7: "Rookie",
+  // Not a real players.level value -- a synthetic tier for international/
+  // complex signees, stored at level=1 with a negative league_id rather than
+  // a distinct level code of their own.
+  8: "International",
 };
 export function levelLabel(level: number | null): string {
   return level === null ? "—" : (LEVEL_LABELS[level] ?? `Lvl ${level}`);
+}
+
+// The ONE shared (level, league_id) -> canonical-level mapping -- previously
+// duplicated across compute-ratings.ts, queries.ts (each with their own
+// effectiveLevel()), and inline isInternational checks in org-minors-
+// query.ts/player-detail-query.ts, none of which knew about the level=4
+// split (see LEVEL_LABELS' comment above for the full finding). League IDs
+// 203/204 are this specific save's own numeric league IDs (same convention
+// as -200/200 for international/MLB elsewhere in this codebase), not a
+// general OOTP constant -- reverse-engineered from real rosters (Wellington
+// =203=A+, Napanee=204=A), not documented anywhere by StatsPlus. An
+// unrecognized league_id at level=4 (shouldn't happen -- confirmed only
+// 203/204 exist there across all 32 orgs) defaults to A+, the majority path.
+export function effectiveLevel(level: number | null | undefined, leagueId: number | null | undefined): number | null {
+  if (level == null) return null;
+  if (level === 1) return leagueId != null && leagueId < 0 ? 8 : 1; // International vs. MLB
+  if (level === 4) return leagueId === 204 ? 5 : 4; // A (204) vs. A+ (203, and default)
+  if (level === 5) return 6; // A-
+  if (level === 6) return 7; // Rookie
+  return level; // 2 (AAA), 3 (AA) unchanged
 }
 
 // StatsPlus serves team logos at a predictable slug of "{name}_{nickname}",

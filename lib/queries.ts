@@ -1,5 +1,5 @@
 import { makeSupabaseClient } from "./supabase-client";
-import { roundGrade, levelLabel, teamLogoUrl } from "./display-helpers";
+import { roundGrade, levelLabel, teamLogoUrl, effectiveLevel, CANONICAL_LEVELS } from "./display-helpers";
 
 const supabase = makeSupabaseClient();
 
@@ -445,7 +445,7 @@ export interface RoleLevelBenchmarkCell {
 }
 export interface RoleLevelBenchmarkRow {
   role: string;
-  byLevel: RoleLevelBenchmarkCell[]; // always 7 entries, levels 1 (MLB) through 6 (Rookie), then 7 (International -- see below), in order
+  byLevel: RoleLevelBenchmarkCell[]; // always 8 entries, in canonical-level order (see display-helpers.ts's effectiveLevel/LEVEL_LABELS): MLB/AAA/AA/A+/A/A-/Rookie/International
 }
 
 // "overall" powers the original Role x Level table; "batting"/"fielding"
@@ -455,20 +455,6 @@ export interface RoleLevelBenchmarkRow {
 // batting/fielding pipelines on their own rather than only blended into
 // Overall.
 export type RoleLevelBenchmarkMetric = "overall" | "batting" | "fielding";
-
-const BENCHMARK_LEVELS = [1, 2, 3, 4, 5, 6, 7];
-// Not a real players.level value -- international/complex signees are
-// actually stored at level=1 with a negative league_id (same convention
-// org-minors-query.ts's `isInternational` uses), not a distinct level code.
-// Remapped to a synthetic level 7 ("below Rookie") here so they get their
-// own rung on the ladder instead of either polluting the MLB row or being
-// silently dropped entirely (Rees 2026-08-24 -- they were being dropped
-// entirely between the is_active fix below and this remap).
-const INTERNATIONAL_LEVEL = 7;
-function effectiveLevel(level: number | null, leagueId: number | null): number | null {
-  if (level === 1 && leagueId !== null && leagueId < 0) return INTERNATIONAL_LEVEL;
-  return level;
-}
 
 // Powers the Glossary page and the role-aware ETA model in
 // scripts/compute-ratings.ts -- this is a read-only view of the exact same
@@ -503,7 +489,7 @@ export async function getRoleLevelBenchmarks(metric: RoleLevelBenchmarkMetric = 
     if (!c.role) continue;
     const p = playerById.get(c.player_id);
     const level = effectiveLevel(p?.level ?? null, p?.league_id ?? null);
-    if (level == null || level < 1 || level > INTERNATIONAL_LEVEL) continue;
+    if (level == null || level < 1 || level > 8) continue;
     if (level === 1 && p?.is_active !== true) continue; // real MLB row only -- international players already remapped to 7 above, so this can't accidentally exclude them
     if (!sums.has(c.role)) sums.set(c.role, new Map());
     const byLevel = sums.get(c.role)!;
@@ -519,7 +505,7 @@ export async function getRoleLevelBenchmarks(metric: RoleLevelBenchmarkMetric = 
     const byLevel = sums.get(role)!;
     return {
       role,
-      byLevel: BENCHMARK_LEVELS.map((level) => {
+      byLevel: CANONICAL_LEVELS.map((level) => {
         const cell = byLevel.get(level);
         return { level, avgValue: cell ? cell.sum / cell.n : null, n: cell?.n ?? 0 };
       }),
@@ -964,10 +950,13 @@ export async function getTopProspectsDetailed(orgId?: number, baselineRefreshRun
     }
   }
 
-  const playersExtra = await fetchAll<{ id: number; level: number | null; team_id: number | null; organization_id: number | null }>((from, to) =>
-    supabase.from("players").select("id,level,team_id,organization_id").in("id", ids).range(from, to) as never
+  const playersExtra = await fetchAll<{ id: number; level: number | null; league_id: number | null; team_id: number | null; organization_id: number | null }>((from, to) =>
+    supabase.from("players").select("id,level,league_id,team_id,organization_id").in("id", ids).range(from, to) as never
   );
-  const levelById = new Map(playersExtra.map((p) => [p.id, p.level]));
+  // effectiveLevel, not raw p.level -- players.level=4 alone can't tell a
+  // real A+ affiliate from a real A affiliate (see display-helpers.ts's
+  // effectiveLevel for the full finding); both would otherwise show "A+".
+  const levelById = new Map(playersExtra.map((p) => [p.id, effectiveLevel(p.level, p.league_id)]));
   const teamIdById = new Map(playersExtra.map((p) => [p.id, p.team_id]));
   const orgIdById = new Map(playersExtra.map((p) => [p.id, p.organization_id]));
 
