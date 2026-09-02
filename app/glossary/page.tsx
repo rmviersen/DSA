@@ -496,31 +496,55 @@ export default async function GlossaryPage() {
         <p style={bodyTextStyle}>
           The raw formula above isn&apos;t on the same ruler for hitters vs. pitchers — pitchers&apos; raw Overall
           runs both higher and meaningfully wider. Before anything is ranked, Overall/Potential/Prospect Potential
-          are each rescaled per player type (from <code>PH</code>), anchored on that type&apos;s own real MLB-roster
-          Overall distribution:
+          are each rescaled per player type (from <code>PH</code>) — but the rescale is a <strong>two-piece</strong>{" "}
+          function, answering a different question above vs. below the real MLB average.
+        </p>
+        <p style={bodyTextStyle}>
+          <strong>At or above the MLB average</strong>: unchanged since the original rescale — how many standard
+          deviations above today&apos;s real MLB-roster average is this raw score:
         </p>
         <code style={formulaStyle}>
-          CalibratedX = max(0, 50 + 10 × (RawX − typeMean) / typeSD)
+          CalibratedX = 50 + 10 × (RawX − typeMean) / typeSD          (RawX ≥ typeMean)
         </code>
         <p style={bodyTextStyle}>
-          <code>typeMean</code>/<code>typeSD</code> are recomputed every refresh from that run&apos;s real MLB roster
-          (<code>league_id = 200</code>, <code>mlb_service_days &gt; 0</code>) — never hand-tuned, so 50 always means
-          &quot;today&apos;s real average player of that type.&quot; Current anchor (refresh {calibration.refreshRunId}):
+          <strong>Below the MLB average</strong> (2026-09-04 rework): a completely different question — not
+          statistical rarity, but which real level&apos;s typical player this looks like. A piecewise-linear
+          interpolation through this run&apos;s own real level averages:
         </p>
-        <div className="table-wrap" style={{ marginTop: "0.5rem", maxWidth: "28rem" }}>
+        <code style={formulaStyle}>
+          CalibratedX = interpolate through (typeMean,50), (avgRaw[AAA],45), (avgRaw[AA],40), (avgRaw[A+],35),{"\n"}
+          {"  "}(avgRaw[A],30), (avgRaw[A-],25), (avgRaw[Rookie],20), (avgRaw[International],15)
+        </code>
+        <p style={bodyTextStyle}>
+          Both pieces meet at exactly 50 at <code>typeMean</code> — no seam jump. Below the lowest anchor
+          (International), the last segment&apos;s slope runs free rather than flattening at a floor — every player
+          gets a real, unique number no matter how far below International-average their raw Overall is (Rees&apos;s
+          explicit call: a small negative Overall is fine, identical numbers for genuinely different players
+          isn&apos;t).
+        </p>
+        <p style={bodyTextStyle}>
+          Every constant here — <code>typeMean</code>/<code>typeSD</code> and every level anchor — is recomputed
+          fresh every refresh from that run&apos;s own real population (levels corrected via <code>effectiveLevel</code>{" "}
+          above, so A+ and A are genuinely separate anchors, not merged) — never hand-tuned, so 50 always means
+          &quot;today&apos;s real average MLB player&quot; and &quot;AAA&quot; always means &quot;today&apos;s real
+          average AAA player.&quot; Current anchor (refresh {calibration.refreshRunId}):
+        </p>
+        <div className="table-wrap" style={{ marginTop: "0.5rem", maxWidth: "36rem" }}>
           <table>
-            <thead><tr><th></th><th>Mean</th><th>SD</th></tr></thead>
+            <thead><tr><th>Level</th><th>Target</th><th>Hitter raw avg</th><th>Pitcher raw avg</th></tr></thead>
             <tbody>
-              <tr><td style={{ fontWeight: 700 }}>Hitters</td><td>{fmt3(calibration.hitterMean)}</td><td>{fmt3(calibration.hitterSd)}</td></tr>
-              <tr><td style={{ fontWeight: 700 }}>Pitchers</td><td>{fmt3(calibration.pitcherMean)}</td><td>{fmt3(calibration.pitcherSd)}</td></tr>
+              <tr><td style={{ fontWeight: 700 }}>MLB</td><td>50</td><td>{fmt3(calibration.hitterMean)}</td><td>{fmt3(calibration.pitcherMean)}</td></tr>
+              {calibration.levelAnchors.map((row) => (
+                <tr key={row.label}>
+                  <td style={{ fontWeight: 700 }}>{row.label}</td><td>{row.target}</td>
+                  <td>{fmt3(row.hitterAvg)}</td><td>{fmt3(row.pitcherAvg)}</td>
+                </tr>
+              ))}
             </tbody>
           </table>
         </div>
         <p style={noteStyle}>
-          Floored at 0, not ceiling-clamped — a true elite outlier can read above 80. The floor is a known, accepted
-          tradeoff: it still flattens a real share of far-below-average/low-level players to an identical value
-          (Rees&apos;s call — non-negative numbers over full differentiation at the bottom). The formula&apos;s
-          untransformed output is preserved in <code>overall_raw</code>/<code>potential_raw</code>/
+          The formula&apos;s untransformed output is preserved in <code>overall_raw</code>/<code>potential_raw</code>/
           <code>prospect_potential_raw</code> for pages that judge the raw formula itself (e.g. Rating Validation),
           rather than the display scale.
         </p>

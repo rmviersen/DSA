@@ -549,15 +549,31 @@ export async function getActiveWeightSet(): Promise<ActiveWeightSet | null> {
   return data as ActiveWeightSet | null;
 }
 
+export interface CalibrationLevelAnchorRow {
+  label: string; // AAA/AA/A+/A/A-/Rookie/International
+  target: number; // 45/40/35/30/25/20/15
+  hitterAvg: number | null;
+  pitcherAvg: number | null;
+}
 export interface CalibrationAnchor {
   hitterMean: number | null; hitterSd: number | null;
   pitcherMean: number | null; pitcherSd: number | null;
   refreshRunId: number;
+  levelAnchors: CalibrationLevelAnchorRow[];
 }
 
-// Powers the Glossary page's calibration note (2026-09-03) -- the per-type
-// mean/SD compute-ratings.ts derived from the real MLB roster on its most
-// recent run, written to refresh_runs at compute time. Recomputed fresh
+// canonical level (2-8) -> [label, target] -- see display-helpers.ts's
+// effectiveLevel/LEVEL_LABELS for the same canonical scale.
+const LEVEL_ANCHOR_META: Record<number, { label: string; target: number }> = {
+  2: { label: "AAA", target: 45 }, 3: { label: "AA", target: 40 }, 4: { label: "A+", target: 35 },
+  5: { label: "A", target: 30 }, 6: { label: "A-", target: 25 }, 7: { label: "Rookie", target: 20 },
+  8: { label: "International", target: 15 },
+};
+
+// Powers the Glossary page's calibration note (2026-09-03, reworked
+// 2026-09-04 for the below-mean piecewise-linear level anchors) -- reads
+// exactly what compute-ratings.ts wrote at compute time (refresh_runs'
+// mean/SD, calibration_level_anchors' per-level averages). Recomputed fresh
 // every refresh (never hand-tuned), so this always reflects what the live
 // Overall/Potential/Prospect Potential numbers were actually calibrated
 // against, not a stale snapshot.
@@ -569,10 +585,26 @@ export async function getCalibrationAnchor(): Promise<CalibrationAnchor> {
     .eq("id", refreshRunId).maybeSingle();
   if (error) throw error;
   const row = data as { hitter_overall_mean: number | null; hitter_overall_sd: number | null; pitcher_overall_mean: number | null; pitcher_overall_sd: number | null } | null;
+
+  const { data: anchorRows, error: anchorErr } = await supabase
+    .from("calibration_level_anchors")
+    .select("player_type, level, avg_raw_overall")
+    .eq("refresh_run_id", refreshRunId);
+  if (anchorErr) throw anchorErr;
+  const avgByTypeLevel = new Map<string, number>();
+  (anchorRows as { player_type: string; level: number; avg_raw_overall: number }[] ?? []).forEach((r) => {
+    avgByTypeLevel.set(`${r.player_type}|${r.level}`, r.avg_raw_overall);
+  });
+  const levelAnchors: CalibrationLevelAnchorRow[] = Object.entries(LEVEL_ANCHOR_META).map(([lvlStr, meta]) => ({
+    label: meta.label, target: meta.target,
+    hitterAvg: avgByTypeLevel.get(`H|${lvlStr}`) ?? null,
+    pitcherAvg: avgByTypeLevel.get(`P|${lvlStr}`) ?? null,
+  }));
+
   return {
     hitterMean: row?.hitter_overall_mean ?? null, hitterSd: row?.hitter_overall_sd ?? null,
     pitcherMean: row?.pitcher_overall_mean ?? null, pitcherSd: row?.pitcher_overall_sd ?? null,
-    refreshRunId,
+    refreshRunId, levelAnchors,
   };
 }
 

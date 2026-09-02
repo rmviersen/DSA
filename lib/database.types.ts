@@ -83,6 +83,44 @@ export type Database = {
           },
         ]
       }
+      calibration_level_anchors: {
+        Row: {
+          avg_raw_overall: number
+          captured_at: string
+          id: number
+          level: number
+          n: number
+          player_type: string
+          refresh_run_id: number
+        }
+        Insert: {
+          avg_raw_overall: number
+          captured_at?: string
+          id?: never
+          level: number
+          n: number
+          player_type: string
+          refresh_run_id: number
+        }
+        Update: {
+          avg_raw_overall?: number
+          captured_at?: string
+          id?: never
+          level?: number
+          n?: number
+          player_type?: string
+          refresh_run_id?: number
+        }
+        Relationships: [
+          {
+            foreignKeyName: "calibration_level_anchors_refresh_run_id_fkey"
+            columns: ["refresh_run_id"]
+            isOneToOne: false
+            referencedRelation: "refresh_runs"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       contract_extension_snapshots: {
         Row: {
           allstar_bonus: number | null

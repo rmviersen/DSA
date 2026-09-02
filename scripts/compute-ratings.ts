@@ -528,19 +528,37 @@ async function computeRatingsForRun(supabase: ReturnType<typeof makeSupabaseClie
   // ceiling-clamped at 80 (Rees 2026-09-01: "top players should be
   // differentiated") -- a true outlier is allowed to read above 80.
   //
-  // Floor lowered from 20 to 0 (Rees 2026-09-03): a floor of 20 triggers
-  // for any hitter below raw Overall ~40.8 (mean - 3 SD, using the narrow
-  // reference-population SD) -- since that SD only measures the tight
-  // spread among real MLB regulars, applying it all the way down to
-  // complex-league teenagers flattened a large swath of the low-level
-  // population to an identical "20," making them impossible to tell apart.
-  // 0 (mean - 5 SD) moves that threshold down to raw ~34.2, capturing most
-  // of the real low-level population's differentiation -- still a floor,
-  // not full symmetry with the no-ceiling call above, because a genuinely
-  // negative-looking "Overall" reads as broken/an error, which unbounded
-  // was fine for the top (a rare, real outlier reading above 80 looks like
-  // a good problem to have) but not a good look at the bottom, where a
-  // large fraction of every refresh's rows would routinely hit it.
+  // Below-mean side reworked 2026-09-04 (Rees's ask), replacing the earlier
+  // flat-SD/floor approach entirely. The floor (originally 20, lowered to 0
+  // on 2026-09-03) never actually fixed the real problem: the narrow
+  // reference-population SD used above the mean is specifically tight so
+  // real MLB talent differentiates well, but applying that SAME tight ruler
+  // below the mean stretched every low-level player's raw distance into
+  // extreme, often-identical readings -- confirmed concretely on Lance
+  // Angstman (A+/A-caliber bat, "productive" by real production) reading as
+  // a flat 0 despite a perfectly ordinary raw Overall, and on the fact that
+  // even fully removing the Contact gate penalty only moved him to ~4.6, not
+  // meaningfully differentiated. Root cause: 1 SD of the elite MLB-only
+  // population is a much smaller raw distance than the real gap between
+  // levels, so the SAME z-score math that correctly separates MLB regulars
+  // from All-Stars above the mean badly over-stretches (and eventually
+  // floor-flattens) below it.
+  //
+  // Fix: below the MLB mean, calibration is a PIECEWISE-LINEAR interpolation
+  // through real level averages instead of a statistical z-score --
+  //   CalibratedX = interpolate through (typeMean,50), (avgRaw[AAA],45),
+  //     (avgRaw[AA],40), (avgRaw[A+],35), (avgRaw[A],30), (avgRaw[A-],25),
+  //     (avgRaw[Rookie],20), (avgRaw[International],15)
+  // -- answering a completely different question than the above-mean side:
+  // not "how many SDs from the MLB average," but "which real level's
+  // typical player does this look like." avgRaw[level] is this run's own
+  // real average raw Overall at that level (by type), computed fresh below
+  // and persisted to calibration_level_anchors for history -- never hand-
+  // tuned, so "AAA" keeps meaning "today's real average AAA player." Below
+  // the lowest anchor (International), the last segment's slope runs free
+  // rather than flattening at a floor (Rees's explicit call, 2026-09-04) --
+  // every player gets a real, unique number no matter how far below
+  // International-average their raw Overall is.
   //
   // typeMean/typeSD are recomputed FRESH every run, from THIS run's own
   // computed values, restricted to the real MLB roster reference population
@@ -579,9 +597,71 @@ async function computeRatingsForRun(supabase: ReturnType<typeof makeSupabaseClie
   console.log(`Calibration anchor -- Hitters: mean=${hitterStats.mean.toFixed(3)} sd=${hitterStats.sd.toFixed(3)} (n=${referencePool.filter((c) => c.ph === "H").length}); ` +
     `Pitchers: mean=${pitcherStats.mean.toFixed(3)} sd=${pitcherStats.sd.toFixed(3)} (n=${referencePool.filter((c) => c.ph === "P").length})`);
 
+  // Level anchors for the below-mean side (2026-09-04) -- this run's own
+  // real average raw Overall, by type, at each canonical level 2 (AAA)
+  // through 8 (International). Level 1 (MLB) is NOT computed here -- it's
+  // the seam point, already covered by hitterStats/pitcherStats.mean above.
+  // Uses effectiveLevel (lib/display-helpers.js), the corrected mapping
+  // that splits real A+ (league_id 203) from real A (league_id 204) --
+  // both share players.level=4 and would otherwise be silently merged (see
+  // that function's comment for the full finding).
+  const TARGET_BY_LEVEL: Record<number, number> = { 2: 45, 3: 40, 4: 35, 5: 30, 6: 25, 7: 20, 8: 15 };
+  const levelSums = new Map<string, { sum: number; n: number }>(); // key: `${ph}|${level}`
+  for (const c of computed) {
+    const p = playerById.get(c.player_id);
+    const level = effectiveLevel(p?.level, p?.league_id);
+    if (level == null || level < 2 || level > 8) continue;
+    const key = `${c.ph}|${level}`;
+    const cell = levelSums.get(key) ?? { sum: 0, n: 0 };
+    cell.sum += c.overall;
+    cell.n += 1;
+    levelSums.set(key, cell);
+  }
+  type CalibrationPoint = { raw: number; target: number };
+  function levelAnchors(ph: "H" | "P"): { level: number; avg: number; n: number }[] {
+    const out: { level: number; avg: number; n: number }[] = [];
+    for (let level = 2; level <= 8; level++) {
+      const cell = levelSums.get(`${ph}|${level}`);
+      if (cell && cell.n > 0) out.push({ level, avg: cell.sum / cell.n, n: cell.n });
+    }
+    return out;
+  }
+  // Points sorted descending by raw value: the seam first (typeMean -> 50),
+  // then each level anchor in order (AAA has the highest raw among minors,
+  // International the lowest, which is already level-ascending order --
+  // sorted defensively anyway in case a thin historical run makes two
+  // levels' averages cross).
+  function calibrationPoints(ph: "H" | "P", stats: { mean: number; sd: number }): CalibrationPoint[] {
+    const anchors = levelAnchors(ph).map((a) => ({ raw: a.avg, target: TARGET_BY_LEVEL[a.level] }));
+    return [{ raw: stats.mean, target: 50 }, ...anchors].sort((a, b) => b.raw - a.raw);
+  }
+  const hitterPoints = calibrationPoints("H", hitterStats);
+  const pitcherPoints = calibrationPoints("P", pitcherStats);
+  console.log(`Level anchors -- Hitters: ${hitterPoints.map((p) => `${p.target}=${p.raw.toFixed(1)}`).join(", ")}; ` +
+    `Pitchers: ${pitcherPoints.map((p) => `${p.target}=${p.raw.toFixed(1)}`).join(", ")}`);
+
   function calibrate(raw: number, ph: "H" | "P" | null): number {
-    const stats = ph === "P" ? pitcherStats : hitterStats; // null ph (rare degenerate case) treated as hitter, matching sp_rp's own "" fallback elsewhere
-    return Math.max(0, 50 + (10 * (raw - stats.mean)) / stats.sd);
+    const type: "H" | "P" = ph === "P" ? "P" : "H"; // null ph (rare degenerate case) treated as hitter, matching sp_rp's own "" fallback elsewhere
+    const stats = type === "P" ? pitcherStats : hitterStats;
+    if (raw >= stats.mean) return 50 + (10 * (raw - stats.mean)) / stats.sd; // unchanged -- see the file comment above this section
+
+    const points = type === "P" ? pitcherPoints : hitterPoints;
+    if (points.length < 2) return 50 + (10 * (raw - stats.mean)) / stats.sd; // degenerate fallback: no real level data this run
+
+    for (let i = 0; i < points.length - 1; i++) {
+      const hi = points[i], lo = points[i + 1];
+      if (raw <= hi.raw && raw >= lo.raw) {
+        const frac = hi.raw === lo.raw ? 0 : (raw - lo.raw) / (hi.raw - lo.raw);
+        return lo.target + frac * (hi.target - lo.target);
+      }
+    }
+    // Below the lowest anchor (International) -- let the last segment's
+    // slope run free rather than flattening at a floor (Rees's explicit
+    // call, 2026-09-04).
+    const lo = points[points.length - 1];
+    const hi = points[points.length - 2];
+    const slope = (hi.target - lo.target) / (hi.raw - lo.raw);
+    return lo.target + slope * (raw - lo.raw);
   }
   const calibratedByPlayer = new Map(computed.map((c) => [c.player_id, {
     overall: calibrate(c.overall, c.ph),
@@ -593,6 +673,18 @@ async function computeRatingsForRun(supabase: ReturnType<typeof makeSupabaseClie
     hitter_overall_mean: hitterStats.mean, hitter_overall_sd: hitterStats.sd,
     pitcher_overall_mean: pitcherStats.mean, pitcher_overall_sd: pitcherStats.sd,
   }).eq("id", refreshRunId);
+
+  // Persist the level anchors too (2026-09-04) -- history of how each
+  // level's real average drifts over time, same reasoning as the
+  // hitter/pitcher_overall_mean/sd persistence above.
+  const anchorRows = [
+    ...levelAnchors("H").map((a) => ({ refresh_run_id: refreshRunId, player_type: "H", level: a.level, avg_raw_overall: a.avg, n: a.n })),
+    ...levelAnchors("P").map((a) => ({ refresh_run_id: refreshRunId, player_type: "P", level: a.level, avg_raw_overall: a.avg, n: a.n })),
+  ];
+  if (anchorRows.length > 0) {
+    const { error: anchorErr } = await supabase.from("calibration_level_anchors").upsert(anchorRows, { onConflict: "refresh_run_id,player_type,level" });
+    if (anchorErr) console.warn(`calibration_level_anchors upsert failed: ${anchorErr.message}`);
+  }
 
   // --- ranks ---------------------------------------------------------
   // League-wide, by CALIBRATED Overall / Potential -- this is the actual
