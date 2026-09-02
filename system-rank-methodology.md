@@ -56,6 +56,6 @@ The rebuilt `/TBL/prospects/farms` page shows Blue-Chip, Depth, and Balance as t
 ## 6. What's unchanged
 
 - The underlying prospect population (league-wide prospect pool, scoped to each org) — same players who'd have counted under the old methodology.
-- `prospect_potential` and `overall` as the raw ingredients — no new player-level metric was invented for this.
+- `prospect_potential` and `overall` as the input ingredients — no new player-level metric was invented for this. (As of 2026-09-03/04, these two columns hold the hitter/pitcher-**calibrated** values, not the formula's raw output — see `HANDOFF.md`'s "Hitter/pitcher rescale" section. That's the correct, intended input here: it's exactly what makes an org's batting and pitching prospects comparable to each other in the Blue-Chip + Depth sums above, which raw values would not have been.)
 - `team_ovr` / `roster_rank` (current MLB roster strength).
 - Column names on `team_computed` (`minors_rank`, `batting_prospect_rank`, `pitching_prospect_rank`, `tbl_readiness_rank`) — same names, recomputed via the new formula, so no existing consumer of these ranks needed to change.
