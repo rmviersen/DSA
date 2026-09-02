@@ -69,6 +69,7 @@ export interface MinorsPlayerRow {
   role: string | null;
   ph: "H" | "P" | null;
   overall: number | null;
+  batting: number | null;
   potential: number | null;
   prospect_potential: number | null;
   eta: number | null;
@@ -84,13 +85,15 @@ export interface MinorsPlayerRow {
   // (queries.ts's getRoleLevelBenchmarks), same as before -- NOT the
   // Role Health table's top-N-per-team number, which is a deliberately
   // separate benchmark.
-  // "promote" if current Overall already clears the level ABOVE's own
+  // "promote" if the deciding metric already clears the level ABOVE's own
   // average -- unchanged from before: "ready to contribute there," not
   // just "better than average here."
-  // "demote" if current Overall is below the MIDPOINT between this
+  // "demote" if the deciding metric is below the MIDPOINT between this
   // level's average and the level BELOW's average -- Rees's fix for the
   // above: a player has to be closer to belonging a level down than to
   // where they are now, not merely below-average for their own level.
+  // The DECIDING METRIC is role-dependent as of 2026-09-02 (see
+  // isPitcherRole above): Batting for hitters, Overall for pitchers.
   // International (no real rung on the ladder) never gets either flag.
   // MLB (no level above) can only ever demote; Rookie (no level below)
   // can only ever promote -- a Rookie-level player can no longer be
@@ -143,6 +146,20 @@ export interface TeamPositionCounts {
 }
 
 const INTERNATIONAL_TEAM_ID_OFFSET = -1_000_000; // keeps synthetic ids well clear of any real team id
+
+// Which metric decides promote/demote and Role Health's Org/League avg &
+// rank, per role (2026-09-02, Rees's ask). For hitters: Batting, not
+// Overall -- Role already distinguishes fielding ability (a shortstop-
+// capable player is already bucketed as SS), so the real test of whether a
+// hitter belongs at a given level is his bat, not an Overall that also
+// carries his glove/baserunning value. For pitchers: Overall is left as-is
+// -- it's already effectively Pitching (a real pitcher's batting-side
+// Overall contribution is negligible), and Overall is already on the new
+// level-anchored calibrated scale, so no metric swap is needed there.
+const PITCHER_ROLES = new Set(["SP", "RP"]);
+function isPitcherRole(role: string): boolean {
+  return PITCHER_ROLES.has(role);
+}
 
 // Row order updated 2026-08-28: SP, RP, C, 1B, INF, SS, CF, COF, DH is now
 // the one canonical role order used everywhere on this page (also
@@ -261,15 +278,15 @@ export async function getOrgMinorsPlayers(orgId: number): Promise<{ rows: Minors
     : [];
   const teamById = new Map(teams.map((t) => [t.id, t]));
 
-  const computedById = new Map<number, { overall: number | null; potential: number | null; prospect_potential: number | null; eta: number | null; ph: "H" | "P" | null; role: string | null }>();
+  const computedById = new Map<number, { overall: number | null; batting: number | null; potential: number | null; prospect_potential: number | null; eta: number | null; ph: "H" | "P" | null; role: string | null }>();
   const ratingsPosById = new Map<number, string | null>();
   for (let i = 0; i < ids.length; i += 500) {
     const chunk = ids.slice(i, i + 500);
     const { data: comp, error: compErr } = await supabase.from("player_computed")
-      .select("player_id,overall,potential,prospect_potential,eta,ph,role")
+      .select("player_id,overall,batting,potential,prospect_potential,eta,ph,role")
       .eq("refresh_run_id", refreshRunId).in("player_id", chunk);
     if (compErr) throw compErr;
-    (comp as never as { player_id: number; overall: number | null; potential: number | null; prospect_potential: number | null; eta: number | null; ph: "H" | "P" | null; role: string | null }[])
+    (comp as never as { player_id: number; overall: number | null; batting: number | null; potential: number | null; prospect_potential: number | null; eta: number | null; ph: "H" | "P" | null; role: string | null }[])
       .forEach((c) => computedById.set(c.player_id, c));
 
     const { data: rat, error: ratErr } = await supabase.from("player_ratings_snapshots")
@@ -331,8 +348,14 @@ export async function getOrgMinorsPlayers(orgId: number): Promise<{ rows: Minors
   // leagueByTeamLevelRole below) -- Rees's call (2026-08-28) to keep the two
   // benchmarks separate: Glossary/promote-demote still means "typical talent
   // leaguewide," Role Health means "typical team's top-N roster strength."
-  const benchmarks = await getRoleLevelBenchmarks("overall");
+  // Batting benchmark added 2026-09-02 (same aggregation, different metric)
+  // -- see isPitcherRole above for which roles use which.
+  const [benchmarks, battingBenchmarks] = await Promise.all([
+    getRoleLevelBenchmarks("overall"),
+    getRoleLevelBenchmarks("batting"),
+  ]);
   const benchByRole = new Map(benchmarks.map((b) => [b.role, new Map(b.byLevel.map((c) => [c.level, c.avgValue]))]));
+  const battingBenchByRole = new Map(battingBenchmarks.map((b) => [b.role, new Map(b.byLevel.map((c) => [c.level, c.avgValue]))]));
 
   // Leaguewide, per-team roster data for the Role Health table's "Lg" column
   // (2026-08-28) -- a separate fetch from benchmarks above, deliberately: this
@@ -345,13 +368,17 @@ export async function getOrgMinorsPlayers(orgId: number): Promise<{ rows: Minors
     supabase.from("players").select("id,level,team_id,league_id,is_active").not("level", "is", null).range(from, to) as never
   );
   const leaguePlayerById = new Map(leagueAllPlayers.map((p) => [p.id, p]));
-  const leagueComputed = await fetchAll<{ player_id: number; role: string | null; overall: number | null }>((from, to) =>
-    supabase.from("player_computed").select("player_id,role,overall").eq("refresh_run_id", refreshRunId).range(from, to) as never
+  const leagueComputed = await fetchAll<{ player_id: number; role: string | null; overall: number | null; batting: number | null }>((from, to) =>
+    supabase.from("player_computed").select("player_id,role,overall,batting").eq("refresh_run_id", refreshRunId).range(from, to) as never
   );
-  // `${level}|${role}` -> team_id -> that team's Overall values at this role/level.
+  // `${level}|${role}` -> team_id -> that team's deciding-metric values at
+  // this role/level (Batting for hitter roles, Overall for pitcher roles --
+  // see isPitcherRole above).
   const leagueByTeamLevelRole = new Map<string, Map<number, number[]>>();
   for (const c of leagueComputed) {
-    if (!c.role || c.overall === null) continue;
+    if (!c.role) continue;
+    const metricValue = isPitcherRole(c.role) ? c.overall : c.batting;
+    if (metricValue === null) continue;
     const p = leaguePlayerById.get(c.player_id);
     if (!p || p.level === null || p.team_id === null) continue;
     if (p.level === 1 && p.is_active !== true) continue; // real MLB roster only
@@ -360,7 +387,7 @@ export async function getOrgMinorsPlayers(orgId: number): Promise<{ rows: Minors
     const key = `${effLevel}|${c.role}`;
     const byTeam = leagueByTeamLevelRole.get(key) ?? new Map<number, number[]>();
     const arr = byTeam.get(p.team_id) ?? [];
-    arr.push(c.overall);
+    arr.push(metricValue);
     byTeam.set(p.team_id, arr);
     leagueByTeamLevelRole.set(key, byTeam);
   }
@@ -393,6 +420,7 @@ export async function getOrgMinorsPlayers(orgId: number): Promise<{ rows: Minors
     const c = computedById.get(p.id);
     const pos = ratingsPosById.get(p.id) ?? null;
     const overall = c?.overall ?? null;
+    const batting = c?.batting ?? null;
     const potential = c?.potential ?? null;
     const role = c?.role ?? null;
 
@@ -409,20 +437,25 @@ export async function getOrgMinorsPlayers(orgId: number): Promise<{ rows: Minors
     const teamNickname = isInternational ? "International Academy" : (team?.nickname ?? null);
     const levelLabel = isInternational ? "Int'l" : canonicalLevelLabel(effLevel);
 
-    // v2 promote/demote (2026-08-28) -- see the levelFlag field comment on
-    // MinorsPlayerRow above for the full rationale.
+    // v2 promote/demote (2026-08-28, deciding metric split by role 2026-09-02
+    // -- see the levelFlag field comment on MinorsPlayerRow above and
+    // isPitcherRole's comment for the full rationale).
     let levelFlag: MinorsPlayerRow["levelFlag"] = null;
-    if (!isInternational && effLevel !== null && role && overall !== null) {
-      const byLevel = benchByRole.get(role);
-      const ownAvg = byLevel?.get(effLevel) ?? null;
+    if (!isInternational && effLevel !== null && role) {
+      const usesPitching = isPitcherRole(role);
+      const metricValue = usesPitching ? overall : batting;
+      const byLevel = usesPitching ? benchByRole.get(role) : battingBenchByRole.get(role);
+      if (metricValue !== null) {
+        const ownAvg = byLevel?.get(effLevel) ?? null;
 
-      if (effLevel > 1) {
-        const aboveAvg = byLevel?.get(effLevel - 1) ?? null; // level 1 = MLB = the top rung, no level "above" it
-        if (aboveAvg !== null && overall >= aboveAvg) levelFlag = "promote";
-      }
-      if (levelFlag === null && effLevel < 7) { // level 7 = Rookie = the bottom real rung, no level "below" it
-        const belowAvg = byLevel?.get(effLevel + 1) ?? null;
-        if (ownAvg !== null && belowAvg !== null && overall < (ownAvg + belowAvg) / 2) levelFlag = "demote";
+        if (effLevel > 1) {
+          const aboveAvg = byLevel?.get(effLevel - 1) ?? null; // level 1 = MLB = the top rung, no level "above" it
+          if (aboveAvg !== null && metricValue >= aboveAvg) levelFlag = "promote";
+        }
+        if (levelFlag === null && effLevel < 7) { // level 7 = Rookie = the bottom real rung, no level "below" it
+          const belowAvg = byLevel?.get(effLevel + 1) ?? null;
+          if (ownAvg !== null && belowAvg !== null && metricValue < (ownAvg + belowAvg) / 2) levelFlag = "demote";
+        }
       }
     }
 
@@ -430,7 +463,7 @@ export async function getOrgMinorsPlayers(orgId: number): Promise<{ rows: Minors
     return {
       player_id: p.id, first_name: p.first_name, last_name: p.last_name, age: p.age,
       level: effLevel, levelLabel, team_id: effectiveTeamId, team_name: teamName, team_nickname: teamNickname,
-      pos, role, ph: c?.ph ?? null, overall, potential, prospect_potential: c?.prospect_potential ?? null, eta: c?.eta ?? null,
+      pos, role, ph: c?.ph ?? null, overall, batting, potential, prospect_potential: c?.prospect_potential ?? null, eta: c?.eta ?? null,
       war: wai?.war ?? null, ab: wai?.ab ?? null, ip: wai?.ip ?? null,
       available: isAvailable(p),
       levelFlag,
@@ -483,14 +516,22 @@ export async function getOrgMinorsPlayers(orgId: number): Promise<{ rows: Minors
       // counted with it.
       const injuredCount = inRole.length - count;
 
-      // Org talent average (2026-08-28) -- top `topN` by Overall, not every
-      // rostered player at this role/level: "only a certain number of
-      // players on a roster can even play, so roster strength should be
-      // limited to expected players" (Rees's wording) -- a 6-deep bench at
-      // SP shouldn't drag the number below what actually takes the mound.
-      // Health status doesn't factor in here (unlike `count` above) -- a
-      // talent grade doesn't change because someone's hurt.
-      const orgAvg = topNAvg(inRole.filter((r) => r.overall !== null).map((r) => r.overall as number), topN);
+      // Org talent average (2026-08-28) -- top `topN` by the deciding metric
+      // (Batting for hitter roles, Overall for pitcher roles -- see
+      // isPitcherRole above, 2026-09-02), not every rostered player at this
+      // role/level: "only a certain number of players on a roster can even
+      // play, so roster strength should be limited to expected players"
+      // (Rees's wording) -- a 6-deep bench at SP shouldn't drag the number
+      // below what actually takes the mound. Health status doesn't factor in
+      // here (unlike `count` above) -- a talent grade doesn't change because
+      // someone's hurt. `roles` is always homogeneous (never mixes pitcher
+      // and hitter roles -- see ROLE_HEALTH_ROWS), so checking the first
+      // entry is enough to decide the metric for the whole row.
+      const usesPitching = isPitcherRole(roles[0]);
+      const orgAvg = topNAvg(
+        inRole.map((r) => (usesPitching ? r.overall : r.batting)).filter((v): v is number => v !== null),
+        topN
+      );
 
       // League side (2026-08-28) -- every team's own top-`topN` average at
       // this role/level, sorted best-first. Powers both leagueAvg (the
