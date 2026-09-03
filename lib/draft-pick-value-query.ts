@@ -19,6 +19,7 @@ export interface DraftRoundValue {
   medianWarPerYear: number;
   smoothedWarPerYear: number;
   pctReachedMlb: number;
+  reachRateSampleSize: number;
   bestPlayerId: number | null;
   bestPlayerName: string;
   bestPlayerWarPerYear: number | null;
@@ -67,7 +68,8 @@ export async function getDraftPickValueCurve(): Promise<DraftRoundValue[]> {
   if (error) throw error;
   const rows = data as {
     draft_round: number; sample_size: number; avg_war_per_year: number; median_war_per_year: number;
-    smoothed_war_per_year: number; pct_reached_mlb: number; best_player_id: number | null; best_player_war_per_year: number | null;
+    smoothed_war_per_year: number; pct_reached_mlb: number; reach_rate_sample_size: number | null;
+    best_player_id: number | null; best_player_war_per_year: number | null;
     best_player_career_war: number | null;
   }[];
   const bestIds = rows.map((r) => r.best_player_id).filter((id): id is number => id != null);
@@ -79,6 +81,7 @@ export async function getDraftPickValueCurve(): Promise<DraftRoundValue[]> {
     medianWarPerYear: r.median_war_per_year,
     smoothedWarPerYear: r.smoothed_war_per_year,
     pctReachedMlb: r.pct_reached_mlb,
+    reachRateSampleSize: r.reach_rate_sample_size ?? r.sample_size,
     bestPlayerId: r.best_player_id,
     bestPlayerName: r.best_player_id != null ? (nameById.get(r.best_player_id) ?? `Player ${r.best_player_id}`) : "—",
     bestPlayerWarPerYear: r.best_player_war_per_year,

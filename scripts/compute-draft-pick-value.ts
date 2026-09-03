@@ -26,6 +26,17 @@ import { isotonicRegressionNonIncreasing } from "../lib/regression.js";
 
 const PAGE_SIZE = 1000;
 const MIN_YEARS_SINCE_DRAFT = 3;
+// Real bug caught by Rees questioning why round 1's reach-MLB rate (69.8%)
+// seemed low (2026-09-04): pooling every >=3-year-eligible class into one %
+// blends fully-matured classes (75-90%+) with recent classes that haven't
+// had time yet (12-50%, still climbing) -- confirmed round 1's TRUE mature
+// rate is ~75%, not 69.8%. Checked league-wide, not just round 1: 96.4% of
+// every real debut happens within 8 years of being drafted (4665/4841), so
+// 8 is a safe, near-complete maturity cutoff, not an arbitrary one. Applies
+// ONLY to pct_reached_mlb -- avg/median/smoothed WAR-per-year already divide
+// by years-since-draft, so they aren't biased the same binary all-or-nothing
+// way and keep using MIN_YEARS_SINCE_DRAFT.
+const MIN_YEARS_FOR_REACH_RATE = 8;
 const REAL_MLB_LEVEL_ID = 1;
 const OVERALL_SPLIT_ID = 1;
 
@@ -199,8 +210,14 @@ async function main() {
     // round" is a real total-value question, where a longer, more productive
     // career should win over a short, high-rate one.
     const best = rows.reduce((a, b) => (b.career_war > a.career_war ? b : a));
-    const pctReachedMlb = (rows.filter((r) => r.reached_mlb).length / rows.length) * 100;
-    return { round, n: rows.length, avg, median, best, pctReachedMlb };
+    // Reach-rate uses the stricter (>=8 years since draft) subset -- see
+    // MIN_YEARS_FOR_REACH_RATE's comment above for why. Falls back to the
+    // full round (still real, just less mature) if literally no player in
+    // this round has hit 8 years yet, so the field is never left undefined.
+    const matureRows = rows.filter((r) => r.years_since_draft >= MIN_YEARS_FOR_REACH_RATE);
+    const reachRatePool = matureRows.length > 0 ? matureRows : rows;
+    const pctReachedMlb = (reachRatePool.filter((r) => r.reached_mlb).length / reachRatePool.length) * 100;
+    return { round, n: rows.length, avg, median, best, pctReachedMlb, reachRateSampleSize: reachRatePool.length };
   });
 
   // Isotonic-smooth the round averages so a later round can never show a
@@ -213,10 +230,10 @@ async function main() {
     roundSummaries.map((r) => r.n)
   );
 
-  console.log("Round  N     Avg WAR/yr  Median  Smoothed  %ReachedMLB  Best player (id / career WAR)");
+  console.log("Round  N     Avg WAR/yr  Median  Smoothed  %ReachedMLB (matureN)  Best player (id / career WAR)");
   roundSummaries.forEach((r, i) => {
     console.log(
-      `${String(r.round).padStart(5)}  ${String(r.n).padStart(4)}  ${r.avg.toFixed(3).padStart(9)}  ${r.median.toFixed(3).padStart(6)}  ${smoothed[i].toFixed(3).padStart(8)}  ${r.pctReachedMlb.toFixed(1).padStart(10)}%  #${r.best.player_id} (${r.best.career_war.toFixed(1)})`
+      `${String(r.round).padStart(5)}  ${String(r.n).padStart(4)}  ${r.avg.toFixed(3).padStart(9)}  ${r.median.toFixed(3).padStart(6)}  ${smoothed[i].toFixed(3).padStart(8)}  ${r.pctReachedMlb.toFixed(1).padStart(6)}% (n=${r.reachRateSampleSize})  #${r.best.player_id} (${r.best.career_war.toFixed(1)})`
     );
   });
 
@@ -232,6 +249,7 @@ async function main() {
       median_war_per_year: r.median,
       smoothed_war_per_year: smoothed[i],
       pct_reached_mlb: r.pctReachedMlb,
+      reach_rate_sample_size: r.reachRateSampleSize,
       best_player_id: r.best.player_id,
       best_player_war_per_year: r.best.war_per_year,
       best_player_career_war: r.best.career_war,

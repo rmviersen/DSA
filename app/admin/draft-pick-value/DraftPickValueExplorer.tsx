@@ -58,6 +58,18 @@ interface Props {
   players: DraftedPlayerPoint[];
 }
 
+// Real bug caught by Rees questioning round 1's reach-MLB rate (2026-09-04):
+// pooling every eligible (>=3 years since draft) class into one % blends
+// fully-matured classes (75-90%+ reach rate) with recent classes that
+// haven't had time yet (12-50%, still climbing) -- round 1's TRUE mature
+// rate is ~75%, not the 69.8% the pooled number showed. Checked league-wide:
+// 96.4% of every real debut happens within 8 years of being drafted, so 8 is
+// a safe, near-complete maturity cutoff. The by-round chart's own pct comes
+// pre-filtered this way from the server (draft_pick_value_curve.pct_reached_
+// mlb); the by-class chart is built client-side from individual players, so
+// it needs the same filter applied here.
+const MIN_YEARS_FOR_REACH_RATE = 8;
+
 export default function DraftPickValueExplorer({ rounds, players }: Props) {
   const [drilldownRound, setDrilldownRound] = useState<number | null>(null);
 
@@ -69,8 +81,9 @@ export default function DraftPickValueExplorer({ rounds, players }: Props) {
   );
 
   const classChartData = useMemo(() => {
+    const mature = players.filter((p) => p.yearsSinceDraft >= MIN_YEARS_FOR_REACH_RATE);
     const byYear = new Map<number, { total: number; reached: number }>();
-    for (const p of players) {
+    for (const p of mature) {
       const entry = byYear.get(p.draftYear) ?? { total: 0, reached: 0 };
       entry.total += 1;
       if (p.reachedMlb) entry.reached += 1;
@@ -152,9 +165,11 @@ export default function DraftPickValueExplorer({ rounds, players }: Props) {
           </BarChart>
         </ResponsiveContainer>
         <div style={{ fontSize: "0.75rem", color: "var(--color-text-muted)", marginTop: "0.25rem" }}>
-          Click a bar to see that round&apos;s individual players below. Only draft classes with at least 3 years since
-          being drafted are counted (2001–2028 as of this build) — too little time has passed for recent classes to show
-          real outcomes yet.
+          Click a bar to see that round&apos;s individual players below. Reach-MLB rate specifically requires at least{" "}
+          {MIN_YEARS_FOR_REACH_RATE} years since being drafted (not just 3) to count — checked league-wide, 96.4% of
+          every real debut happens within {MIN_YEARS_FOR_REACH_RATE} years, so anything younger hasn&apos;t had a fair
+          chance to show up yet and would silently drag the rate down (round 1&apos;s true rate is ~75%, not the ~70%
+          you&apos;d get pooling in still-developing recent classes).
         </div>
       </div>
 
@@ -164,7 +179,7 @@ export default function DraftPickValueExplorer({ rounds, players }: Props) {
         <ResponsiveContainer width="100%" height={340}>
           <BarChart data={classChartData} margin={{ top: 24, right: 20, bottom: 10, left: 10 }}>
             <CartesianGrid strokeDasharray="3 3" stroke="var(--color-border)" vertical={false} />
-            <XAxis dataKey="year" tick={{ fontSize: 11 }} interval={2} label={{ value: "Draft Year", position: "insideBottom", offset: -5, fontSize: 12 }} />
+            <XAxis dataKey="year" tick={{ fontSize: 11 }} interval={1} label={{ value: "Draft Year", position: "insideBottom", offset: -5, fontSize: 12 }} />
             <YAxis domain={[0, 100]} tickFormatter={pctLabel} tick={{ fontSize: 12 }} width={45} label={{ value: "% Reached MLB", angle: -90, position: "insideLeft", fontSize: 12 }} />
             <Bar dataKey="pct" fill="var(--color-tan)" radius={[3, 3, 0, 0]} isAnimationActive={false}>
               <LabelList dataKey="pct" position="top" formatter={(v: unknown) => (typeof v === "number" ? v.toFixed(0) : "")} style={{ fontSize: 10, fill: "var(--color-text-muted)" }} />
@@ -173,7 +188,8 @@ export default function DraftPickValueExplorer({ rounds, players }: Props) {
         </ResponsiveContainer>
         <div style={{ fontSize: "0.75rem", color: "var(--color-text-muted)", marginTop: "0.25rem" }}>
           Every player drafted that year (all rounds combined), not just one round — a way to see whether talent
-          depth/graduation rates have shifted across the league&apos;s history.
+          depth/graduation rates have shifted across the league&apos;s history. Only shows classes at least{" "}
+          {MIN_YEARS_FOR_REACH_RATE} years removed from their draft, same reason as the round chart above.
         </div>
       </div>
 
@@ -184,7 +200,7 @@ export default function DraftPickValueExplorer({ rounds, players }: Props) {
           <table style={{ width: "100%", borderCollapse: "collapse", fontSize: "0.875rem" }}>
             <thead>
               <tr style={{ background: "var(--color-table-header)", textAlign: "left" }}>
-                {["Round", "n", "% Reached MLB", "Avg WAR/yr", "Median", "Smoothed", "Hit rate", "Best pick"].map((h) => (
+                {["Round", "n", "% Reached MLB (n)", "Avg WAR/yr", "Median", "Smoothed", "Hit rate", "Best pick"].map((h) => (
                   <th key={h} style={{ padding: "0.5rem 0.75rem", fontWeight: 700 }}>{h}</th>
                 ))}
               </tr>
@@ -201,7 +217,9 @@ export default function DraftPickValueExplorer({ rounds, players }: Props) {
                 >
                   <td style={{ padding: "0.5rem 0.75rem", fontWeight: 700 }}>{r.round}</td>
                   <td style={{ padding: "0.5rem 0.75rem", fontVariantNumeric: "tabular-nums" }}>{r.sampleSize}</td>
-                  <td style={{ padding: "0.5rem 0.75rem", fontVariantNumeric: "tabular-nums", fontWeight: 700 }}>{r.pctReachedMlb.toFixed(1)}%</td>
+                  <td style={{ padding: "0.5rem 0.75rem", fontVariantNumeric: "tabular-nums", fontWeight: 700 }}>
+                    {r.pctReachedMlb.toFixed(1)}% <span style={{ color: "var(--color-text-muted)", fontWeight: 400 }}>(n={r.reachRateSampleSize})</span>
+                  </td>
                   <td style={{ padding: "0.5rem 0.75rem", fontVariantNumeric: "tabular-nums" }}>{r.avgWarPerYear.toFixed(3)}</td>
                   <td style={{ padding: "0.5rem 0.75rem", fontVariantNumeric: "tabular-nums" }}>{r.medianWarPerYear.toFixed(3)}</td>
                   <td style={{ padding: "0.5rem 0.75rem", fontVariantNumeric: "tabular-nums" }}>{r.smoothedWarPerYear.toFixed(3)}</td>
@@ -264,9 +282,12 @@ export default function DraftPickValueExplorer({ rounds, players }: Props) {
         real plate appearance or inning pitched at the MLB level, ever — a much lower bar than producing positive career
         value. WAR/year (in the table below) is real MLB career WAR accumulated since being drafted, divided by years
         since draft, so a recent pick still early in his career isn&apos;t penalized against one who&apos;s had decades
-        to accumulate value. Draft classes need at least 3 years on the books to qualify. This will get better, not be
-        replaced, over time — every future draft adds a class. Full detail in HANDOFF.md&apos;s transaction-analysis
-        section.
+        to accumulate value — that metric needs at least 3 years on the books to qualify. Reach-MLB rate needs at
+        least {MIN_YEARS_FOR_REACH_RATE} years — checked league-wide, 96.4% of every real debut happens within{" "}
+        {MIN_YEARS_FOR_REACH_RATE} years of being drafted, so anything younger hasn&apos;t had a fair chance yet and
+        would silently drag the rate down if pooled in (round 1&apos;s true mature rate is ~75%, not ~70%). This will
+        get better, not be replaced, over time — every future draft adds a class, and more recent classes clear the{" "}
+        {MIN_YEARS_FOR_REACH_RATE}-year bar every year. Full detail in HANDOFF.md&apos;s transaction-analysis section.
       </div>
     </div>
   );

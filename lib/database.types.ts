@@ -876,6 +876,7 @@ export type Database = {
           id: number
           median_war_per_year: number
           pct_reached_mlb: number
+          reach_rate_sample_size: number | null
           refresh_run_id: number
           sample_size: number
           smoothed_war_per_year: number
@@ -890,6 +891,7 @@ export type Database = {
           id?: never
           median_war_per_year: number
           pct_reached_mlb?: number
+          reach_rate_sample_size?: number | null
           refresh_run_id: number
           sample_size: number
           smoothed_war_per_year: number
@@ -904,6 +906,7 @@ export type Database = {
           id?: never
           median_war_per_year?: number
           pct_reached_mlb?: number
+          reach_rate_sample_size?: number | null
           refresh_run_id?: number
           sample_size?: number
           smoothed_war_per_year?: number
