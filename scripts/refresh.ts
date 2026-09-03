@@ -372,6 +372,27 @@ async function main() {
       console.error(`scan-market-contracts.ts failed after a successful refresh -- raw data is fine, but this run's contracts weren't scanned into the training pool: ${err}`);
       process.exitCode = 1;
     }
+
+    // Trade block + trade history (2026-09-04) -- previously manual-only, so
+    // both had gone stale (trade block hadn't been re-scraped since it was
+    // built; the trade ledger was missing everything traded since). Both
+    // scripts are idempotent (upsert on refresh_run_id+player_id / trade_key
+    // respectively) and cheap (one page fetch each), so it's safe to run them
+    // every refresh rather than inventing a separate cadence for them.
+    console.log("Scraping the trade block...");
+    try {
+      execFileSync("npx", ["tsx", "scripts/scrape-trade-block.ts"], { stdio: "inherit", shell: true });
+    } catch (err) {
+      console.error(`scrape-trade-block.ts failed after a successful refresh -- raw data is fine, but this run's trade_block_snapshots wasn't captured: ${err}`);
+      process.exitCode = 1;
+    }
+    console.log("Scraping trade history...");
+    try {
+      execFileSync("npx", ["tsx", "scripts/scrape-trade-history.ts"], { stdio: "inherit", shell: true });
+    } catch (err) {
+      console.error(`scrape-trade-history.ts failed after a successful refresh -- raw data is fine, but new trades since the last scrape weren't captured: ${err}`);
+      process.exitCode = 1;
+    }
   } catch (err) {
     await supabase.from("refresh_runs").update({ status: "failed", completed_at: new Date().toISOString(), notes: String(err) }).eq("id", refreshRunId);
     console.error(`Refresh run ${refreshRunId} failed:`, err);
