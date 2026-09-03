@@ -303,6 +303,7 @@ Rees: wants a real "before" picture on record ahead of the hitter/pitcher rescal
 - Bin edges computed from every role's data for the current metric, not just the currently-selected roles -- toggling a role on/off never shifts the x-axis under curves already on screen (only switching Overall/Potential recomputes the bins, since the two scales differ).
 
 ### Not built yet (don't design against these)
+- **Development Lab page** (2026-09-02, Rees's ask) — a real in-game mechanic (submit up to 12 young/near-ready players per sim to work on one tool each). Difficulty-tier notes and success-rate estimates captured in `development-lab-notes.md` at repo root ("save this... to turn into a page in the future") — first real use was a one-off manual analysis for OKC, not a built feature.
 - Win/loss-based team power rankings (needs league-relative stat normalization, not started)
 - Ratings/computed values for pre-draft amateurs — same rating engine works fine on them once they have data, but the ingestion pipeline for their scouted grades is still manual/deferred
 - Team financials beyond raw contract data — team payroll is **not** simply `SUM(contracts.salary0)`; retained salary on trades breaks that naive sum and hasn't been solved yet. **See the transaction-analysis section above — `/thebigleague/finance/current/` may solve this directly, not yet checked.**
