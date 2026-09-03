@@ -868,6 +868,7 @@ export type Database = {
       draft_pick_value_curve: {
         Row: {
           avg_war_per_year: number
+          best_player_career_war: number | null
           best_player_id: number | null
           best_player_war_per_year: number | null
           created_at: string
@@ -881,6 +882,7 @@ export type Database = {
         }
         Insert: {
           avg_war_per_year: number
+          best_player_career_war?: number | null
           best_player_id?: number | null
           best_player_war_per_year?: number | null
           created_at?: string
@@ -894,6 +896,7 @@ export type Database = {
         }
         Update: {
           avg_war_per_year?: number
+          best_player_career_war?: number | null
           best_player_id?: number | null
           best_player_war_per_year?: number | null
           created_at?: string

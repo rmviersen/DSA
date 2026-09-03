@@ -22,6 +22,7 @@ export interface DraftRoundValue {
   bestPlayerId: number | null;
   bestPlayerName: string;
   bestPlayerWarPerYear: number | null;
+  bestPlayerCareerWar: number | null;
 }
 
 export interface DraftedPlayerPoint {
@@ -67,6 +68,7 @@ export async function getDraftPickValueCurve(): Promise<DraftRoundValue[]> {
   const rows = data as {
     draft_round: number; sample_size: number; avg_war_per_year: number; median_war_per_year: number;
     smoothed_war_per_year: number; pct_reached_mlb: number; best_player_id: number | null; best_player_war_per_year: number | null;
+    best_player_career_war: number | null;
   }[];
   const bestIds = rows.map((r) => r.best_player_id).filter((id): id is number => id != null);
   const nameById = await namesFor(supabase, bestIds);
@@ -80,6 +82,7 @@ export async function getDraftPickValueCurve(): Promise<DraftRoundValue[]> {
     bestPlayerId: r.best_player_id,
     bestPlayerName: r.best_player_id != null ? (nameById.get(r.best_player_id) ?? `Player ${r.best_player_id}`) : "—",
     bestPlayerWarPerYear: r.best_player_war_per_year,
+    bestPlayerCareerWar: r.best_player_career_war,
   }));
 }
 

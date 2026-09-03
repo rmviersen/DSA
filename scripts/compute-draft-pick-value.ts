@@ -193,7 +193,12 @@ async function main() {
     const sorted = [...values].sort((a, b) => a - b);
     const avg = values.reduce((a, b) => a + b, 0) / values.length;
     const median = quantileMedian(sorted);
-    const best = rows.reduce((a, b) => (b.war_per_year > a.war_per_year ? b : a));
+    // "Best pick" is by total CAREER WAR, not the WAR/year rate (Rees's ask,
+    // 2026-09-04) -- the rate metric exists specifically to compare picks
+    // fairly across different amounts of career time, but "best pick in this
+    // round" is a real total-value question, where a longer, more productive
+    // career should win over a short, high-rate one.
+    const best = rows.reduce((a, b) => (b.career_war > a.career_war ? b : a));
     const pctReachedMlb = (rows.filter((r) => r.reached_mlb).length / rows.length) * 100;
     return { round, n: rows.length, avg, median, best, pctReachedMlb };
   });
@@ -208,10 +213,10 @@ async function main() {
     roundSummaries.map((r) => r.n)
   );
 
-  console.log("Round  N     Avg WAR/yr  Median  Smoothed  %ReachedMLB  Best player (id / WAR-per-yr)");
+  console.log("Round  N     Avg WAR/yr  Median  Smoothed  %ReachedMLB  Best player (id / career WAR)");
   roundSummaries.forEach((r, i) => {
     console.log(
-      `${String(r.round).padStart(5)}  ${String(r.n).padStart(4)}  ${r.avg.toFixed(3).padStart(9)}  ${r.median.toFixed(3).padStart(6)}  ${smoothed[i].toFixed(3).padStart(8)}  ${r.pctReachedMlb.toFixed(1).padStart(10)}%  #${r.best.player_id} (${r.best.war_per_year.toFixed(2)})`
+      `${String(r.round).padStart(5)}  ${String(r.n).padStart(4)}  ${r.avg.toFixed(3).padStart(9)}  ${r.median.toFixed(3).padStart(6)}  ${smoothed[i].toFixed(3).padStart(8)}  ${r.pctReachedMlb.toFixed(1).padStart(10)}%  #${r.best.player_id} (${r.best.career_war.toFixed(1)})`
     );
   });
 
@@ -229,6 +234,7 @@ async function main() {
       pct_reached_mlb: r.pctReachedMlb,
       best_player_id: r.best.player_id,
       best_player_war_per_year: r.best.war_per_year,
+      best_player_career_war: r.best.career_war,
     })),
     "refresh_run_id,draft_round"
   );

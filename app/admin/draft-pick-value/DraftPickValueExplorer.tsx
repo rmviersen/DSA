@@ -207,7 +207,7 @@ export default function DraftPickValueExplorer({ rounds, players }: Props) {
                   <td style={{ padding: "0.5rem 0.75rem", fontVariantNumeric: "tabular-nums" }}>{r.smoothedWarPerYear.toFixed(3)}</td>
                   <td style={{ padding: "0.5rem 0.75rem", fontVariantNumeric: "tabular-nums" }}>{(hitRateByRound.get(r.round) ?? 0).toFixed(1)}%</td>
                   <td style={{ padding: "0.5rem 0.75rem" }}>
-                    {r.bestPlayerName} <span style={{ color: "var(--color-text-muted)" }}>({r.bestPlayerWarPerYear?.toFixed(2)})</span>
+                    {r.bestPlayerName} <span style={{ color: "var(--color-text-muted)" }}>({r.bestPlayerCareerWar?.toFixed(1)} career WAR)</span>
                   </td>
                 </tr>
               ))}
