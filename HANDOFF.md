@@ -400,6 +400,14 @@ Rees's ask: pick the transaction-analysis work back up, working toward a "My Tea
 
 **"Best pick" per round switched from the WAR/year rate to total career WAR (2026-09-04).** Rees: the rate metric exists specifically to compare players fairly across different amounts of career time, but "best pick ever in this round" is a real total-value question, where a longer, more productive career should win over a short, high-rate one. New `best_player_career_war` column on `draft_pick_value_curve`; the report page's Best Pick cell now shows career WAR directly. Re-ran and verified: round 1's best pick changed from a high-rate/shorter-career player to Nick Henson at 99.9 career WAR.
 
+**Real methodology bug caught by Rees questioning round 1's 69.8% reach-MLB rate (2026-09-04).** Validated the number itself independently first (a completely separate SQL query landed on the exact same 69.8% — not a computation bug), but that led to finding a real flaw: pooling every `>=3`-years-since-draft class into one % blends fully-matured classes (75-90%+ reach rate) with recent classes that haven't had time yet (12-50%, still climbing) — a genuinely different question than "does this pick eventually make it." Checked league-wide, not just round 1: **96.4% of every real debut happens within 8 years of being drafted** (4665/4841), so anything younger hasn't had a fair chance yet and silently drags the pooled rate down.
+
+- New `MIN_YEARS_FOR_REACH_RATE = 8`, applied ONLY to `pct_reached_mlb` — the avg/median/smoothed WAR-per-year metrics keep the existing `MIN_YEARS_SINCE_DRAFT = 3` unchanged, since they already divide by years-since-draft and aren't biased the same binary all-or-nothing way.
+- **Round 1's TRUE mature reach rate is 75.0% (n=668), not 69.8% (n=828)** — higher, not lower, once immature classes are excluded rather than pooled in.
+- New `reach_rate_sample_size` column on `draft_pick_value_curve`, shown transparently in the report page's table (`75.0% (n=668)`) — a still-immature round/class's rate is never silently blended with a mature one again.
+- By-draft-class chart now only plots classes with `>=8` years since draft (2001-2023) — the misleadingly-low recent-class bars are removed from that chart entirely rather than shown as if they were a fair, final read.
+- Report page copy rewritten to state the real numbers behind the methodology (96.4% within 8 years, ~75% vs ~70%) rather than just asserting a cutoff.
+
 ## 5. Existing front-end code (starting point, not gospel)
 
 Minimal Next.js 14 App Router, explicitly built with "no polish, just functional tables" as the brief — expect to replace most of the visual layer.
