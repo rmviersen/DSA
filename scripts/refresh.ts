@@ -393,6 +393,17 @@ async function main() {
       console.error(`scrape-trade-history.ts failed after a successful refresh -- raw data is fine, but new trades since the last scrape weren't captured: ${err}`);
       process.exitCode = 1;
     }
+
+    // Draft-pick value curve (2026-09-04) -- only meaningfully changes once a
+    // real season completes, but cheap enough to keep current every refresh
+    // like the other weight-tuning-style regressions.
+    console.log("Computing draft-pick value curve...");
+    try {
+      execFileSync("npx", ["tsx", "scripts/compute-draft-pick-value.ts"], { stdio: "inherit", shell: true });
+    } catch (err) {
+      console.error(`compute-draft-pick-value.ts failed after a successful refresh -- raw data is fine, but this run's draft-pick value curve wasn't recomputed: ${err}`);
+      process.exitCode = 1;
+    }
   } catch (err) {
     await supabase.from("refresh_runs").update({ status: "failed", completed_at: new Date().toISOString(), notes: String(err) }).eq("id", refreshRunId);
     console.error(`Refresh run ${refreshRunId} failed:`, err);

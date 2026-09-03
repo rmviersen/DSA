@@ -865,6 +865,81 @@ export type Database = {
           },
         ]
       }
+      draft_pick_value_curve: {
+        Row: {
+          avg_war_per_year: number
+          best_player_id: number | null
+          best_player_war_per_year: number | null
+          created_at: string
+          draft_round: number
+          id: number
+          median_war_per_year: number
+          refresh_run_id: number
+          sample_size: number
+          smoothed_war_per_year: number
+        }
+        Insert: {
+          avg_war_per_year: number
+          best_player_id?: number | null
+          best_player_war_per_year?: number | null
+          created_at?: string
+          draft_round: number
+          id?: never
+          median_war_per_year: number
+          refresh_run_id: number
+          sample_size: number
+          smoothed_war_per_year: number
+        }
+        Update: {
+          avg_war_per_year?: number
+          best_player_id?: number | null
+          best_player_war_per_year?: number | null
+          created_at?: string
+          draft_round?: number
+          id?: never
+          median_war_per_year?: number
+          refresh_run_id?: number
+          sample_size?: number
+          smoothed_war_per_year?: number
+        }
+        Relationships: []
+      }
+      draft_pick_value_players: {
+        Row: {
+          career_war: number
+          created_at: string
+          draft_round: number
+          draft_year: number
+          id: number
+          player_id: number
+          refresh_run_id: number
+          war_per_year: number
+          years_since_draft: number
+        }
+        Insert: {
+          career_war: number
+          created_at?: string
+          draft_round: number
+          draft_year: number
+          id?: never
+          player_id: number
+          refresh_run_id: number
+          war_per_year: number
+          years_since_draft: number
+        }
+        Update: {
+          career_war?: number
+          created_at?: string
+          draft_round?: number
+          draft_year?: number
+          id?: never
+          player_id?: number
+          refresh_run_id?: number
+          war_per_year?: number
+          years_since_draft?: number
+        }
+        Relationships: []
+      }
       draft_picks: {
         Row: {
           age: number | null
