@@ -874,6 +874,7 @@ export type Database = {
           draft_round: number
           id: number
           median_war_per_year: number
+          pct_reached_mlb: number
           refresh_run_id: number
           sample_size: number
           smoothed_war_per_year: number
@@ -886,6 +887,7 @@ export type Database = {
           draft_round: number
           id?: never
           median_war_per_year: number
+          pct_reached_mlb?: number
           refresh_run_id: number
           sample_size: number
           smoothed_war_per_year: number
@@ -898,6 +900,7 @@ export type Database = {
           draft_round?: number
           id?: never
           median_war_per_year?: number
+          pct_reached_mlb?: number
           refresh_run_id?: number
           sample_size?: number
           smoothed_war_per_year?: number
@@ -912,6 +915,7 @@ export type Database = {
           draft_year: number
           id: number
           player_id: number
+          reached_mlb: boolean
           refresh_run_id: number
           war_per_year: number
           years_since_draft: number
@@ -923,6 +927,7 @@ export type Database = {
           draft_year: number
           id?: never
           player_id: number
+          reached_mlb?: boolean
           refresh_run_id: number
           war_per_year: number
           years_since_draft: number
@@ -934,6 +939,7 @@ export type Database = {
           draft_year?: number
           id?: never
           player_id?: number
+          reached_mlb?: boolean
           refresh_run_id?: number
           war_per_year?: number
           years_since_draft?: number

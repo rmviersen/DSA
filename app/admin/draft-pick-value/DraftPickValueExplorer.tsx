@@ -2,17 +2,27 @@
 
 import { useMemo, useState } from "react";
 import {
-  Scatter, XAxis, YAxis, ZAxis, CartesianGrid, Legend,
-  ResponsiveContainer, Line, ComposedChart,
+  Bar, BarChart, XAxis, YAxis, CartesianGrid, LabelList,
+  ResponsiveContainer,
 } from "recharts";
 import type { DraftRoundValue, DraftedPlayerPoint } from "../../../lib/draft-pick-value-query";
 import { warPerYearTier, percentileRank } from "../../../lib/draft-pick-value-query";
 
-// Interactive view for the draft-pick value curve (2026-09-04, Rees's ask)
-// -- same scatter + fitted-curve-overlay + drill-down-table pattern as
-// MarketRateExplorer.tsx, and the same explicit per-Scatter hover/click
-// handlers (not recharts' built-in <Tooltip>, which doesn't reliably fire
-// with multiple series -- see MarketRateExplorer's own note on this).
+// Interactive view for the draft-pick value curve (2026-09-04, Rees's ask).
+//
+// REBUILT same day after real feedback on the first version: (1) the
+// scatter chart wasn't rendering any dots at all -- root cause was a stray
+// `dataKey` prop set directly on <Scatter>, which isn't how the working
+// MarketRateExplorer.tsx reference pattern does it (there, XAxis/YAxis's
+// OWN dataKey pulls straight from each point in `data`; Scatter itself
+// never repeats it). (2) a raw WAR/year scatter isn't very insightful on
+// its own and its linear y-axis was badly stretched by a handful of
+// outliers (max ~5.4) against a population where 84% of players sit at
+// exactly 0 -- nothing in the useful middle was visible. Replaced entirely
+// with two %-based bar charts (naturally bounded 0-100%, no scaling
+// problem to have) answering the more direct question Rees actually
+// wanted: what share of picks make the majors at all, by round and by
+// draft class.
 
 const cardStyle: React.CSSProperties = {
   background: "var(--color-surface)",
@@ -39,6 +49,10 @@ const TIER_COLORS: Record<string, string> = {
   "Well Below Average": "#b0413e",
 };
 
+function pctLabel(v: number): string {
+  return `${v.toFixed(0)}%`;
+}
+
 interface Props {
   rounds: DraftRoundValue[];
   players: DraftedPlayerPoint[];
@@ -46,11 +60,26 @@ interface Props {
 
 export default function DraftPickValueExplorer({ rounds, players }: Props) {
   const [drilldownRound, setDrilldownRound] = useState<number | null>(null);
-  const [hoveredPoint, setHoveredPoint] = useState<DraftedPlayerPoint | null>(null);
-  const [pinnedPoint, setPinnedPoint] = useState<DraftedPlayerPoint | null>(null);
-  const activePoint = hoveredPoint ?? pinnedPoint;
 
   const allWarPerYear = useMemo(() => players.map((p) => p.warPerYear), [players]);
+
+  const roundChartData = useMemo(
+    () => rounds.map((r) => ({ round: r.round, pct: r.pctReachedMlb })),
+    [rounds]
+  );
+
+  const classChartData = useMemo(() => {
+    const byYear = new Map<number, { total: number; reached: number }>();
+    for (const p of players) {
+      const entry = byYear.get(p.draftYear) ?? { total: 0, reached: 0 };
+      entry.total += 1;
+      if (p.reachedMlb) entry.reached += 1;
+      byYear.set(p.draftYear, entry);
+    }
+    return [...byYear.entries()]
+      .sort(([a], [b]) => a - b)
+      .map(([year, { total, reached }]) => ({ year, pct: (reached / total) * 100, n: total }));
+  }, [players]);
 
   // "Hit rate" per round -- % of that round's OWN players who individually
   // graded Plus-tier or better -- not a round-average-vs-population tier.
@@ -73,9 +102,6 @@ export default function DraftPickValueExplorer({ rounds, players }: Props) {
     return map;
   }, [rounds, players, allWarPerYear]);
 
-  const curveLine = useMemo(() => rounds.map((r) => ({ round: r.round, smoothed: r.smoothedWarPerYear })), [rounds]);
-  const avgLine = useMemo(() => rounds.map((r) => ({ round: r.round, avg: r.avgWarPerYear })), [rounds]);
-
   const drilldownPlayers = useMemo(() => {
     if (drilldownRound == null) return [];
     return players.filter((p) => p.draftRound === drilldownRound).sort((a, b) => b.warPerYear - a.warPerYear);
@@ -87,96 +113,78 @@ export default function DraftPickValueExplorer({ rounds, players }: Props) {
       <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))", gap: "1rem" }}>
         <div style={cardStyle}>
           <div style={statLabelStyle}>Draft classes</div>
-          <div style={statValueStyle}>{rounds.length > 0 ? `${Math.min(...players.map((p) => p.draftYear))}–${Math.max(...players.map((p) => p.draftYear))}` : "—"}</div>
+          <div style={statValueStyle}>{players.length > 0 ? `${Math.min(...players.map((p) => p.draftYear))}–${Math.max(...players.map((p) => p.draftYear))}` : "—"}</div>
         </div>
         <div style={cardStyle}>
           <div style={statLabelStyle}>Players</div>
           <div style={statValueStyle}>{players.length.toLocaleString()}</div>
         </div>
         <div style={cardStyle}>
-          <div style={statLabelStyle}>Rounds tracked</div>
-          <div style={statValueStyle}>{rounds.length}</div>
+          <div style={statLabelStyle}>Round 1 reach-MLB rate</div>
+          <div style={statValueStyle}>{rounds[0]?.pctReachedMlb.toFixed(0) ?? "—"}%</div>
         </div>
         <div style={cardStyle}>
-          <div style={statLabelStyle}>Round 1 avg WAR/yr</div>
-          <div style={statValueStyle}>{rounds[0]?.avgWarPerYear.toFixed(2) ?? "—"}</div>
+          <div style={statLabelStyle}>Round 20+ reach-MLB rate</div>
+          <div style={statValueStyle}>
+            {(() => {
+              const late = rounds.filter((r) => r.round >= 20);
+              if (late.length === 0) return "—";
+              return `${(late.reduce((a, r) => a + r.pctReachedMlb, 0) / late.length).toFixed(0)}%`;
+            })()}
+          </div>
         </div>
       </div>
 
-      {/* Scatter + curve */}
+      {/* % reached MLB by round */}
       <div style={cardStyle}>
-        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", flexWrap: "wrap", gap: "0.75rem", marginBottom: "0.75rem" }}>
-          <h2 style={{ ...sectionTitleStyle, margin: 0 }}>Draft Round vs. Career WAR/Year</h2>
-          <div
-            style={{
-              minWidth: 260, minHeight: 64, padding: "0.5rem 0.85rem", borderRadius: 6,
-              border: `1px solid ${activePoint ? "var(--color-border-strong)" : "var(--color-border)"}`,
-              background: "var(--color-bg)", fontSize: "0.8125rem",
-            }}
-          >
-            {activePoint ? (
-              <>
-                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", gap: "0.5rem" }}>
-                  <span style={{ fontWeight: 700 }}>{activePoint.playerName}</span>
-                  {pinnedPoint && !hoveredPoint && (
-                    <button
-                      onClick={() => setPinnedPoint(null)}
-                      style={{ border: "none", background: "none", color: "var(--color-text-muted)", cursor: "pointer", fontSize: "0.75rem", padding: 0 }}
-                    >
-                      clear ✕
-                    </button>
-                  )}
-                </div>
-                <div style={{ color: "var(--color-text-muted)" }}>Round {activePoint.draftRound} · {activePoint.draftYear} draft</div>
-                <div style={{ fontWeight: 600 }}>
-                  {activePoint.warPerYear.toFixed(2)} WAR/yr · {activePoint.careerWar.toFixed(1)} career WAR over {activePoint.yearsSinceDraft} yrs
-                </div>
-              </>
-            ) : (
-              <div style={{ color: "var(--color-text-muted)", lineHeight: "64px" }}>Hover or click a point for details</div>
-            )}
-          </div>
-        </div>
-        <ResponsiveContainer width="100%" height={460}>
-          <ComposedChart margin={{ top: 10, right: 30, bottom: 10, left: 10 }}>
-            <CartesianGrid strokeDasharray="3 3" stroke="var(--color-border)" />
-            <XAxis type="number" dataKey="round" name="Round" domain={[1, "auto"]} tick={{ fontSize: 12 }} label={{ value: "Draft Round", position: "insideBottom", offset: -5, fontSize: 12 }} />
-            <YAxis type="number" dataKey="warPerYear" name="WAR/yr" tick={{ fontSize: 12 }} width={50} label={{ value: "Career WAR / Year", angle: -90, position: "insideLeft", fontSize: 12 }} />
-            <ZAxis range={[35, 35]} />
-            <Legend verticalAlign="top" height={32} />
-            <Scatter
-              name="Player"
-              data={players}
-              dataKey="warPerYear"
-              fill="var(--color-border-strong)"
-              fillOpacity={0.35}
-              cursor="pointer"
-              onMouseEnter={(data: unknown) => setHoveredPoint(data as DraftedPlayerPoint)}
-              onMouseLeave={() => setHoveredPoint(null)}
-              onClick={(data: unknown) => {
-                const point = data as DraftedPlayerPoint;
-                setPinnedPoint((prev) => (prev && prev.playerId === point.playerId ? null : point));
-              }}
-            />
-            <Line type="monotone" dataKey="avg" data={avgLine} xAxisId={0} dot={false} activeDot={false} name="Round avg" stroke="var(--color-tan)" strokeWidth={2} strokeDasharray="6 4" isAnimationActive={false} />
-            <Line type="monotone" dataKey="smoothed" data={curveLine} xAxisId={0} dot={false} activeDot={false} name="Smoothed curve" stroke="var(--color-navy)" strokeWidth={2.5} isAnimationActive={false} />
-          </ComposedChart>
+        <h2 style={sectionTitleStyle}>% of Picks Who Reached the Majors, by Round</h2>
+        <ResponsiveContainer width="100%" height={340}>
+          <BarChart data={roundChartData} margin={{ top: 24, right: 20, bottom: 10, left: 10 }}>
+            <CartesianGrid strokeDasharray="3 3" stroke="var(--color-border)" vertical={false} />
+            <XAxis dataKey="round" tick={{ fontSize: 11 }} interval={0} label={{ value: "Draft Round", position: "insideBottom", offset: -5, fontSize: 12 }} />
+            <YAxis domain={[0, 100]} tickFormatter={pctLabel} tick={{ fontSize: 12 }} width={45} label={{ value: "% Reached MLB", angle: -90, position: "insideLeft", fontSize: 12 }} />
+            <Bar dataKey="pct" fill="var(--color-navy)" radius={[3, 3, 0, 0]} isAnimationActive={false} cursor="pointer" onClick={(d: unknown) => {
+              const point = d as { round: number };
+              setDrilldownRound((prev) => (prev === point.round ? null : point.round));
+            }}>
+              <LabelList dataKey="pct" position="top" formatter={(v: unknown) => (typeof v === "number" ? v.toFixed(0) : "")} style={{ fontSize: 10, fill: "var(--color-text-muted)" }} />
+            </Bar>
+          </BarChart>
         </ResponsiveContainer>
-        <div style={{ fontSize: "0.75rem", color: "var(--color-text-muted)", marginTop: "0.5rem" }}>
-          Each dot is one drafted player. The solid line (smoothed curve) is what the trade-value composite reads — it can
-          never show a later round as more valuable than an earlier one, even where the raw round average (dashed line)
-          briefly bumps up from sample noise.
+        <div style={{ fontSize: "0.75rem", color: "var(--color-text-muted)", marginTop: "0.25rem" }}>
+          Click a bar to see that round&apos;s individual players below. Only draft classes with at least 3 years since
+          being drafted are counted (2001–2028 as of this build) — too little time has passed for recent classes to show
+          real outcomes yet.
+        </div>
+      </div>
+
+      {/* % reached MLB by draft class */}
+      <div style={cardStyle}>
+        <h2 style={sectionTitleStyle}>% of Picks Who Reached the Majors, by Draft Class</h2>
+        <ResponsiveContainer width="100%" height={340}>
+          <BarChart data={classChartData} margin={{ top: 24, right: 20, bottom: 10, left: 10 }}>
+            <CartesianGrid strokeDasharray="3 3" stroke="var(--color-border)" vertical={false} />
+            <XAxis dataKey="year" tick={{ fontSize: 11 }} interval={2} label={{ value: "Draft Year", position: "insideBottom", offset: -5, fontSize: 12 }} />
+            <YAxis domain={[0, 100]} tickFormatter={pctLabel} tick={{ fontSize: 12 }} width={45} label={{ value: "% Reached MLB", angle: -90, position: "insideLeft", fontSize: 12 }} />
+            <Bar dataKey="pct" fill="var(--color-tan)" radius={[3, 3, 0, 0]} isAnimationActive={false}>
+              <LabelList dataKey="pct" position="top" formatter={(v: unknown) => (typeof v === "number" ? v.toFixed(0) : "")} style={{ fontSize: 10, fill: "var(--color-text-muted)" }} />
+            </Bar>
+          </BarChart>
+        </ResponsiveContainer>
+        <div style={{ fontSize: "0.75rem", color: "var(--color-text-muted)", marginTop: "0.25rem" }}>
+          Every player drafted that year (all rounds combined), not just one round — a way to see whether talent
+          depth/graduation rates have shifted across the league&apos;s history.
         </div>
       </div>
 
       {/* Round summary table */}
       <div style={cardStyle}>
-        <h2 style={sectionTitleStyle}>By round</h2>
+        <h2 style={sectionTitleStyle}>By round — full detail</h2>
         <div style={{ overflowX: "auto" }}>
           <table style={{ width: "100%", borderCollapse: "collapse", fontSize: "0.875rem" }}>
             <thead>
               <tr style={{ background: "var(--color-table-header)", textAlign: "left" }}>
-                {["Round", "n", "Avg WAR/yr", "Median", "Smoothed", "Hit rate", "Best pick"].map((h) => (
+                {["Round", "n", "% Reached MLB", "Avg WAR/yr", "Median", "Smoothed", "Hit rate", "Best pick"].map((h) => (
                   <th key={h} style={{ padding: "0.5rem 0.75rem", fontWeight: 700 }}>{h}</th>
                 ))}
               </tr>
@@ -193,9 +201,10 @@ export default function DraftPickValueExplorer({ rounds, players }: Props) {
                 >
                   <td style={{ padding: "0.5rem 0.75rem", fontWeight: 700 }}>{r.round}</td>
                   <td style={{ padding: "0.5rem 0.75rem", fontVariantNumeric: "tabular-nums" }}>{r.sampleSize}</td>
+                  <td style={{ padding: "0.5rem 0.75rem", fontVariantNumeric: "tabular-nums", fontWeight: 700 }}>{r.pctReachedMlb.toFixed(1)}%</td>
                   <td style={{ padding: "0.5rem 0.75rem", fontVariantNumeric: "tabular-nums" }}>{r.avgWarPerYear.toFixed(3)}</td>
                   <td style={{ padding: "0.5rem 0.75rem", fontVariantNumeric: "tabular-nums" }}>{r.medianWarPerYear.toFixed(3)}</td>
-                  <td style={{ padding: "0.5rem 0.75rem", fontVariantNumeric: "tabular-nums", fontWeight: 700 }}>{r.smoothedWarPerYear.toFixed(3)}</td>
+                  <td style={{ padding: "0.5rem 0.75rem", fontVariantNumeric: "tabular-nums" }}>{r.smoothedWarPerYear.toFixed(3)}</td>
                   <td style={{ padding: "0.5rem 0.75rem", fontVariantNumeric: "tabular-nums" }}>{(hitRateByRound.get(r.round) ?? 0).toFixed(1)}%</td>
                   <td style={{ padding: "0.5rem 0.75rem" }}>
                     {r.bestPlayerName} <span style={{ color: "var(--color-text-muted)" }}>({r.bestPlayerWarPerYear?.toFixed(2)})</span>
@@ -207,9 +216,9 @@ export default function DraftPickValueExplorer({ rounds, players }: Props) {
         </div>
         <div style={{ fontSize: "0.75rem", color: "var(--color-text-muted)", marginTop: "0.5rem" }}>
           Hit rate = the share of that round&apos;s OWN players who individually graded Plus-tier or better against the
-          full population (not a fixed WAR cutoff — the real distribution is heavily skewed, so an absolute cutoff would
-          call almost everything &quot;replacement level&quot;). Click a row to see that round&apos;s individual players
-          and their own tier grades.
+          full population (percentile-based, not a fixed WAR cutoff — the real distribution is heavily skewed, so an
+          absolute cutoff would call almost everything &quot;replacement level&quot;). Smoothed WAR/yr is what the
+          trade-value composite will actually read. Click a row to see that round&apos;s individual players.
         </div>
       </div>
 
@@ -221,7 +230,7 @@ export default function DraftPickValueExplorer({ rounds, players }: Props) {
             <table style={{ width: "100%", borderCollapse: "collapse", fontSize: "0.875rem" }}>
               <thead>
                 <tr style={{ background: "var(--color-table-header)", textAlign: "left", position: "sticky", top: 0 }}>
-                  {["Player", "Draft Year", "Career WAR", "Years Since Draft", "WAR/yr", "Tier"].map((h) => (
+                  {["Player", "Draft Year", "Reached MLB?", "Career WAR", "Years Since Draft", "WAR/yr", "Tier"].map((h) => (
                     <th key={h} style={{ padding: "0.5rem 0.75rem", fontWeight: 700 }}>{h}</th>
                   ))}
                 </tr>
@@ -233,6 +242,7 @@ export default function DraftPickValueExplorer({ rounds, players }: Props) {
                     <tr key={p.playerId} style={{ borderTop: "1px solid var(--color-border)" }}>
                       <td style={{ padding: "0.45rem 0.75rem" }}>{p.playerName}</td>
                       <td style={{ padding: "0.45rem 0.75rem", fontVariantNumeric: "tabular-nums" }}>{p.draftYear}</td>
+                      <td style={{ padding: "0.45rem 0.75rem" }}>{p.reachedMlb ? "Yes" : "No"}</td>
                       <td style={{ padding: "0.45rem 0.75rem", fontVariantNumeric: "tabular-nums" }}>{p.careerWar.toFixed(1)}</td>
                       <td style={{ padding: "0.45rem 0.75rem", fontVariantNumeric: "tabular-nums" }}>{p.yearsSinceDraft}</td>
                       <td style={{ padding: "0.45rem 0.75rem", fontVariantNumeric: "tabular-nums", fontWeight: 700 }}>{p.warPerYear.toFixed(2)}</td>
@@ -250,11 +260,13 @@ export default function DraftPickValueExplorer({ rounds, players }: Props) {
 
       {/* Methodology note */}
       <div style={{ ...cardStyle, fontSize: "0.8125rem", color: "var(--color-text-muted)" }}>
-        <strong style={{ color: "var(--color-text)" }}>Methodology.</strong> Real MLB (level_id=1) career WAR accumulated
-        since being drafted, divided by years since draft — draft classes need at least 3 years on the books to qualify,
-        so the most recent classes aren&apos;t included yet (not enough time has passed to show real outcomes). This will
-        get better, not be replaced, over time: every future draft adds a class, and as recent classes keep accumulating
-        real MLB seasons, this curve will naturally sharpen. Full detail in HANDOFF.md&apos;s transaction-analysis section.
+        <strong style={{ color: "var(--color-text)" }}>Methodology.</strong> &quot;Reached MLB&quot; means at least one
+        real plate appearance or inning pitched at the MLB level, ever — a much lower bar than producing positive career
+        value. WAR/year (in the table below) is real MLB career WAR accumulated since being drafted, divided by years
+        since draft, so a recent pick still early in his career isn&apos;t penalized against one who&apos;s had decades
+        to accumulate value. Draft classes need at least 3 years on the books to qualify. This will get better, not be
+        replaced, over time — every future draft adds a class. Full detail in HANDOFF.md&apos;s transaction-analysis
+        section.
       </div>
     </div>
   );

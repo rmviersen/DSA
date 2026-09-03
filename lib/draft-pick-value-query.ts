@@ -18,6 +18,7 @@ export interface DraftRoundValue {
   avgWarPerYear: number;
   medianWarPerYear: number;
   smoothedWarPerYear: number;
+  pctReachedMlb: number;
   bestPlayerId: number | null;
   bestPlayerName: string;
   bestPlayerWarPerYear: number | null;
@@ -31,6 +32,7 @@ export interface DraftedPlayerPoint {
   yearsSinceDraft: number;
   careerWar: number;
   warPerYear: number;
+  reachedMlb: boolean;
 }
 
 // No FK from either table to players (same sibling-table, join-by-key
@@ -64,7 +66,7 @@ export async function getDraftPickValueCurve(): Promise<DraftRoundValue[]> {
   if (error) throw error;
   const rows = data as {
     draft_round: number; sample_size: number; avg_war_per_year: number; median_war_per_year: number;
-    smoothed_war_per_year: number; best_player_id: number | null; best_player_war_per_year: number | null;
+    smoothed_war_per_year: number; pct_reached_mlb: number; best_player_id: number | null; best_player_war_per_year: number | null;
   }[];
   const bestIds = rows.map((r) => r.best_player_id).filter((id): id is number => id != null);
   const nameById = await namesFor(supabase, bestIds);
@@ -74,6 +76,7 @@ export async function getDraftPickValueCurve(): Promise<DraftRoundValue[]> {
     avgWarPerYear: r.avg_war_per_year,
     medianWarPerYear: r.median_war_per_year,
     smoothedWarPerYear: r.smoothed_war_per_year,
+    pctReachedMlb: r.pct_reached_mlb,
     bestPlayerId: r.best_player_id,
     bestPlayerName: r.best_player_id != null ? (nameById.get(r.best_player_id) ?? `Player ${r.best_player_id}`) : "—",
     bestPlayerWarPerYear: r.best_player_war_per_year,
@@ -88,11 +91,11 @@ export async function getDraftPickValuePlayers(): Promise<DraftedPlayerPoint[]> 
   const refreshRunId = (latestRow as { refresh_run_id: number }).refresh_run_id;
 
   const PAGE_SIZE = 1000;
-  const rows: { player_id: number; draft_year: number; draft_round: number; years_since_draft: number; career_war: number; war_per_year: number }[] = [];
+  const rows: { player_id: number; draft_year: number; draft_round: number; years_since_draft: number; career_war: number; war_per_year: number; reached_mlb: boolean }[] = [];
   let from = 0;
   while (true) {
     const { data, error } = await supabase
-      .from("draft_pick_value_players").select("player_id, draft_year, draft_round, years_since_draft, career_war, war_per_year")
+      .from("draft_pick_value_players").select("player_id, draft_year, draft_round, years_since_draft, career_war, war_per_year, reached_mlb")
       .eq("refresh_run_id", refreshRunId).range(from, from + PAGE_SIZE - 1);
     if (error) throw error;
     if (!data || data.length === 0) break;
@@ -110,6 +113,7 @@ export async function getDraftPickValuePlayers(): Promise<DraftedPlayerPoint[]> 
     yearsSinceDraft: r.years_since_draft,
     careerWar: r.career_war,
     warPerYear: r.war_per_year,
+    reachedMlb: r.reached_mlb,
   }));
 }
 

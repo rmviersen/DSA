@@ -121,6 +121,12 @@ async function main() {
   // never accumulated real MLB value) is a real, meaningful outcome and
   // belongs in the round average at 0, not excluded for lack of stat rows.
   const careerWarByPlayer = new Map<number, number>(eligible.map((p) => [p.id, 0]));
+  // Separate, more literal signal (Rees's ask, 2026-09-04): did this player
+  // ever actually appear in a real MLB game at all, regardless of how much
+  // value he produced once there. Requires a real PA/IP, not just a row
+  // existing -- guards against a phantom zero-appearance row counting as
+  // "reached the majors."
+  const reachedMlbByPlayer = new Set<number>();
 
   // A career can span from its draft year all the way to the current year --
   // sweep every year in that whole window once, not per-player, since the
@@ -132,25 +138,27 @@ async function main() {
     const battingRun = await latestRunForYear(supabase, "player_batting_stats_snapshots", year);
     const pitchingRun = await latestRunForYear(supabase, "player_pitching_stats_snapshots", year);
     if (battingRun != null) {
-      const rows = await fetchAll<{ player_id: number; war: number | null }>((from, to) =>
-        supabase.from("player_batting_stats_snapshots").select("player_id, war")
+      const rows = await fetchAll<{ player_id: number; war: number | null; pa: number | null }>((from, to) =>
+        supabase.from("player_batting_stats_snapshots").select("player_id, war, pa")
           .eq("year", year).eq("level_id", REAL_MLB_LEVEL_ID).eq("split_id", OVERALL_SPLIT_ID).eq("refresh_run_id", battingRun)
           .range(from, to) as never
       );
       for (const r of rows) {
         if (!eligibleIds.has(r.player_id)) continue;
         careerWarByPlayer.set(r.player_id, (careerWarByPlayer.get(r.player_id) ?? 0) + (r.war ?? 0));
+        if ((r.pa ?? 0) > 0) reachedMlbByPlayer.add(r.player_id);
       }
     }
     if (pitchingRun != null) {
-      const rows = await fetchAll<{ player_id: number; war: number | null }>((from, to) =>
-        supabase.from("player_pitching_stats_snapshots").select("player_id, war")
+      const rows = await fetchAll<{ player_id: number; war: number | null; ip: number | null }>((from, to) =>
+        supabase.from("player_pitching_stats_snapshots").select("player_id, war, ip")
           .eq("year", year).eq("level_id", REAL_MLB_LEVEL_ID).eq("split_id", OVERALL_SPLIT_ID).eq("refresh_run_id", pitchingRun)
           .range(from, to) as never
       );
       for (const r of rows) {
         if (!eligibleIds.has(r.player_id)) continue;
         careerWarByPlayer.set(r.player_id, (careerWarByPlayer.get(r.player_id) ?? 0) + (r.war ?? 0));
+        if ((r.ip ?? 0) > 0) reachedMlbByPlayer.add(r.player_id);
       }
     }
     if (year % 5 === 0 || year === currentYear) console.log(`  ...through ${year}`);
@@ -168,6 +176,7 @@ async function main() {
       years_since_draft: yearsSinceDraft,
       career_war: careerWar,
       war_per_year: careerWar / yearsSinceDraft,
+      reached_mlb: reachedMlbByPlayer.has(p.id),
     };
   });
 
@@ -185,7 +194,8 @@ async function main() {
     const avg = values.reduce((a, b) => a + b, 0) / values.length;
     const median = quantileMedian(sorted);
     const best = rows.reduce((a, b) => (b.war_per_year > a.war_per_year ? b : a));
-    return { round, n: rows.length, avg, median, best };
+    const pctReachedMlb = (rows.filter((r) => r.reached_mlb).length / rows.length) * 100;
+    return { round, n: rows.length, avg, median, best, pctReachedMlb };
   });
 
   // Isotonic-smooth the round averages so a later round can never show a
@@ -198,10 +208,10 @@ async function main() {
     roundSummaries.map((r) => r.n)
   );
 
-  console.log("Round  N     Avg WAR/yr  Median  Smoothed  Best player (id / WAR-per-yr)");
+  console.log("Round  N     Avg WAR/yr  Median  Smoothed  %ReachedMLB  Best player (id / WAR-per-yr)");
   roundSummaries.forEach((r, i) => {
     console.log(
-      `${String(r.round).padStart(5)}  ${String(r.n).padStart(4)}  ${r.avg.toFixed(3).padStart(9)}  ${r.median.toFixed(3).padStart(6)}  ${smoothed[i].toFixed(3).padStart(8)}  #${r.best.player_id} (${r.best.war_per_year.toFixed(2)})`
+      `${String(r.round).padStart(5)}  ${String(r.n).padStart(4)}  ${r.avg.toFixed(3).padStart(9)}  ${r.median.toFixed(3).padStart(6)}  ${smoothed[i].toFixed(3).padStart(8)}  ${r.pctReachedMlb.toFixed(1).padStart(10)}%  #${r.best.player_id} (${r.best.war_per_year.toFixed(2)})`
     );
   });
 
@@ -216,6 +226,7 @@ async function main() {
       avg_war_per_year: r.avg,
       median_war_per_year: r.median,
       smoothed_war_per_year: smoothed[i],
+      pct_reached_mlb: r.pctReachedMlb,
       best_player_id: r.best.player_id,
       best_player_war_per_year: r.best.war_per_year,
     })),
