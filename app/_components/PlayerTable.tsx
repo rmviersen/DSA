@@ -38,9 +38,20 @@ const ROLE_ORDER = ["SP", "RP", "C", "1B", "INF", "SS", "COF", "CF", "DH"];
 
 type SortKey =
   | "name" | "pos" | "role" | "team" | "age"
-  | "cntct" | "pow" | "eye" | "speed" | "stf" | "mov" | "ctrl" | "stm"
+  // Combined hitter/pitcher tool columns (2026-09-04, Rees's ask -- cuts 8
+  // columns to 4 so everything fits on one screen without a scrollbar).
+  // Each pairs the hitter grade with its closest pitcher analog; only one
+  // side is ever meaningful for a given player (the other reads a flat 20,
+  // the "not applicable" placeholder), so showing both in the same column
+  // loses no information.
+  | "contactStuff" | "powerMovement" | "eyeControl" | "speedStamina"
   | "overall" | "potential" | "ab" | "ip" | "war" | "prospect_potential" | "prospect_rank"
   | "demand" | "fairValue" | "valueGap";
+
+// r.ph is "H" for a hitter, "P" for a pitcher (null is not expected in
+// practice but falls back to the hitter side, matching every other
+// nullable-ph default in this component).
+const combined = (r: PlayerRow, hitterVal: number | null, pitcherVal: number | null) => (r.ph === "P" ? pitcherVal : hitterVal);
 
 export function PlayerTable({ rows, showTeam, showProspectCols, showStatLevel, showValueVsDemand }: { rows: PlayerRow[]; showTeam: boolean; showProspectCols: boolean; showStatLevel?: boolean; showValueVsDemand?: boolean }) {
   const [phFilter, setPhFilter] = useState<"all" | "H" | "P">("all");
@@ -99,14 +110,10 @@ export function PlayerTable({ rows, showTeam, showProspectCols, showStatLevel, s
         case "role": av = a.role ?? ""; bv = b.role ?? ""; break;
         case "team": av = a.team_abbr ?? ""; bv = b.team_abbr ?? ""; break;
         case "age": av = a.age ?? -1; bv = b.age ?? -1; break;
-        case "cntct": av = a.cntct ?? -1; bv = b.cntct ?? -1; break;
-        case "pow": av = a.pow ?? -1; bv = b.pow ?? -1; break;
-        case "eye": av = a.eye ?? -1; bv = b.eye ?? -1; break;
-        case "speed": av = a.speed ?? -1; bv = b.speed ?? -1; break;
-        case "stf": av = a.stf ?? -1; bv = b.stf ?? -1; break;
-        case "mov": av = a.mov ?? -1; bv = b.mov ?? -1; break;
-        case "ctrl": av = a.ctrl ?? -1; bv = b.ctrl ?? -1; break;
-        case "stm": av = a.stm ?? -1; bv = b.stm ?? -1; break;
+        case "contactStuff": av = combined(a, a.cntct, a.stf) ?? -1; bv = combined(b, b.cntct, b.stf) ?? -1; break;
+        case "powerMovement": av = combined(a, a.pow, a.mov) ?? -1; bv = combined(b, b.pow, b.mov) ?? -1; break;
+        case "eyeControl": av = combined(a, a.eye, a.ctrl) ?? -1; bv = combined(b, b.eye, b.ctrl) ?? -1; break;
+        case "speedStamina": av = combined(a, a.speed, a.stm) ?? -1; bv = combined(b, b.speed, b.stm) ?? -1; break;
         case "overall": av = a.overall ?? -1; bv = b.overall ?? -1; break;
         case "potential": av = a.potential ?? -1; bv = b.potential ?? -1; break;
         case "ab": av = a.ab ?? -1; bv = b.ab ?? -1; break;
@@ -137,7 +144,13 @@ export function PlayerTable({ rows, showTeam, showProspectCols, showStatLevel, s
     </th>
   );
 
-  const colCount = 15 + (showTeam ? 1 : 0) + (showProspectCols ? 2 : 0);
+  // Base 13: Name/Pos/Role/Age/Overall/Potential/AB/IP/WAR + the 4 combined
+  // grade columns. Fixed 2026-09-04 to actually account for showStatLevel/
+  // showValueVsDemand -- previously hardcoded at a stale 15 that predated
+  // both those props, so the empty-state row's colSpan silently under- or
+  // over-counted (a cosmetic miss: the "No players match" message just
+  // wouldn't span the real table width in those cases).
+  const colCount = 13 + (showTeam ? 1 : 0) + (showStatLevel ? 1 : 0) + (showValueVsDemand ? 3 : 0) + (showProspectCols ? 2 : 0);
 
   return (
     <div>
@@ -202,14 +215,10 @@ export function PlayerTable({ rows, showTeam, showProspectCols, showStatLevel, s
               {th("Role", "role")}
               {showTeam && th("Team", "team")}
               {th("Age", "age")}
-              {th("Cntct", "cntct")}
-              {th("Pow", "pow")}
-              {th("Eye", "eye")}
-              {th("Spd", "speed")}
-              {th("Stf", "stf")}
-              {th("Mov", "mov")}
-              {th("Ctrl", "ctrl")}
-              {th("Stm", "stm")}
+              {/* Our analysis (computed output) first, then the underlying
+                  raw ratings at the end (2026-09-04, Rees's ask) -- the
+                  engine's own conclusions are what you scan first, the
+                  ingredients are there to check if you want to dig in. */}
               {th("Overall", "overall")}
               {th("Potential", "potential")}
               {showStatLevel && <th title="The level this AB/IP/WAR line was earned at -- two players can show the same WAR from very different levels">Level</th>}
@@ -229,6 +238,10 @@ export function PlayerTable({ rows, showTeam, showProspectCols, showStatLevel, s
                   {th("Prospect Rank", "prospect_rank")}
                 </>
               )}
+              {th("Con/Stf", "contactStuff")}
+              {th("Pow/Mov", "powerMovement")}
+              {th("Eye/Ctrl", "eyeControl")}
+              {th("Spd/Stm", "speedStamina")}
             </tr>
           </thead>
           <tbody>
@@ -247,14 +260,6 @@ export function PlayerTable({ rows, showTeam, showProspectCols, showStatLevel, s
                 <td>{r.role ?? "—"}</td>
                 {showTeam && <td>{r.team_abbr ?? "—"}</td>}
                 <td>{r.age ?? "—"}</td>
-                <td style={gradeStyle(r.cntct)}>{fmtInt(r.cntct)}</td>
-                <td style={gradeStyle(r.pow)}>{fmtInt(r.pow)}</td>
-                <td style={gradeStyle(r.eye)}>{fmtInt(r.eye)}</td>
-                <td style={gradeStyle(r.speed)}>{fmtInt(r.speed)}</td>
-                <td style={gradeStyle(r.stf)}>{fmtInt(r.stf)}</td>
-                <td style={gradeStyle(r.mov)}>{fmtInt(r.mov)}</td>
-                <td style={gradeStyle(r.ctrl)}>{fmtInt(r.ctrl)}</td>
-                <td style={gradeStyle(r.stm)}>{fmtInt(r.stm)}</td>
                 <td style={gradeStyle(r.overall)}>{fmt1(r.overall)}</td>
                 <td style={gradeStyle(r.potential)}>{fmt1(r.potential)}</td>
                 {showStatLevel && <td>{r.statLevel ?? "—"}</td>}
@@ -274,6 +279,10 @@ export function PlayerTable({ rows, showTeam, showProspectCols, showStatLevel, s
                     <td>{r.prospect_rank ?? "—"}</td>
                   </>
                 )}
+                <td style={gradeStyle(combined(r, r.cntct, r.stf))}>{fmtInt(combined(r, r.cntct, r.stf))}</td>
+                <td style={gradeStyle(combined(r, r.pow, r.mov))}>{fmtInt(combined(r, r.pow, r.mov))}</td>
+                <td style={gradeStyle(combined(r, r.eye, r.ctrl))}>{fmtInt(combined(r, r.eye, r.ctrl))}</td>
+                <td style={gradeStyle(combined(r, r.speed, r.stm))}>{fmtInt(combined(r, r.speed, r.stm))}</td>
               </tr>
             ))}
             {sortedRows.length === 0 && (
