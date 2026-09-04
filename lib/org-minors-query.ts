@@ -188,6 +188,14 @@ function isPitcherRole(role: string): boolean {
 // risk regardless of count, so they shouldn't render as an ungraded "no
 // color" the way RP -- also min:0 -- still does). 82 lands solidly in the
 // green band without claiming to be leaguewide-elite (100/blue).
+// RP's org/league talent average is special-cased (2026-09-04, see
+// rpQualityPool/rpQualityTeamAverages above) to NOT be a plain top-N of
+// role=RP -- it's the best `topN` arms left after a team's own top-5
+// role=SP rotation is set aside, so a strong 6th-best "SP" still reads as
+// bullpen-quality pitching rather than being excluded by label. `roles:
+// ["RP"]` here still governs the row's staffing COUNT (min/count/countPct),
+// which Rees confirmed should stay untouched -- only the quality columns
+// (orgAvg/leagueAvg/rank) use the new pool.
 const ROLE_HEALTH_ROWS: { label: string; roles: string[]; min: number; topN: number; forcePct?: number }[] = [
   { label: "SP", roles: ["SP"], min: 5, topN: 5 },
   { label: "RP", roles: ["RP"], min: 0, topN: 5 },
@@ -245,6 +253,21 @@ function rankPercentile(rank: number | null, totalTeams: number | null): number 
 function topNAvg(values: number[], n: number): number | null {
   const top = [...values].sort((a, b) => b - a).slice(0, n);
   return top.length > 0 ? top.reduce((a, b) => a + b, 0) / top.length : null;
+}
+
+// RP "quality" pool (2026-09-04, Rees's rule). SP's role label is trustworthy
+// -- a player is labeled RP specifically because he lacks a starter's
+// stamina/repertoire -- so SP quality stays a plain top-5 of role=SP (see
+// the ROLE_HEALTH_ROWS loop below; no special-casing needed for that side).
+// RP quality is deliberately NOT limited to role=RP, though: it's the best 5
+// arms left once a team's top-5 rotation is set aside, wherever they came
+// from. A team's 6th-best "SP"-labeled arm is real bullpen-quality pitching
+// (a long man/spot starter), and scoring RP quality only off role=RP would
+// undercount it just because of a label that describes rotation fitness, not
+// raw stuff.
+function rpQualityPool(spValues: number[], rpValues: number[]): number[] {
+  const spSurplus = [...spValues].sort((a, b) => b - a).slice(5);
+  return [...spSurplus, ...rpValues];
 }
 
 export async function getOrgMinorsPlayers(orgId: number): Promise<{ rows: MinorsPlayerRow[]; teamCounts: TeamPositionCounts[]; roleHealth: RoleHealthRow[] }> {
@@ -416,6 +439,21 @@ export async function getOrgMinorsPlayers(orgId: number): Promise<{ rows: Minors
     return out;
   }
 
+  // League-wide version of rpQualityPool (2026-09-04) -- every team's own
+  // top-`topN` "best arms left after the top-5 rotation" average, one entry
+  // per team, same shape leagueTeamTopNAverages returns for every other row.
+  function rpQualityTeamAverages(level: number, topN: number): { teamId: number; avg: number }[] {
+    const spByTeam = leagueByTeamLevelRole.get(`${level}|SP`) ?? new Map<number, number[]>();
+    const rpByTeam = leagueByTeamLevelRole.get(`${level}|RP`) ?? new Map<number, number[]>();
+    const teamIds = new Set([...spByTeam.keys(), ...rpByTeam.keys()]);
+    const out: { teamId: number; avg: number }[] = [];
+    for (const teamId of teamIds) {
+      const avg = topNAvg(rpQualityPool(spByTeam.get(teamId) ?? [], rpByTeam.get(teamId) ?? []), topN);
+      if (avg !== null) out.push({ teamId, avg });
+    }
+    return out;
+  }
+
   const rows: MinorsPlayerRow[] = players.map((p) => {
     const c = computedById.get(p.id);
     const pos = ratingsPosById.get(p.id) ?? null;
@@ -528,10 +566,22 @@ export async function getOrgMinorsPlayers(orgId: number): Promise<{ rows: Minors
       // and hitter roles -- see ROLE_HEALTH_ROWS), so checking the first
       // entry is enough to decide the metric for the whole row.
       const usesPitching = isPitcherRole(roles[0]);
-      const orgAvg = topNAvg(
-        inRole.map((r) => (usesPitching ? r.overall : r.batting)).filter((v): v is number => v !== null),
-        topN
-      );
+      // RP quality (2026-09-04): see rpQualityPool's comment -- pool this
+      // team's SP surplus (beyond its own top-5 rotation) together with its
+      // actual RP-labeled arms, rather than scoring RP off role=RP alone.
+      const orgAvg = label === "RP"
+        ? topNAvg(
+            rpQualityPool(
+              rows.filter((r) => r.level === level && r.levelLabel !== "Int'l" && r.role === "SP")
+                .map((r) => r.overall).filter((v): v is number => v !== null),
+              inRole.map((r) => r.overall).filter((v): v is number => v !== null)
+            ),
+            topN
+          )
+        : topNAvg(
+            inRole.map((r) => (usesPitching ? r.overall : r.batting)).filter((v): v is number => v !== null),
+            topN
+          );
 
       // League side (2026-08-28) -- every team's own top-`topN` average at
       // this role/level, sorted best-first. Powers both leagueAvg (the
@@ -540,7 +590,7 @@ export async function getOrgMinorsPlayers(orgId: number): Promise<{ rows: Minors
       // one stays a flat leaguewide pool average) -- Rees's call to keep
       // "typical team's roster strength" and "typical individual player"
       // as two separate numbers.
-      const teamAverages = leagueTeamTopNAverages(roles, level, topN);
+      const teamAverages = label === "RP" ? rpQualityTeamAverages(level, topN) : leagueTeamTopNAverages(roles, level, topN);
       const leagueAvg = teamAverages.length > 0 ? teamAverages.reduce((a, b) => a + b.avg, 0) / teamAverages.length : null;
       const sortedTeams = [...teamAverages].sort((a, b) => b.avg - a.avg);
       const okcTeamId = okcTeamIdByLevel.get(level) ?? null;
