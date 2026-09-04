@@ -1,0 +1,26 @@
+Free Agency: level selection now requires a real sample size
+
+Rees's refinement: prefer the highest level played, but only if it clears a
+real minimum (30 PA / 10 IP) -- a 3-PA September call-up shouldn't outrank a
+real, meaningful AAA season just for being labeled MLB. If no level clears
+its floor, fall back to whichever level has the MOST playing time on file
+(the most representative sample), not just "next level down."
+
+- lib/free-agency-query.ts: stints are now grouped by level FIRST (summing
+  same-level multi-stint players correctly, e.g. an in-season same-level
+  trade), then pickBestLevel() walks from highest to lowest level looking
+  for the first one clearing MIN_PA=30 / MIN_IP=10, falling back to the
+  level with the most playing time if none qualify.
+- Added `pa` to the batting query specifically for the threshold check
+  (still displays `ab`, matching the existing table column) -- PA is the
+  correct playing-time measure per Rees's ask, AB alone would undercount
+  walks/HBP.
+
+Verified against two real, opposite scenarios pulled directly from the
+data: 5 free agents with a tiny MLB cup of coffee (2-28 PA) now correctly
+show their real AAA season (317-427 PA) instead of a near-meaningless MLB
+line; 3 free agents with a smaller but qualifying MLB sample (37-122 PA,
+each below a bigger minor-league PA total) correctly still show MLB, since
+30+ PA already clears the floor. Console clean.
+
+Co-Authored-By: Claude Sonnet 5 <noreply@anthropic.com>

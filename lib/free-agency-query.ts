@@ -94,54 +94,87 @@ export async function getFreeAgents(): Promise<FreeAgentsResult> {
     .eq("refresh_run_id", refreshRunId).order("year", { ascending: false }).limit(1).maybeSingle();
   const statSeasonYear = (statYearRow as { year: number } | null)?.year ?? null;
 
+  // Which level's stint counts as "the" stat line (2026-09-04, Rees's ask,
+  // refining the original "always highest level" rule): prefer the highest
+  // level played, but only if it clears a real sample-size floor -- 30 PA
+  // for hitters, 10 IP for pitchers. A 3-PA September call-up shouldn't
+  // outrank a real, meaningful AAA season just for being "MLB". If NO level
+  // clears its floor (a hurt/limited-usage player), fall back to whichever
+  // level has the MOST playing time -- the most representative sample on
+  // file, not an arbitrary tiebreak.
+  const MIN_PA = 30;
+  const MIN_IP = 10;
+  interface LevelAgg { level_id: number; league_id: number | null; playingTime: number; displayStat: number; war: number | null; hasWar: boolean }
+  function pickBestLevel(byLevel: Map<number, LevelAgg>, minPlayingTime: number): LevelAgg | null {
+    const levels = [...byLevel.values()].sort((a, b) => a.level_id - b.level_id); // ascending id = descending real level
+    if (levels.length === 0) return null;
+    return levels.find((l) => l.playingTime >= minPlayingTime)
+      ?? levels.reduce((best, cur) => (cur.playingTime > best.playingTime ? cur : best));
+  }
+
   const warAbIpById = new Map<number, { war: number | null; ab: number | null; ip: number | null; statLevel: string | null }>();
   if (statSeasonYear !== null) {
-    const batData = await fetchByIdsChunked<{ player_id: number; level_id: number; league_id: number | null; ab: number; war: number | null }>(ids, (chunk) =>
-      supabase.from("player_batting_stats_snapshots").select("player_id,level_id,league_id,ab,war")
+    const batData = await fetchByIdsChunked<{ player_id: number; level_id: number; league_id: number | null; pa: number; ab: number; war: number | null }>(ids, (chunk) =>
+      supabase.from("player_batting_stats_snapshots").select("player_id,level_id,league_id,pa,ab,war")
         .eq("refresh_run_id", refreshRunId).eq("year", statSeasonYear).eq("split_id", 1).in("player_id", chunk) as never
     );
     const pitData = await fetchByIdsChunked<{ player_id: number; level_id: number; league_id: number | null; ip: number; war: number | null }>(ids, (chunk) =>
       supabase.from("player_pitching_stats_snapshots").select("player_id,level_id,league_id,ip,war")
         .eq("refresh_run_id", refreshRunId).eq("year", statSeasonYear).eq("split_id", 1).in("player_id", chunk) as never
     );
-    const sumStat = (arr: number[]) => arr.reduce((a, b) => a + b, 0);
 
-    const batByPlayer = new Map<number, { level_id: number; league_id: number | null; ab: number; war: number | null }[]>();
-    batData.forEach((r) => { const arr = batByPlayer.get(r.player_id) ?? []; arr.push(r); batByPlayer.set(r.player_id, arr); });
-    const pitByPlayer = new Map<number, { level_id: number; league_id: number | null; ip: number; war: number | null }[]>();
-    pitData.forEach((r) => { const arr = pitByPlayer.get(r.player_id) ?? []; arr.push(r); pitByPlayer.set(r.player_id, arr); });
+    // Group each player's stints by level FIRST (a same-level in-season
+    // trade produces two stints at the identical level, which must be
+    // summed together, not compared against each other as if they were
+    // different levels).
+    const batLevelsByPlayer = new Map<number, Map<number, LevelAgg>>();
+    batData.forEach((s) => {
+      const byLevel = batLevelsByPlayer.get(s.player_id) ?? new Map<number, LevelAgg>();
+      const agg = byLevel.get(s.level_id) ?? { level_id: s.level_id, league_id: s.league_id, playingTime: 0, displayStat: 0, war: 0, hasWar: false };
+      agg.playingTime += s.pa ?? 0;
+      agg.displayStat += s.ab ?? 0;
+      if (s.war !== null) { agg.war = (agg.war ?? 0) + s.war; agg.hasWar = true; }
+      byLevel.set(s.level_id, agg);
+      batLevelsByPlayer.set(s.player_id, byLevel);
+    });
+    const pitLevelsByPlayer = new Map<number, Map<number, LevelAgg>>();
+    pitData.forEach((s) => {
+      const byLevel = pitLevelsByPlayer.get(s.player_id) ?? new Map<number, LevelAgg>();
+      const agg = byLevel.get(s.level_id) ?? { level_id: s.level_id, league_id: s.league_id, playingTime: 0, displayStat: 0, war: 0, hasWar: false };
+      agg.playingTime += s.ip ?? 0;
+      agg.displayStat += s.ip ?? 0;
+      if (s.war !== null) { agg.war = (agg.war ?? 0) + s.war; agg.hasWar = true; }
+      byLevel.set(s.level_id, agg);
+      pitLevelsByPlayer.set(s.player_id, byLevel);
+    });
 
-    // "Best" stint = numerically lowest level_id = highest level actually
-    // played (a free agent released mid-optioning could have both an MLB
-    // and a AAA stint the same season -- their real last MLB performance is
-    // what matters for "identifying and approaching" them, same reasoning a
-    // real scouting report would use). statLevel labels EXACTLY that stint,
-    // via the shared effectiveLevel()/levelLabel() helpers -- resolves the
-    // level=4 A/A+ ambiguity using that stint's own league_id, not a guess
-    // (confirmed real: player_batting_stats_snapshots.level_id=4 mixes
-    // league_id 203/204 exactly like players.level did, same fix applies).
+    // statLevel labels EXACTLY the chosen level, via the shared
+    // effectiveLevel()/levelLabel() helpers -- resolves the level=4 A/A+
+    // ambiguity using that level's own league_id, not a guess (confirmed
+    // real: player_batting_stats_snapshots.level_id=4 mixes league_id
+    // 203/204 exactly like players.level did, same fix applies here).
     for (const r of rawRows) {
       if (r.ph === "H") {
-        const stints = batByPlayer.get(r.player_id) ?? [];
-        if (stints.length === 0) continue;
-        const bestLevel = Math.min(...stints.map((s) => s.level_id));
-        const atBest = stints.filter((s) => s.level_id === bestLevel);
+        const byLevel = batLevelsByPlayer.get(r.player_id);
+        if (!byLevel) continue;
+        const chosen = pickBestLevel(byLevel, MIN_PA);
+        if (!chosen) continue;
         warAbIpById.set(r.player_id, {
-          war: atBest.some((s) => s.war !== null) ? sumStat(atBest.map((s) => s.war ?? 0)) : null,
-          ab: sumStat(atBest.map((s) => s.ab)),
+          war: chosen.hasWar ? chosen.war : null,
+          ab: chosen.displayStat,
           ip: null,
-          statLevel: levelLabel(effectiveLevel(bestLevel, atBest[0].league_id)),
+          statLevel: levelLabel(effectiveLevel(chosen.level_id, chosen.league_id)),
         });
       } else if (r.ph === "P") {
-        const stints = pitByPlayer.get(r.player_id) ?? [];
-        if (stints.length === 0) continue;
-        const bestLevel = Math.min(...stints.map((s) => s.level_id));
-        const atBest = stints.filter((s) => s.level_id === bestLevel);
+        const byLevel = pitLevelsByPlayer.get(r.player_id);
+        if (!byLevel) continue;
+        const chosen = pickBestLevel(byLevel, MIN_IP);
+        if (!chosen) continue;
         warAbIpById.set(r.player_id, {
-          war: atBest.some((s) => s.war !== null) ? sumStat(atBest.map((s) => s.war ?? 0)) : null,
+          war: chosen.hasWar ? chosen.war : null,
           ab: null,
-          ip: sumStat(atBest.map((s) => s.ip)),
-          statLevel: levelLabel(effectiveLevel(bestLevel, atBest[0].league_id)),
+          ip: chosen.displayStat,
+          statLevel: levelLabel(effectiveLevel(chosen.level_id, chosen.league_id)),
         });
       }
     }
