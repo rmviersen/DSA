@@ -1461,6 +1461,65 @@ export type Database = {
           },
         ]
       }
+      free_agent_demand_imports: {
+        Row: {
+          game_date: string | null
+          id: number
+          imported_at: string
+          row_count: number
+          source_file: string
+        }
+        Insert: {
+          game_date?: string | null
+          id?: never
+          imported_at?: string
+          row_count: number
+          source_file: string
+        }
+        Update: {
+          game_date?: string | null
+          id?: never
+          imported_at?: string
+          row_count?: number
+          source_file?: string
+        }
+        Relationships: []
+      }
+      free_agent_demands: {
+        Row: {
+          created_at: string
+          demand_salary: number | null
+          id: number
+          import_id: number
+          player_id: number
+          sign_difficulty: string | null
+        }
+        Insert: {
+          created_at?: string
+          demand_salary?: number | null
+          id?: never
+          import_id: number
+          player_id: number
+          sign_difficulty?: string | null
+        }
+        Update: {
+          created_at?: string
+          demand_salary?: number | null
+          id?: never
+          import_id?: number
+          player_id?: number
+          sign_difficulty?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "free_agent_demands_import_id_fkey"
+            columns: ["import_id"]
+            isOneToOne: false
+            referencedRelation: "free_agent_demand_imports"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       game_box_scores: {
         Row: {
           away_errors: number | null

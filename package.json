@@ -18,6 +18,7 @@
     "snapshot-players": "tsx scripts/snapshot-players.ts",
     "compute-team-ratings": "tsx scripts/compute-team-ratings.ts",
     "import-draft-pool": "tsx scripts/import-draft-pool.ts",
+    "import-free-agent-demands": "tsx scripts/import-free-agent-demands.ts",
     "scrape-trade-block": "tsx scripts/scrape-trade-block.ts",
     "scrape-trade-history": "tsx scripts/scrape-trade-history.ts",
     "compute-market-rates": "tsx scripts/compute-market-rates.ts",
