@@ -102,6 +102,17 @@ export async function getLatestRoleMultipliers(): Promise<RoleMultiplier[]> {
 // No FK between market_rate_training_contracts and players (gotcha 1 --
 // sibling tables joined by key, not a relationship Supabase can embed), so
 // names are fetched separately and joined in JS.
+//
+// Re-joins to CURRENT player_computed.overall (2026-09-04 fix, same reason
+// as compute-market-rates.ts's own fix) instead of trusting the stored
+// snapshot -- that value freezes at whenever a contract was first scanned
+// clean and goes stale the moment the rating engine's calibration changes
+// (confirmed real after the Sept 3-4 rescale: the same players' stored
+// Overall reads ~15-20 points higher than their current one). Without this,
+// the scatter's dots would sit at the OLD scale while the curve line drawn
+// through them was fit on the NEW one -- a real, visible mismatch, even
+// though the curve itself (fit inside compute-market-rates.ts, not here)
+// was already correct.
 export async function getTrainingContracts(): Promise<TrainingContractPoint[]> {
   const supabase = makeSupabaseClient();
   const { data, error } = await supabase
@@ -111,6 +122,10 @@ export async function getTrainingContracts(): Promise<TrainingContractPoint[]> {
   const rows = data as { player_id: number; overall: number; role: string; player_type: string; aav: number; season_year: number; years: number }[];
   const playerIds = [...new Set(rows.map((r) => r.player_id))];
   const nameById = new Map<number, string>();
+  const currentOverallById = new Map<number, number>();
+  const { data: latestRun } = await supabase
+    .from("player_computed").select("refresh_run_id").order("refresh_run_id", { ascending: false }).limit(1).maybeSingle();
+  const refreshRunId = (latestRun as { refresh_run_id: number } | null)?.refresh_run_id ?? null;
   const CHUNK = 500;
   for (let i = 0; i < playerIds.length; i += CHUNK) {
     const chunk = playerIds.slice(i, i + CHUNK);
@@ -119,11 +134,19 @@ export async function getTrainingContracts(): Promise<TrainingContractPoint[]> {
     for (const p of playerRows as { id: number; first_name: string | null; last_name: string | null }[]) {
       nameById.set(p.id, [p.first_name, p.last_name].filter(Boolean).join(" ") || `Player ${p.id}`);
     }
+    if (refreshRunId !== null) {
+      const { data: computedRows, error: computedErr } = await supabase
+        .from("player_computed").select("player_id, overall").eq("refresh_run_id", refreshRunId).in("player_id", chunk);
+      if (computedErr) throw computedErr;
+      for (const c of computedRows as { player_id: number; overall: number }[]) currentOverallById.set(c.player_id, c.overall);
+    }
   }
-  return rows.map((r) => ({
-    playerId: r.player_id,
-    playerName: nameById.get(r.player_id) ?? `Player ${r.player_id}`,
-    overall: r.overall, role: r.role, playerType: r.player_type as "hitter" | "pitcher",
-    aav: r.aav, seasonYear: r.season_year, years: r.years,
-  }));
+  return rows
+    .filter((r) => currentOverallById.has(r.player_id))
+    .map((r) => ({
+      playerId: r.player_id,
+      playerName: nameById.get(r.player_id) ?? `Player ${r.player_id}`,
+      overall: currentOverallById.get(r.player_id)!, role: r.role, playerType: r.player_type as "hitter" | "pitcher",
+      aav: r.aav, seasonYear: r.season_year, years: r.years,
+    }));
 }

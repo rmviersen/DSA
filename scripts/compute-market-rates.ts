@@ -75,17 +75,56 @@ async function main() {
       `Run scripts/scan-market-contracts.ts first (also runs automatically as part of scripts/refresh.ts).`
     );
   }
-  const clean: TrainingContract[] = training.map((t) => ({ playerId: t.player_id, overall: t.overall, role: t.role, aav: t.aav }));
 
   // Tag the output with the CURRENT latest refresh run -- "when was this fit
   // computed," independent of when any individual training contract was
   // first observed (those can span many past refreshes).
-  console.log("Finding latest refresh run (for tagging this fit)...");
+  console.log("Finding latest refresh run (for tagging this fit and pulling current Overall)...");
   const { data: runRow, error: runErr } = await supabase
     .from("refresh_runs").select("id").order("id", { ascending: false }).limit(1).single();
   if (runErr || !runRow) throw new Error(`No refresh_runs found: ${runErr?.message}`);
   const currentRunId = (runRow as { id: number }).id;
   console.log(`  refresh_run_id ${currentRunId}`);
+
+  // Real bug found and fixed 2026-09-04: this used to fit directly against
+  // market_rate_training_contracts.overall -- a value frozen at whenever
+  // scan-market-contracts.ts first recorded that contract as clean, NEVER
+  // refreshed since (that table is append-only by design). That was silent
+  // and harmless until the Overall rescale/calibration work (2026-09-03/04)
+  // changed what "Overall" even means -- confirmed real: the exact same
+  // players' stored Overall reads ~15-20 points HIGHER than their current
+  // calibrated Overall (e.g. 66.6 stored vs 48.8 current for one real
+  // player). Fitting the curve on that stale scale while every OTHER
+  // consumer (this page's own /free-agency value-vs-demand feature, in
+  // particular) reads current calibrated Overall produced nonsense
+  // "fair value" predictions -- caught because comparing against a real
+  // dollar demand made the mismatch impossible to miss (differences up to
+  // -979%), not because /admin/market-rates' own numbers looked wrong in
+  // isolation. Fixed by re-joining every training contract to its CURRENT
+  // player_computed.overall at fit time instead of trusting the stored
+  // snapshot -- keeps this curve always internally consistent with
+  // whatever the rating engine outputs right now, whenever that changes
+  // again in the future. Same known, already-documented approximation as
+  // before (current Overall, not Overall-at-signing) -- not a new gap.
+  console.log("Re-joining training contracts to CURRENT player_computed.overall (not the stale stored snapshot)...");
+  const trainingIds = training.map((t) => t.player_id);
+  const currentOverallById = new Map<number, number>();
+  for (let i = 0; i < trainingIds.length; i += 500) {
+    const chunk = trainingIds.slice(i, i + 500);
+    const { data, error } = await supabase
+      .from("player_computed").select("player_id, overall")
+      .eq("refresh_run_id", currentRunId).in("player_id", chunk);
+    if (error) throw error;
+    (data as { player_id: number; overall: number }[]).forEach((r) => currentOverallById.set(r.player_id, r.overall));
+  }
+  const missingCurrent = training.filter((t) => !currentOverallById.has(t.player_id));
+  if (missingCurrent.length > 0) {
+    console.warn(`  ${missingCurrent.length} of ${training.length} training contracts have no current player_computed row (retired/removed?) -- excluded from this fit.`);
+  }
+  const clean: TrainingContract[] = training
+    .filter((t) => currentOverallById.has(t.player_id))
+    .map((t) => ({ playerId: t.player_id, overall: currentOverallById.get(t.player_id)!, role: t.role, aav: t.aav }));
+  console.log(`  ${clean.length} contracts with current Overall, fitting against those`);
 
   // League minimum is purely informational here now (classification already
   // happened in scan-market-contracts.ts) -- recomputed fresh from the

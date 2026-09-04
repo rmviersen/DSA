@@ -24,10 +24,15 @@ export default async function FreeAgencyPage() {
             : ""}
           . &quot;Team&quot; shows each player&apos;s last team, not a current roster (free agents have none). &quot;Level&quot;
           shows which level the AB/IP/WAR line was actually earned at — the same WAR number means something very
-          different at MLB vs. AAA.
+          different at MLB vs. AAA. &quot;Demand&quot; is each player&apos;s real AAV ask (manually imported from the
+          game&apos;s own export — run <code>npm run import-free-agent-demands</code> after a fresh export to update
+          it); &quot;Fair Value&quot; is what the market-rate curve says that talent level is actually worth; &quot;Value
+          Gap&quot; is the difference as a % of fair value — positive (green) means he&apos;s asking for less than
+          he&apos;s worth, negative (red) means he&apos;s asking for more. Blank Demand means no ask has been
+          generated yet for that player.
         </p>
       </header>
-      <PlayerTable rows={rows} showTeam showProspectCols={false} showStatLevel />
+      <PlayerTable rows={rows} showTeam showProspectCols={false} showStatLevel showValueVsDemand />
     </>
   );
 }

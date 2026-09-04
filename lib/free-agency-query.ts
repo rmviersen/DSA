@@ -2,6 +2,8 @@ import { fetchComputedPlayers, fetchByIdsChunked, latestRefreshRunId } from "./q
 import type { PlayerRow } from "./queries";
 import { makeSupabaseClient } from "./supabase-client";
 import { effectiveLevel, levelLabel } from "./display-helpers";
+import { getLatestMarketRateCurves, getLatestRoleMultipliers } from "./market-rate-query";
+import { playerTypeForRole } from "./contract-classification";
 
 // Data layer for /free-agency (2026-09-04, Rees's ask). Kept in its own
 // file, same reasoning as every other page-specific query module this
@@ -180,10 +182,47 @@ export async function getFreeAgents(): Promise<FreeAgentsResult> {
     }
   }
 
+  // Value vs. demand (2026-09-04, Rees's ask): DEM (from the manual OOTP
+  // export, see free_agent_demands) is a real AAV ask, confirmed directly
+  // with Rees -- "some players will demand that flat, some players will
+  // want a different schedule [but] the DEM matches with the AAV of the
+  // contract... For our purposes the AAV should work as we haven't modeled
+  // out multi-year value and regression potentials." That means it compares
+  // directly against the existing market-rate curve (also an AAV
+  // prediction, /admin/market-rates) with no conversion needed -- no new
+  // valuation model required for this piece.
+  const { data: latestDemandImport } = await supabase
+    .from("free_agent_demand_imports").select("id").order("id", { ascending: false }).limit(1).maybeSingle();
+  const demandImportId = (latestDemandImport as { id: number } | null)?.id ?? null;
+  const demandByPlayer = new Map<number, number>();
+  if (demandImportId !== null) {
+    const demandRows = await fetchByIdsChunked<{ player_id: number; demand_salary: number | null }>(ids, (chunk) =>
+      supabase.from("free_agent_demands").select("player_id,demand_salary")
+        .eq("import_id", demandImportId).in("player_id", chunk) as never
+    );
+    demandRows.forEach((d) => { if (d.demand_salary !== null) demandByPlayer.set(d.player_id, d.demand_salary); });
+  }
+
+  const [curves, roleMultipliers] = await Promise.all([getLatestMarketRateCurves(), getLatestRoleMultipliers()]);
+  const curveByType = new Map(curves.map((c) => [c.playerType, c]));
+  const multiplierByRole = new Map(roleMultipliers.map((m) => [m.role, m.finalMultiplier]));
+  function fairValueAav(overall: number, role: string | null): number | null {
+    if (role === null) return null;
+    const curve = curveByType.get(playerTypeForRole(role));
+    if (!curve) return null;
+    const base = Math.exp(curve.intercept + curve.slope * overall);
+    return base * (multiplierByRole.get(role) ?? 1);
+  }
+
   const rows: PlayerRow[] = rawRows.map((r) => {
     const lastTeamId = lastTeamIdByPlayer.get(r.player_id);
     const team = lastTeamId != null ? teamById.get(lastTeamId) : undefined;
     const wai = warAbIpById.get(r.player_id);
+    const demandSalary = demandByPlayer.get(r.player_id) ?? null;
+    const fairValue = fairValueAav(r.overall, r.role);
+    const valueGapPct = demandSalary !== null && fairValue !== null && fairValue > 0
+      ? ((fairValue - demandSalary) / fairValue) * 100
+      : null;
     return {
       ...r,
       team_name: team?.name ?? null,
@@ -193,6 +232,9 @@ export async function getFreeAgents(): Promise<FreeAgentsResult> {
       ab: wai?.ab ?? r.ab,
       ip: wai?.ip ?? r.ip,
       statLevel: wai?.statLevel ?? r.statLevel,
+      demandSalary,
+      fairValueAav: fairValue,
+      valueGapPct,
     };
   });
 

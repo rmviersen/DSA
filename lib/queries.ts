@@ -236,6 +236,18 @@ export interface PlayerRow extends RatingsSlice {
   // majors and the other in AAA, which is a completely different signal.
   // Null whenever war/ab/ip are also null (nothing to label).
   statLevel: string | null;
+  // Free-agent value-vs-demand (2026-09-04, Rees's ask) -- null for every
+  // consumer except /free-agency, which is the only place any of these
+  // three actually gets populated (a rostered player has no demand to
+  // compare against). demandSalary is the real AAV a free agent is asking
+  // for (from the manual OOTP export -- see free_agent_demands); fairValueAav
+  // is what the existing market-rate curve says that talent level/role is
+  // actually worth; valueGapPct = (fairValueAav - demandSalary) / fairValueAav
+  // * 100 -- positive means he's asking for LESS than he's worth (a bargain),
+  // negative means he's asking for MORE (an overpay).
+  demandSalary: number | null;
+  fairValueAav: number | null;
+  valueGapPct: number | null;
   draft_year: number | null;
   draft_round: number | null;
   draft_overall_pick: number | null;
@@ -468,6 +480,7 @@ export async function fetchComputedPlayers(opts: { orgId?: number; prospectsOnly
         prospect_rank: c.prospect_rank, org_rank: c.org_rank, prospect_org_rank: c.prospect_org_rank,
         prospect_role_rank: c.prospect_role_rank, role: c.role, ph: c.ph,
         war: wai?.war ?? null, ab: wai?.ab ?? null, ip: wai?.ip ?? null, statLevel: wai?.statLevel ?? null,
+        demandSalary: null as number | null, fairValueAav: null as number | null, valueGapPct: null as number | null,
         // StatsPlus returns literal 0, not null, for players who were never
         // drafted (international signees, etc.) -- confirmed 2026-08-19.
         // Normalize to null here so every consumer of PlayerRow gets a

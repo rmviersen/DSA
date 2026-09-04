@@ -8,7 +8,7 @@ import type { PlayerRow } from "../../lib/queries";
 // would crash the browser bundle if a "use client" component pulled in even
 // one unrelated value export from that file. See display-helpers.ts's top
 // comment (and ProspectTable.tsx, which hit this for real first).
-import { gradeStyle, statsPlusPlayerUrl } from "../../lib/display-helpers";
+import { gradeStyle, percentileStyle, statsPlusPlayerUrl } from "../../lib/display-helpers";
 
 // Raw/full precision throughout (2026-08-27, Rees's spec) -- both /players
 // and /draft (the two pages sharing this component) are admin-only, not on
@@ -17,6 +17,20 @@ import { gradeStyle, statsPlusPlayerUrl } from "../../lib/display-helpers";
 // NOT apply here -- same reasoning /org-minors already uses for its own org.
 const fmt1 = (n: number | null) => (n === null || n === undefined ? "—" : n.toFixed(1));
 const fmtInt = (n: number | null) => (n === null || n === undefined ? "—" : Math.round(n));
+const fmtMoney = (n: number | null) => {
+  if (n === null || n === undefined) return "—";
+  if (Math.abs(n) >= 1_000_000) return `$${(n / 1_000_000).toFixed(1)}M`;
+  if (Math.abs(n) >= 1_000) return `$${(n / 1_000).toFixed(0)}K`;
+  return `$${n.toFixed(0)}`;
+};
+// Value-gap color (2026-09-04, Rees's ask) reuses percentileStyle -- the
+// same red/orange/yellow/green/blue "how good is this, relatively" scale
+// already used for Role Health's RAG comparisons -- rather than inventing a
+// new color language for this one column. valueGapPct (positive = asking
+// for LESS than he's worth, a bargain; negative = asking for MORE, an
+// overpay) isn't itself a 0-100 percentile, so it's re-anchored here: 0%
+// gap (fair value) -> 50 (neutral yellow), +/-50% gap -> the scale's ends.
+const valueGapStyle = (pct: number | null) => (pct === null ? undefined : percentileStyle(Math.max(0, Math.min(100, 50 + pct))));
 
 // Same fixed display order as ProspectTable's Role filter (2026-08-20 spec) --
 // roughly pitchers first, then hitter roles by defensive spectrum.
@@ -25,9 +39,10 @@ const ROLE_ORDER = ["SP", "RP", "C", "1B", "INF", "SS", "COF", "CF", "DH"];
 type SortKey =
   | "name" | "pos" | "role" | "team" | "age"
   | "cntct" | "pow" | "eye" | "speed" | "stf" | "mov" | "ctrl" | "stm"
-  | "overall" | "potential" | "ab" | "ip" | "war" | "prospect_potential" | "prospect_rank";
+  | "overall" | "potential" | "ab" | "ip" | "war" | "prospect_potential" | "prospect_rank"
+  | "demand" | "fairValue" | "valueGap";
 
-export function PlayerTable({ rows, showTeam, showProspectCols, showStatLevel }: { rows: PlayerRow[]; showTeam: boolean; showProspectCols: boolean; showStatLevel?: boolean }) {
+export function PlayerTable({ rows, showTeam, showProspectCols, showStatLevel, showValueVsDemand }: { rows: PlayerRow[]; showTeam: boolean; showProspectCols: boolean; showStatLevel?: boolean; showValueVsDemand?: boolean }) {
   const [phFilter, setPhFilter] = useState<"all" | "H" | "P">("all");
   const [roleFilter, setRoleFilter] = useState<Set<string>>(new Set());
   const [sortKey, setSortKey] = useState<SortKey>("overall");
@@ -103,6 +118,12 @@ export function PlayerTable({ rows, showTeam, showProspectCols, showStatLevel }:
         // on ascending).
         case "prospect_potential": av = a.prospect_potential ?? -1; bv = b.prospect_potential ?? -1; break;
         case "prospect_rank": av = a.prospect_rank ?? 999999; bv = b.prospect_rank ?? 999999; break;
+        case "demand": av = a.demandSalary ?? -1; bv = b.demandSalary ?? -1; break;
+        case "fairValue": av = a.fairValueAav ?? -1; bv = b.fairValueAav ?? -1; break;
+        // Missing valueGapPct (no demand or no fair-value estimate) sorts to
+        // the bottom regardless of direction -- there's no real "unknown is
+        // better/worse" answer, so it shouldn't compete with real values.
+        case "valueGap": av = a.valueGapPct ?? -999; bv = b.valueGapPct ?? -999; break;
       }
       if (av < bv) return -1 * dir;
       if (av > bv) return 1 * dir;
@@ -195,6 +216,13 @@ export function PlayerTable({ rows, showTeam, showProspectCols, showStatLevel }:
               {th("AB", "ab")}
               {th("IP", "ip")}
               {th("WAR", "war")}
+              {showValueVsDemand && (
+                <>
+                  {th("Demand (AAV)", "demand")}
+                  {th("Fair Value", "fairValue")}
+                  {th("Value Gap", "valueGap")}
+                </>
+              )}
               {showProspectCols && (
                 <>
                   {th("Prospect Pot.", "prospect_potential")}
@@ -233,6 +261,13 @@ export function PlayerTable({ rows, showTeam, showProspectCols, showStatLevel }:
                 <td>{fmtInt(r.ab)}</td>
                 <td>{fmt1(r.ip)}</td>
                 <td>{fmt1(r.war)}</td>
+                {showValueVsDemand && (
+                  <>
+                    <td>{fmtMoney(r.demandSalary)}</td>
+                    <td>{fmtMoney(r.fairValueAav)}</td>
+                    <td style={valueGapStyle(r.valueGapPct)}>{r.valueGapPct === null ? "—" : `${r.valueGapPct > 0 ? "+" : ""}${r.valueGapPct.toFixed(0)}%`}</td>
+                  </>
+                )}
                 {showProspectCols && (
                   <>
                     <td style={gradeStyle(r.prospect_potential)}>{fmt1(r.prospect_potential)}</td>
