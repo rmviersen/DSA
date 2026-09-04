@@ -111,6 +111,14 @@ function pickRoleDepth(universe: DepthCandidate[], rowLabel: string, rowRoles: s
 const CARD_ROWS = ROLE_HEALTH_ROWS.filter((r) => r.label !== "P Tot" && r.label !== "H Tot");
 const SP_TOP_N = ROLE_HEALTH_ROWS.find((r) => r.label === "SP")!.topN;
 
+// Depth-chart DISPLAY length vs. rating EVALUATION count (2026-09-04, Rees's
+// ask): the rating still only averages a role's own topN (e.g. SP/RP
+// evaluate on 5), but the list shown under it goes twice as deep (10) so you
+// can see who's just outside the number, not only who's inside it. Purely a
+// display slice -- `topNAvg` below always re-derives the rating from just
+// the real topN regardless of how many extra candidates are handed to it.
+const DEPTH_DISPLAY_MULTIPLIER = 2;
+
 export async function getMyRosterAnalysis(orgId: number): Promise<RoleCard[]> {
   const [{ rows, roleHealth }, refreshRunId] = await Promise.all([
     getOrgMinorsPlayers(orgId),
@@ -202,10 +210,13 @@ export async function getMyRosterAnalysis(orgId: number): Promise<RoleCard[]> {
       rank: currentCell?.rank ?? null,
       totalTeams: currentCell?.totalTeams ?? null,
       rankPct: currentCell?.rankPct ?? null,
-      depthChart: pickRoleDepth(currentUniverse, label, roles, SP_TOP_N, topN),
+      depthChart: pickRoleDepth(currentUniverse, label, roles, SP_TOP_N, topN * DEPTH_DISPLAY_MULTIPLIER),
     };
 
-    const futureDepth = pickRoleDepth(ownFuturePool, label, roles, SP_TOP_N, topN);
+    // futureDepth is the longer DISPLAY list; futureRating still evaluates
+    // only the real topN off the front of it (pickRoleDepth returns players
+    // already sorted best-first, and topNAvg re-sorts/slices to topN anyway).
+    const futureDepth = pickRoleDepth(ownFuturePool, label, roles, SP_TOP_N, topN * DEPTH_DISPLAY_MULTIPLIER);
     const futureRating = topNAvg(futureDepth.map((d) => d.metric as number), topN);
 
     const leagueFutureAverages: { orgId: number; avg: number }[] = [];

@@ -17,17 +17,29 @@ function rankLabel(rank: number | null, totalTeams: number | null): string {
   return `${rank}/${totalTeams}`;
 }
 
+// table-layout: fixed + an explicit colgroup (2026-09-04 fix) -- without
+// this, the name column's `nowrap` let a long player name push the table's
+// natural width past its flex container, which a plain `1fr`/minWidth:0 flex
+// item can't stop (that only bounds the *container*, not a table's own
+// min-content width). Fixed layout respects the container no matter what;
+// the name cell truncates with an ellipsis instead of overflowing.
 function DepthList({ rows, showLevel }: { rows: RosterDepthPlayer[]; showLevel: boolean }) {
   if (rows.length === 0) return <p style={{ margin: "4px 0", fontSize: "0.8125rem", color: "var(--color-text-muted)" }}>No players</p>;
   return (
-    <table style={{ width: "100%", borderCollapse: "collapse", fontSize: "0.8125rem" }}>
+    <table style={{ width: "100%", tableLayout: "fixed", borderCollapse: "collapse", fontSize: "0.8125rem" }}>
+      <colgroup>
+        <col style={{ width: showLevel ? "46%" : "70%" }} />
+        {showLevel ? <col style={{ width: "18%" }} /> : <col style={{ width: "15%" }} />}
+        {showLevel && <col style={{ width: "21%" }} />}
+        <col style={{ width: "15%" }} />
+      </colgroup>
       <tbody>
         {rows.map((p) => (
           <tr key={p.playerId}>
-            <td style={{ padding: "2px 4px 2px 0", whiteSpace: "nowrap" }}>{p.name}</td>
-            {showLevel && <td style={{ padding: "2px 4px", color: "var(--color-text-muted)", whiteSpace: "nowrap" }}>{p.levelLabel}</td>}
+            <td style={{ padding: "2px 4px 2px 0", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }} title={p.name}>{p.name}</td>
+            {showLevel && <td style={{ padding: "2px 4px", color: "var(--color-text-muted)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{p.levelLabel}</td>}
             {!showLevel && <td style={{ padding: "2px 4px", color: "var(--color-text-muted)" }}>{p.age ?? "—"}</td>}
-            {showLevel && <td style={{ padding: "2px 4px", color: "var(--color-text-muted)" }}>{p.eta !== null && p.eta !== undefined ? `ETA ${p.eta}` : ""}</td>}
+            {showLevel && <td style={{ padding: "2px 4px", color: "var(--color-text-muted)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{p.eta !== null && p.eta !== undefined ? `ETA ${p.eta}` : ""}</td>}
             <td style={{ padding: "2px 0 2px 4px", textAlign: "right", fontWeight: 600 }}>{fmt1(p.metric)}</td>
           </tr>
         ))}
@@ -61,10 +73,7 @@ function SideColumn({ title, side, showLevel }: { title: string; side: RoleSide;
 
 export default function RoleCards({ cards }: { cards: RoleCard[] }) {
   return (
-    <div
-      className="my-roster-page"
-      style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(360px, 1fr))", gap: 16 }}
-    >
+    <div className="my-roster-page" style={{ display: "flex", flexDirection: "column", gap: 16 }}>
       {cards.map((card) => (
         <div
           key={card.label}
