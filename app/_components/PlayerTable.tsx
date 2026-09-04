@@ -27,7 +27,7 @@ type SortKey =
   | "cntct" | "pow" | "eye" | "speed" | "stf" | "mov" | "ctrl" | "stm"
   | "overall" | "potential" | "ab" | "ip" | "war" | "prospect_potential" | "prospect_rank";
 
-export function PlayerTable({ rows, showTeam, showProspectCols }: { rows: PlayerRow[]; showTeam: boolean; showProspectCols: boolean }) {
+export function PlayerTable({ rows, showTeam, showProspectCols, showStatLevel }: { rows: PlayerRow[]; showTeam: boolean; showProspectCols: boolean; showStatLevel?: boolean }) {
   const [phFilter, setPhFilter] = useState<"all" | "H" | "P">("all");
   const [roleFilter, setRoleFilter] = useState<Set<string>>(new Set());
   const [sortKey, setSortKey] = useState<SortKey>("overall");
@@ -191,6 +191,7 @@ export function PlayerTable({ rows, showTeam, showProspectCols }: { rows: Player
               {th("Stm", "stm")}
               {th("Overall", "overall")}
               {th("Potential", "potential")}
+              {showStatLevel && <th title="The level this AB/IP/WAR line was earned at -- two players can show the same WAR from very different levels">Level</th>}
               {th("AB", "ab")}
               {th("IP", "ip")}
               {th("WAR", "war")}
@@ -228,6 +229,7 @@ export function PlayerTable({ rows, showTeam, showProspectCols }: { rows: Player
                 <td style={gradeStyle(r.stm)}>{fmtInt(r.stm)}</td>
                 <td style={gradeStyle(r.overall)}>{fmt1(r.overall)}</td>
                 <td style={gradeStyle(r.potential)}>{fmt1(r.potential)}</td>
+                {showStatLevel && <td>{r.statLevel ?? "—"}</td>}
                 <td>{fmtInt(r.ab)}</td>
                 <td>{fmt1(r.ip)}</td>
                 <td>{fmt1(r.war)}</td>

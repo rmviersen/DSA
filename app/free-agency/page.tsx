@@ -22,10 +22,12 @@ export default async function FreeAgencyPage() {
           {missingRatings > 0
             ? ` (${missingRatings} more are between team assignments this refresh and don't have ratings yet)`
             : ""}
-          . &quot;Team&quot; shows each player&apos;s last team, not a current roster (free agents have none).
+          . &quot;Team&quot; shows each player&apos;s last team, not a current roster (free agents have none). &quot;Level&quot;
+          shows which level the AB/IP/WAR line was actually earned at — the same WAR number means something very
+          different at MLB vs. AAA.
         </p>
       </header>
-      <PlayerTable rows={rows} showTeam showProspectCols={false} />
+      <PlayerTable rows={rows} showTeam showProspectCols={false} showStatLevel />
     </>
   );
 }

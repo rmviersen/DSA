@@ -231,6 +231,11 @@ export interface PlayerRow extends RatingsSlice {
   war: number | null;
   ab: number | null;
   ip: number | null;
+  // Which level war/ab/ip actually came from (2026-09-04, Rees's ask) --
+  // two players can show the same WAR number while one earned it in the
+  // majors and the other in AAA, which is a completely different signal.
+  // Null whenever war/ab/ip are also null (nothing to label).
+  statLevel: string | null;
   draft_year: number | null;
   draft_round: number | null;
   draft_overall_pick: number | null;
@@ -339,9 +344,9 @@ export async function fetchComputedPlayers(opts: { orgId?: number; prospectsOnly
 
   // Now scoped to just the (at most opts.limit + 50) winning IDs -- fits in
   // one page/chunk in every realistic case, no more per-500 looping needed.
-  const players = await fetchAll<{ id: number; first_name: string; last_name: string; age: number | null; organization_id: number | null; team_id: number | null; level: number | null; draft_year: number | null; draft_round: number | null; draft_overall_pick: number | null }>(
+  const players = await fetchAll<{ id: number; first_name: string; last_name: string; age: number | null; organization_id: number | null; team_id: number | null; level: number | null; league_id: number | null; draft_year: number | null; draft_round: number | null; draft_overall_pick: number | null }>(
     (from, to) =>
-      supabase.from("players").select("id,first_name,last_name,age,organization_id,team_id,level,draft_year,draft_round,draft_overall_pick").in("id", relevantIds).order("id").range(from, to) as never
+      supabase.from("players").select("id,first_name,last_name,age,organization_id,team_id,level,league_id,draft_year,draft_round,draft_overall_pick").in("id", relevantIds).order("id").range(from, to) as never
   );
   const playerById = new Map(players.map((p) => [p.id, p]));
 
@@ -383,7 +388,7 @@ export async function fetchComputedPlayers(opts: { orgId?: number; prospectsOnly
     .eq("refresh_run_id", refreshRunId).order("year", { ascending: false }).limit(1).maybeSingle();
   const statSeasonYear = (statYearRow as { year: number } | null)?.year ?? null;
 
-  const warAbIpById = new Map<number, { war: number | null; ab: number | null; ip: number | null }>();
+  const warAbIpById = new Map<number, { war: number | null; ab: number | null; ip: number | null; statLevel: string | null }>();
   if (statSeasonYear !== null) {
     const batData = await fetchByIdsChunked<{ player_id: number; level_id: number; ab: number; war: number | null }>(relevantIds, (chunk) =>
       supabase
@@ -415,6 +420,10 @@ export async function fetchComputedPlayers(opts: { orgId?: number; prospectsOnly
     for (const c of computed) {
       const p = playerById.get(c.player_id);
       if (!p || p.level === null) continue;
+      // Same label the player themself would show elsewhere (e.g. org-minors,
+      // player detail) -- effectiveLevel resolves the level=4 A/A+ ambiguity
+      // using this player's own league_id, not a guess.
+      const statLevel = levelLabel(effectiveLevel(p.level, p.league_id));
       // A player can have more than one stint AT their current level in a
       // season (optioned/recalled, etc.) -- sum across matching stints
       // rather than taking the first, same fix as HANDOFF gotcha 15.
@@ -425,6 +434,7 @@ export async function fetchComputedPlayers(opts: { orgId?: number; prospectsOnly
             war: stints.some((x) => x.war !== null) ? sumStat(stints.map((x) => x.war ?? 0)) : null,
             ab: sumStat(stints.map((x) => x.ab)),
             ip: null,
+            statLevel,
           });
         }
       } else if (c.ph === "P") {
@@ -434,6 +444,7 @@ export async function fetchComputedPlayers(opts: { orgId?: number; prospectsOnly
             war: stints.some((x) => x.war !== null) ? sumStat(stints.map((x) => x.war ?? 0)) : null,
             ab: null,
             ip: sumStat(stints.map((x) => x.ip)),
+            statLevel,
           });
         }
       }
@@ -456,7 +467,7 @@ export async function fetchComputedPlayers(opts: { orgId?: number; prospectsOnly
         overall: c.overall, potential: c.potential, prospect_potential: c.prospect_potential,
         prospect_rank: c.prospect_rank, org_rank: c.org_rank, prospect_org_rank: c.prospect_org_rank,
         prospect_role_rank: c.prospect_role_rank, role: c.role, ph: c.ph,
-        war: wai?.war ?? null, ab: wai?.ab ?? null, ip: wai?.ip ?? null,
+        war: wai?.war ?? null, ab: wai?.ab ?? null, ip: wai?.ip ?? null, statLevel: wai?.statLevel ?? null,
         // StatsPlus returns literal 0, not null, for players who were never
         // drafted (international signees, etc.) -- confirmed 2026-08-19.
         // Normalize to null here so every consumer of PlayerRow gets a

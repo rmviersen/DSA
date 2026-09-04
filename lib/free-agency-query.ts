@@ -1,6 +1,7 @@
 import { fetchComputedPlayers, fetchByIdsChunked, latestRefreshRunId } from "./queries";
 import type { PlayerRow } from "./queries";
 import { makeSupabaseClient } from "./supabase-client";
+import { effectiveLevel, levelLabel } from "./display-helpers";
 
 // Data layer for /free-agency (2026-09-04, Rees's ask). Kept in its own
 // file, same reasoning as every other page-specific query module this
@@ -93,23 +94,32 @@ export async function getFreeAgents(): Promise<FreeAgentsResult> {
     .eq("refresh_run_id", refreshRunId).order("year", { ascending: false }).limit(1).maybeSingle();
   const statSeasonYear = (statYearRow as { year: number } | null)?.year ?? null;
 
-  const warAbIpById = new Map<number, { war: number | null; ab: number | null; ip: number | null }>();
+  const warAbIpById = new Map<number, { war: number | null; ab: number | null; ip: number | null; statLevel: string | null }>();
   if (statSeasonYear !== null) {
-    const batData = await fetchByIdsChunked<{ player_id: number; level_id: number; ab: number; war: number | null }>(ids, (chunk) =>
-      supabase.from("player_batting_stats_snapshots").select("player_id,level_id,ab,war")
+    const batData = await fetchByIdsChunked<{ player_id: number; level_id: number; league_id: number | null; ab: number; war: number | null }>(ids, (chunk) =>
+      supabase.from("player_batting_stats_snapshots").select("player_id,level_id,league_id,ab,war")
         .eq("refresh_run_id", refreshRunId).eq("year", statSeasonYear).eq("split_id", 1).in("player_id", chunk) as never
     );
-    const pitData = await fetchByIdsChunked<{ player_id: number; level_id: number; ip: number; war: number | null }>(ids, (chunk) =>
-      supabase.from("player_pitching_stats_snapshots").select("player_id,level_id,ip,war")
+    const pitData = await fetchByIdsChunked<{ player_id: number; level_id: number; league_id: number | null; ip: number; war: number | null }>(ids, (chunk) =>
+      supabase.from("player_pitching_stats_snapshots").select("player_id,level_id,league_id,ip,war")
         .eq("refresh_run_id", refreshRunId).eq("year", statSeasonYear).eq("split_id", 1).in("player_id", chunk) as never
     );
     const sumStat = (arr: number[]) => arr.reduce((a, b) => a + b, 0);
 
-    const batByPlayer = new Map<number, { level_id: number; ab: number; war: number | null }[]>();
+    const batByPlayer = new Map<number, { level_id: number; league_id: number | null; ab: number; war: number | null }[]>();
     batData.forEach((r) => { const arr = batByPlayer.get(r.player_id) ?? []; arr.push(r); batByPlayer.set(r.player_id, arr); });
-    const pitByPlayer = new Map<number, { level_id: number; ip: number; war: number | null }[]>();
+    const pitByPlayer = new Map<number, { level_id: number; league_id: number | null; ip: number; war: number | null }[]>();
     pitData.forEach((r) => { const arr = pitByPlayer.get(r.player_id) ?? []; arr.push(r); pitByPlayer.set(r.player_id, arr); });
 
+    // "Best" stint = numerically lowest level_id = highest level actually
+    // played (a free agent released mid-optioning could have both an MLB
+    // and a AAA stint the same season -- their real last MLB performance is
+    // what matters for "identifying and approaching" them, same reasoning a
+    // real scouting report would use). statLevel labels EXACTLY that stint,
+    // via the shared effectiveLevel()/levelLabel() helpers -- resolves the
+    // level=4 A/A+ ambiguity using that stint's own league_id, not a guess
+    // (confirmed real: player_batting_stats_snapshots.level_id=4 mixes
+    // league_id 203/204 exactly like players.level did, same fix applies).
     for (const r of rawRows) {
       if (r.ph === "H") {
         const stints = batByPlayer.get(r.player_id) ?? [];
@@ -120,6 +130,7 @@ export async function getFreeAgents(): Promise<FreeAgentsResult> {
           war: atBest.some((s) => s.war !== null) ? sumStat(atBest.map((s) => s.war ?? 0)) : null,
           ab: sumStat(atBest.map((s) => s.ab)),
           ip: null,
+          statLevel: levelLabel(effectiveLevel(bestLevel, atBest[0].league_id)),
         });
       } else if (r.ph === "P") {
         const stints = pitByPlayer.get(r.player_id) ?? [];
@@ -130,6 +141,7 @@ export async function getFreeAgents(): Promise<FreeAgentsResult> {
           war: atBest.some((s) => s.war !== null) ? sumStat(atBest.map((s) => s.war ?? 0)) : null,
           ab: null,
           ip: sumStat(atBest.map((s) => s.ip)),
+          statLevel: levelLabel(effectiveLevel(bestLevel, atBest[0].league_id)),
         });
       }
     }
@@ -147,6 +159,7 @@ export async function getFreeAgents(): Promise<FreeAgentsResult> {
       war: wai?.war ?? r.war,
       ab: wai?.ab ?? r.ab,
       ip: wai?.ip ?? r.ip,
+      statLevel: wai?.statLevel ?? r.statLevel,
     };
   });
 
