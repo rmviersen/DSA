@@ -164,7 +164,14 @@ export function PlayerTable({ rows, showTeam, showProspectCols, showStatLevel, s
   const colCount = 13 + (showTeam ? 1 : 0) + (showStatLevel ? 1 : 0) + (showValueVsDemand ? 3 : 0) + (showProspectCols ? 2 : 0);
 
   return (
-    <div>
+    // player-table-page marker (2026-09-04, Rees's ask) -- widens .site-main
+    // for every page using this table (see globals.css's .site-main:has()
+    // rule), same established mechanism as the org-minors/prospects-report
+    // page-specific width overrides. Measured real: at the site's normal
+    // 1200px, /free-agency's full column set (18 with Level + value-vs-
+    // demand) already renders at ~1270px, already forcing .table-wrap's
+    // horizontal-scroll fallback -- this removes that.
+    <div className="player-table-page">
       <div className="filter-bar" style={{ flexWrap: "wrap" }}>
         {(["all", "H", "P"] as const).map((f) => (
           <button

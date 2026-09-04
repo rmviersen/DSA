@@ -463,6 +463,20 @@ body {
   max-width: 1270px;
 }
 
+/* PlayerTable pages (/players, /draft, /free-agency) need more horizontal
+   room than the site's normal 1200px (2026-09-04, Rees's ask) -- measured
+   real: /free-agency's full column set (Level + value-vs-demand columns)
+   already renders at ~1270px at 1200px available, already forcing
+   .table-wrap's horizontal-scroll fallback. Same .site-main:has() mechanism
+   as org-minors/prospects-report above, scoped via the player-table-page
+   marker class PlayerTable.tsx renders (so /players and /draft, which use
+   fewer columns and don't strictly need it, get the same wider room too --
+   harmless, and keeps all three pages visually consistent rather than each
+   settling at its own width). */
+.site-main:has(.player-table-page) {
+  max-width: 1500px;
+}
+
 .page-header {
   margin-bottom: 1.25rem;
 }
