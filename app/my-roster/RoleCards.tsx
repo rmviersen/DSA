@@ -1,3 +1,4 @@
+import type { CSSProperties } from "react";
 import type { RoleCard, RoleSide, RosterDepthPlayer } from "@/lib/my-roster-query";
 import { percentileStyle } from "@/lib/display-helpers";
 
@@ -17,29 +18,90 @@ function rankLabel(rank: number | null, totalTeams: number | null): string {
   return `${rank}/${totalTeams}`;
 }
 
+// Same formatting convention as PlayerTable.tsx's fmtMoney -- kept as its
+// own local copy rather than a shared import, matching that file's existing
+// precedent of each component owning its own small display helpers.
+function fmtMoney(n: number | null | undefined): string {
+  if (n === null || n === undefined) return "—";
+  if (Math.abs(n) >= 1_000_000) return `$${(n / 1_000_000).toFixed(1)}M`;
+  if (Math.abs(n) >= 1_000) return `$${(n / 1_000).toFixed(0)}K`;
+  return `$${n.toFixed(0)}`;
+}
+
+type Variant = "current" | "future";
+
 // table-layout: fixed + an explicit colgroup (2026-09-04 fix) -- without
 // this, the name column's `nowrap` let a long player name push the table's
 // natural width past its flex container, which a plain `1fr`/minWidth:0 flex
 // item can't stop (that only bounds the *container*, not a table's own
 // min-content width). Fixed layout respects the container no matter what;
 // the name cell truncates with an ellipsis instead of overflowing.
-function DepthList({ rows, showLevel }: { rows: RosterDepthPlayer[]; showLevel: boolean }) {
+//
+// Current shows Contract (AAV) + Control (years remaining) instead of a
+// bare age (2026-09-04, Rees's ask) -- both come from the same
+// yearsOfControl()/computeAAV() logic already used elsewhere (trade-value
+// composite, contract classification), just displayed here rather than
+// used as a filter. Future doesn't show these -- a pipeline player's real
+// "control" is already the filter that got him into this pool at all (see
+// my-roster-query.ts), not a fresh per-player number worth repeating here.
+function DepthList({ rows, variant }: { rows: RosterDepthPlayer[]; variant: Variant }) {
   if (rows.length === 0) return <p style={{ margin: "4px 0", fontSize: "0.8125rem", color: "var(--color-text-muted)" }}>No players</p>;
+  const isCurrent = variant === "current";
+  const thStyle: CSSProperties = { padding: "0 4px 2px 0", fontWeight: 600, fontSize: "0.6875rem", color: "var(--color-text-muted)", textAlign: "left" };
   return (
     <table style={{ width: "100%", tableLayout: "fixed", borderCollapse: "collapse", fontSize: "0.8125rem" }}>
       <colgroup>
-        <col style={{ width: showLevel ? "46%" : "70%" }} />
-        {showLevel ? <col style={{ width: "18%" }} /> : <col style={{ width: "15%" }} />}
-        {showLevel && <col style={{ width: "21%" }} />}
-        <col style={{ width: "15%" }} />
+        {isCurrent ? (
+          <>
+            <col style={{ width: "30%" }} />
+            <col style={{ width: "10%" }} />
+            <col style={{ width: "26%" }} />
+            <col style={{ width: "16%" }} />
+            <col style={{ width: "18%" }} />
+          </>
+        ) : (
+          <>
+            <col style={{ width: "46%" }} />
+            <col style={{ width: "18%" }} />
+            <col style={{ width: "21%" }} />
+            <col style={{ width: "15%" }} />
+          </>
+        )}
       </colgroup>
+      <thead>
+        <tr>
+          <th style={thStyle}></th>
+          {isCurrent ? (
+            <>
+              <th style={thStyle}>Age</th>
+              <th style={thStyle}>Contract</th>
+              <th style={thStyle}>Control</th>
+            </>
+          ) : (
+            <>
+              <th style={thStyle}>Level</th>
+              <th style={thStyle}>ETA</th>
+            </>
+          )}
+          <th style={{ ...thStyle, textAlign: "right" }}>Rtg</th>
+        </tr>
+      </thead>
       <tbody>
         {rows.map((p) => (
           <tr key={p.playerId}>
             <td style={{ padding: "2px 4px 2px 0", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }} title={p.name}>{p.name}</td>
-            {showLevel && <td style={{ padding: "2px 4px", color: "var(--color-text-muted)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{p.levelLabel}</td>}
-            {!showLevel && <td style={{ padding: "2px 4px", color: "var(--color-text-muted)" }}>{p.age ?? "—"}</td>}
-            {showLevel && <td style={{ padding: "2px 4px", color: "var(--color-text-muted)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{p.eta !== null && p.eta !== undefined ? `ETA ${p.eta}` : ""}</td>}
+            {isCurrent ? (
+              <>
+                <td style={{ padding: "2px 4px", color: "var(--color-text-muted)" }}>{p.age ?? "—"}</td>
+                <td style={{ padding: "2px 4px", color: "var(--color-text-muted)" }}>{fmtMoney(p.contractAav)}</td>
+                <td style={{ padding: "2px 4px", color: "var(--color-text-muted)" }}>{p.controlYears ?? "—"}</td>
+              </>
+            ) : (
+              <>
+                <td style={{ padding: "2px 4px", color: "var(--color-text-muted)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{p.levelLabel}</td>
+                <td style={{ padding: "2px 4px", color: "var(--color-text-muted)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{p.eta !== null && p.eta !== undefined ? p.eta : ""}</td>
+              </>
+            )}
             <td style={{ padding: "2px 0 2px 4px", textAlign: "right", fontWeight: 600 }}>{fmt1(p.metric)}</td>
           </tr>
         ))}
@@ -48,7 +110,7 @@ function DepthList({ rows, showLevel }: { rows: RosterDepthPlayer[]; showLevel: 
   );
 }
 
-function SideColumn({ title, side, showLevel }: { title: string; side: RoleSide; showLevel: boolean }) {
+function SideColumn({ title, side, variant }: { title: string; side: RoleSide; variant: Variant }) {
   return (
     <div style={{ flex: 1, minWidth: 0 }}>
       <div style={{ fontSize: "0.75rem", fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.03em", color: "var(--color-text-muted)", marginBottom: 4 }}>
@@ -66,7 +128,7 @@ function SideColumn({ title, side, showLevel }: { title: string; side: RoleSide;
           <div style={{ fontSize: "0.6875rem", color: "var(--color-text-muted)" }}>Rank</div>
         </div>
       </div>
-      <DepthList rows={side.depthChart} showLevel={showLevel} />
+      <DepthList rows={side.depthChart} variant={variant} />
     </div>
   );
 }
@@ -81,8 +143,8 @@ export default function RoleCards({ cards }: { cards: RoleCard[] }) {
         >
           <h3 style={{ margin: "0 0 8px", fontSize: "1rem" }}>{card.label}</h3>
           <div style={{ display: "flex", gap: 16 }}>
-            <SideColumn title="Current (MLB)" side={card.current} showLevel={false} />
-            <SideColumn title="Future (pipeline)" side={card.future} showLevel />
+            <SideColumn title="Current (MLB)" side={card.current} variant="current" />
+            <SideColumn title="Future (pipeline)" side={card.future} variant="future" />
           </div>
         </div>
       ))}

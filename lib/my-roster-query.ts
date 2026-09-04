@@ -2,7 +2,7 @@ import { makeSupabaseClient } from "./supabase-client";
 import { latestRefreshRunId } from "./queries";
 import { getOrgMinorsPlayers, fetchAll, avgDiffPercentile, rankPercentile, topNAvg, ROLE_HEALTH_ROWS } from "./org-minors-query";
 import { effectiveLevel, levelLabel as canonicalLevelLabel } from "./display-helpers";
-import { PITCHER_ROLES } from "./contract-classification";
+import { PITCHER_ROLES, computeAAV, type ContractSalaryFields } from "./contract-classification";
 import { yearsOfControl } from "./trade-value";
 
 const supabase = makeSupabaseClient();
@@ -55,6 +55,8 @@ interface DepthCandidate {
   metric: number | null;
   levelLabel?: string; // future depth only -- current is always MLB
   eta?: number | null; // future depth only
+  contractAav?: number | null; // current depth only (2026-09-04, Rees's ask)
+  controlYears?: number | null; // current depth only
 }
 
 export interface RosterDepthPlayer {
@@ -64,6 +66,8 @@ export interface RosterDepthPlayer {
   metric: number | null;
   levelLabel?: string;
   eta?: number | null;
+  contractAav?: number | null;
+  controlYears?: number | null;
 }
 
 export interface RoleSide {
@@ -130,15 +134,45 @@ export async function getMyRosterAnalysis(orgId: number): Promise<RoleCard[]> {
   // to recompute a number that page already gets right, including the RP fix.
   // Depth-chart identity is built locally from `rows` using the identical
   // selection rule, so the list shown always matches the number above it.
-  const currentUniverse: DepthCandidate[] = rows
-    .filter((r) => r.level === 1 && r.levelLabel !== "Int'l" && r.role !== null)
-    .map((r) => ({
+  const currentMlbRows = rows.filter((r) => r.level === 1 && r.levelLabel !== "Int'l" && r.role !== null);
+  const currentIds = currentMlbRows.map((r) => r.player_id);
+
+  // Contract + years-of-control, current MLB roster only (2026-09-04, Rees's
+  // ask -- "for current players, it should display their current contract
+  // and years of control remaining"). Small, roster-sized fetch (~25-40
+  // players), unlike the FUTURE side's leaguewide one below. Reuses the same
+  // yearsOfControl() as the future-pool filter -- same real-vs-nominal
+  // control-years insight (see trade-value.ts), just displayed here instead
+  // of used as a filter.
+  const salaryCols = "player_id,years,current_year,salary0,salary1,salary2,salary3,salary4,salary5,salary6,salary7,salary8,salary9,salary10,salary11,salary12,salary13,salary14";
+  const [{ data: currentContractsRaw, error: ccErr }, { data: currentServiceRaw, error: csErr }] = await Promise.all([
+    supabase.from("contracts").select(salaryCols).in("player_id", currentIds),
+    supabase.from("players").select("id,mlb_service_years").in("id", currentIds),
+  ]);
+  if (ccErr) throw ccErr;
+  if (csErr) throw csErr;
+  const currentContractById = new Map(
+    (currentContractsRaw as never as (ContractSalaryFields & { player_id: number; current_year: number | null })[])
+      .map((c) => [c.player_id, c])
+  );
+  const currentServiceById = new Map((currentServiceRaw as { id: number; mlb_service_years: number | null }[]).map((p) => [p.id, p.mlb_service_years]));
+
+  const currentUniverse: DepthCandidate[] = currentMlbRows.map((r) => {
+    const contract = currentContractById.get(r.player_id) ?? null;
+    return {
       playerId: r.player_id,
       name: `${r.first_name} ${r.last_name}`,
       age: r.age,
       role: r.role,
       metric: isPitcherRole(r.role as string) ? r.overall : r.batting,
-    }));
+      contractAav: contract ? computeAAV(contract) : null,
+      controlYears: yearsOfControl({
+        contractYears: contract?.years ?? null,
+        contractCurrentYear: contract?.current_year ?? null,
+        mlbServiceYears: currentServiceById.get(r.player_id) ?? null,
+      }),
+    };
+  });
 
   // ---- FUTURE side: one leaguewide fetch so every org's pipeline gets
   // scored by the exact same rule OKC's is -- needed to rank OKC against
