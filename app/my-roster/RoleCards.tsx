@@ -1,6 +1,6 @@
 import type { CSSProperties } from "react";
 import type { RoleCard, RoleSide, RosterDepthPlayer } from "@/lib/my-roster-query";
-import { percentileStyle } from "@/lib/display-helpers";
+import { percentileStyle, gradeStyle } from "@/lib/display-helpers";
 
 // My Roster (2026-09-04) -- structural first pass, deliberately plain: one
 // card per role, Current vs. Future side by side, each with a rating, a
@@ -38,12 +38,21 @@ type Variant = "current" | "future";
 // the name cell truncates with an ellipsis instead of overflowing.
 //
 // Current shows Contract (AAV) + Control (years remaining) instead of a
-// bare age (2026-09-04, Rees's ask) -- both come from the same
-// yearsOfControl()/computeAAV() logic already used elsewhere (trade-value
-// composite, contract classification), just displayed here rather than
-// used as a filter. Future doesn't show these -- a pipeline player's real
-// "control" is already the filter that got him into this pool at all (see
+// bare age (Rees's ask) -- both come from the same yearsOfControl()/
+// computeAAV() logic already used elsewhere (trade-value composite,
+// contract classification), just displayed here rather than used as a
+// filter. Future doesn't show these -- a pipeline player's real "control"
+// is already the filter that got him into this pool at all (see
 // my-roster-query.ts), not a fresh per-player number worth repeating here.
+//
+// Ovr/Pot (2026-09-04, Rees's ask) use `gradeStyle` -- the same raw 20-80
+// grade-color gradient every other report on the site colors Overall/
+// Potential with (PlayerTable, MinorsTable, etc.), not `percentileStyle`
+// (the 0-100 relative scale the rating/rank numbers above use). These are
+// always the player's real Overall/Potential, never the role-specific
+// Batting-substituted or bust-risk-adjusted metric that actually drives the
+// card's own rating number above -- matching every other report's
+// convention takes priority over hand-verifying the rating by eye here.
 function DepthList({ rows, variant }: { rows: RosterDepthPlayer[]; variant: Variant }) {
   if (rows.length === 0) return <p style={{ margin: "4px 0", fontSize: "0.8125rem", color: "var(--color-text-muted)" }}>No players</p>;
   const isCurrent = variant === "current";
@@ -53,17 +62,19 @@ function DepthList({ rows, variant }: { rows: RosterDepthPlayer[]; variant: Vari
       <colgroup>
         {isCurrent ? (
           <>
-            <col style={{ width: "30%" }} />
-            <col style={{ width: "10%" }} />
-            <col style={{ width: "26%" }} />
-            <col style={{ width: "16%" }} />
-            <col style={{ width: "18%" }} />
+            <col style={{ width: "24%" }} />
+            <col style={{ width: "8%" }} />
+            <col style={{ width: "22%" }} />
+            <col style={{ width: "12%" }} />
+            <col style={{ width: "17%" }} />
+            <col style={{ width: "17%" }} />
           </>
         ) : (
           <>
-            <col style={{ width: "46%" }} />
-            <col style={{ width: "18%" }} />
-            <col style={{ width: "21%" }} />
+            <col style={{ width: "38%" }} />
+            <col style={{ width: "15%" }} />
+            <col style={{ width: "17%" }} />
+            <col style={{ width: "15%" }} />
             <col style={{ width: "15%" }} />
           </>
         )}
@@ -83,7 +94,8 @@ function DepthList({ rows, variant }: { rows: RosterDepthPlayer[]; variant: Vari
               <th style={thStyle}>ETA</th>
             </>
           )}
-          <th style={{ ...thStyle, textAlign: "right" }}>Rtg</th>
+          <th style={{ ...thStyle, textAlign: "right" }}>Ovr</th>
+          <th style={{ ...thStyle, textAlign: "right" }}>Pot</th>
         </tr>
       </thead>
       <tbody>
@@ -102,7 +114,8 @@ function DepthList({ rows, variant }: { rows: RosterDepthPlayer[]; variant: Vari
                 <td style={{ padding: "2px 4px", color: "var(--color-text-muted)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{p.eta !== null && p.eta !== undefined ? p.eta : ""}</td>
               </>
             )}
-            <td style={{ padding: "2px 0 2px 4px", textAlign: "right", fontWeight: 600 }}>{fmt1(p.metric)}</td>
+            <td style={{ padding: "2px 0 2px 4px", textAlign: "right", fontWeight: 700, ...gradeStyle(p.overall) }}>{fmt1(p.overall)}</td>
+            <td style={{ padding: "2px 0 2px 4px", textAlign: "right", fontWeight: 700, ...gradeStyle(p.potential) }}>{fmt1(p.potential)}</td>
           </tr>
         ))}
       </tbody>

@@ -52,10 +52,12 @@ interface DepthCandidate {
   name: string;
   age: number | null;
   role: string | null;
-  metric: number | null;
+  metric: number | null; // selection/ranking metric only -- NOT what's displayed (see overall/potential)
+  overall: number | null; // 2026-09-04, Rees's ask -- always the real Overall, never the Batting-substituted metric
+  potential: number | null;
   levelLabel?: string; // future depth only -- current is always MLB
   eta?: number | null; // future depth only
-  contractAav?: number | null; // current depth only (2026-09-04, Rees's ask)
+  contractAav?: number | null; // current depth only
   controlYears?: number | null; // current depth only
 }
 
@@ -63,7 +65,8 @@ export interface RosterDepthPlayer {
   playerId: number;
   name: string;
   age: number | null;
-  metric: number | null;
+  overall: number | null;
+  potential: number | null;
   levelLabel?: string;
   eta?: number | null;
   contractAav?: number | null;
@@ -165,6 +168,8 @@ export async function getMyRosterAnalysis(orgId: number): Promise<RoleCard[]> {
       age: r.age,
       role: r.role,
       metric: isPitcherRole(r.role as string) ? r.overall : r.batting,
+      overall: r.overall,
+      potential: r.potential,
       contractAav: contract ? computeAAV(contract) : null,
       controlYears: yearsOfControl({
         contractYears: contract?.years ?? null,
@@ -189,18 +194,18 @@ export async function getMyRosterAnalysis(orgId: number): Promise<RoleCard[]> {
   );
   const ids = pipelinePlayers.map((p) => p.id);
 
-  const computedById = new Map<number, { role: string | null; potential: number | null; prospect_potential: number | null; eta: number | null }>();
+  const computedById = new Map<number, { role: string | null; overall: number | null; potential: number | null; prospect_potential: number | null; eta: number | null }>();
   const contractById = new Map<number, { years: number | null; current_year: number | null }>();
   const CHUNK = 500;
   for (let i = 0; i < ids.length; i += CHUNK) {
     const chunk = ids.slice(i, i + CHUNK);
     const [{ data: comp, error: compErr }, { data: contracts, error: contractErr }] = await Promise.all([
-      supabase.from("player_computed").select("player_id,role,potential,prospect_potential,eta").eq("refresh_run_id", refreshRunId).in("player_id", chunk),
+      supabase.from("player_computed").select("player_id,role,overall,potential,prospect_potential,eta").eq("refresh_run_id", refreshRunId).in("player_id", chunk),
       supabase.from("contracts").select("player_id,years,current_year").in("player_id", chunk),
     ]);
     if (compErr) throw compErr;
     if (contractErr) throw contractErr;
-    (comp as never as { player_id: number; role: string | null; potential: number | null; prospect_potential: number | null; eta: number | null }[])
+    (comp as never as { player_id: number; role: string | null; overall: number | null; potential: number | null; prospect_potential: number | null; eta: number | null }[])
       .forEach((c) => computedById.set(c.player_id, c));
     (contracts as never as { player_id: number; years: number | null; current_year: number | null }[])
       .forEach((c) => contractById.set(c.player_id, c));
@@ -227,6 +232,8 @@ export async function getMyRosterAnalysis(orgId: number): Promise<RoleCard[]> {
       age: p.age,
       role: c.role,
       metric,
+      overall: c.overall,
+      potential: c.potential,
       levelLabel: effLvl === 8 ? "Int'l" : canonicalLevelLabel(effLvl),
       eta: c.eta,
     });
