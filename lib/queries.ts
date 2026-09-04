@@ -18,6 +18,24 @@ async function fetchAll<T>(build: (from: number, to: number) => PromiseLike<{ da
   return all;
 }
 
+// For an `.in("col", ids)` fetch where `ids` itself might exceed 1000 --
+// PostgREST caps a single response at 1000 rows regardless of how many ids
+// are requested, and a bare `.in()` (no `.order()`+`.range()` semantics to
+// paginate against) needs the id LIST chunked instead. Added 2026-09-04 for
+// /free-agency's ~1800-id calls into fetchComputedPlayers -- every id-scoped
+// query below this point in that function used to assume "at most a few
+// hundred ids" and would have silently dropped rows past 1000 otherwise.
+export async function fetchByIdsChunked<T>(ids: number[], build: (chunk: number[]) => PromiseLike<{ data: T[] | null; error: unknown }>): Promise<T[]> {
+  const CHUNK = 900;
+  const all: T[] = [];
+  for (let i = 0; i < ids.length; i += CHUNK) {
+    const { data, error } = await build(ids.slice(i, i + CHUNK));
+    if (error) throw error;
+    if (data) all.push(...data);
+  }
+  return all;
+}
+
 // PERFORMANCE FIX (2026-08-25): used to fetch the ENTIRE players table's
 // organization_id column (up to ~45,757 rows across ~46 sequential pages,
 // unfiltered) just to build a Set of which org ids actually have players --
@@ -50,7 +68,7 @@ export async function getOrgTeams() {
   return candidateTeams.filter((t) => validIds.has(t.id));
 }
 
-async function latestRefreshRunId(): Promise<number> {
+export async function latestRefreshRunId(): Promise<number> {
   const { data, error } = await supabase
     .from("player_computed").select("refresh_run_id").order("refresh_run_id", { ascending: false }).limit(1).single();
   if (error || !data) throw new Error(`No player_computed data found: ${error?.message}`);
@@ -249,7 +267,10 @@ export interface PlayerRow extends RatingsSlice {
 // players/ratings row (shouldn't happen in healthy data, but the original
 // code silently tolerated it by filtering those out, so this preserves
 // that behavior rather than risking returning fewer than `limit` rows).
-async function fetchComputedPlayers(opts: { orgId?: number; prospectsOnly?: boolean; playerIds?: number[]; limit: number }) {
+// Exported 2026-09-04 for /free-agency (lib/free-agency-query.ts) to reuse
+// directly via its `playerIds` scope, rather than duplicating this whole
+// player_computed + players + ratings + WAR/AB/IP join.
+export async function fetchComputedPlayers(opts: { orgId?: number; prospectsOnly?: boolean; playerIds?: number[]; limit: number }) {
   const refreshRunId = await latestRefreshRunId();
 
   // Org-scoped case: get that org's player IDs first. Cheap -- one org's
@@ -265,18 +286,39 @@ async function fetchComputedPlayers(opts: { orgId?: number; prospectsOnly?: bool
   }
   const idFilter = opts.playerIds ?? orgPlayerIds;
 
+  // Paginated instead of one .limit() call (2026-09-04, fixed for
+  // /free-agency, the first caller ever to request more than 1000 rows) --
+  // Supabase/PostgREST silently caps a single request at 1000 rows
+  // regardless of the requested .limit() value (the same "select() caps at
+  // 1000 rows by default" gotcha documented elsewhere in this codebase,
+  // just triggered here via .limit() instead of an unbounded .select()).
+  // Every existing caller (getTopPlayers/getTopDraftees, limit <= 500) only
+  // ever needed a single page and behaves identically -- this only changes
+  // behavior for a request that actually exceeds 1000 rows.
+  type ComputedRow = { player_id: number; overall: number; potential: number; prospect_potential: number; prospect_rank: number | null; org_rank: number | null; prospect_org_rank: number | null; prospect_role_rank: number | null; role: string | null; ph: "H" | "P" | null; comp_player_id: number | null; comp_similarity: number | null };
   const sortCol = opts.prospectsOnly ? "prospect_potential" : "overall";
-  let cq = supabase
-    .from("player_computed")
-    .select("player_id,overall,potential,prospect_potential,prospect_rank,org_rank,prospect_org_rank,prospect_role_rank,role,ph,comp_player_id,comp_similarity")
-    .eq("refresh_run_id", refreshRunId)
-    .order(sortCol, { ascending: false })
-    .limit(opts.limit + 50);
-  if (opts.prospectsOnly) cq = cq.not("prospect_rank", "is", null);
-  if (idFilter) cq = cq.in("player_id", idFilter);
-  const { data: computedData, error: computedErr } = await cq;
-  if (computedErr) throw computedErr;
-  const computed = computedData as { player_id: number; overall: number; potential: number; prospect_potential: number; prospect_rank: number | null; org_rank: number | null; prospect_org_rank: number | null; prospect_role_rank: number | null; role: string | null; ph: "H" | "P" | null; comp_player_id: number | null; comp_similarity: number | null }[];
+  const targetCount = opts.limit + 50;
+  const computed: ComputedRow[] = [];
+  {
+    const PAGE = 1000;
+    let from = 0;
+    while (computed.length < targetCount) {
+      let cq = supabase
+        .from("player_computed")
+        .select("player_id,overall,potential,prospect_potential,prospect_rank,org_rank,prospect_org_rank,prospect_role_rank,role,ph,comp_player_id,comp_similarity")
+        .eq("refresh_run_id", refreshRunId)
+        .order(sortCol, { ascending: false })
+        .range(from, Math.min(from + PAGE, targetCount) - 1);
+      if (opts.prospectsOnly) cq = cq.not("prospect_rank", "is", null);
+      if (idFilter) cq = cq.in("player_id", idFilter);
+      const { data, error } = await cq;
+      if (error) throw error;
+      if (!data || data.length === 0) break;
+      computed.push(...(data as ComputedRow[]));
+      if (data.length < PAGE) break;
+      from += PAGE;
+    }
+  }
   const relevantIds = computed.map((c) => c.player_id);
   if (relevantIds.length === 0) return [];
 
@@ -321,13 +363,14 @@ async function fetchComputedPlayers(opts: { orgId?: number; prospectsOnly?: bool
   abbrRows.forEach((r) => { if (!abbrByTeamId.has(r.team_id)) abbrByTeamId.set(r.team_id, r.abbr); });
 
   const ratingsById = new Map<number, RatingsSlice>();
-  const { data: ratingsData, error: ratingsErr } = await supabase
-    .from("player_ratings_snapshots")
-    .select("player_id,cntct,pow,eye,speed,stf,mov,ctrl,stm,pos")
-    .eq("refresh_run_id", refreshRunId)
-    .in("player_id", relevantIds);
-  if (ratingsErr) throw ratingsErr;
-  (ratingsData as never as ({ player_id: number } & RatingsSlice)[]).forEach((r) => ratingsById.set(r.player_id, r));
+  const ratingsData = await fetchByIdsChunked<{ player_id: number } & RatingsSlice>(relevantIds, (chunk) =>
+    supabase
+      .from("player_ratings_snapshots")
+      .select("player_id,cntct,pow,eye,speed,stf,mov,ctrl,stm,pos")
+      .eq("refresh_run_id", refreshRunId)
+      .in("player_id", chunk) as never
+  );
+  ratingsData.forEach((r) => ratingsById.set(r.player_id, r));
 
   // WAR/AB/IP (2026-08-27, Rees's spec) -- current season, current LEVEL
   // only, same convention getTopProspectsDetailed's seasonTotals already
@@ -342,25 +385,27 @@ async function fetchComputedPlayers(opts: { orgId?: number; prospectsOnly?: bool
 
   const warAbIpById = new Map<number, { war: number | null; ab: number | null; ip: number | null }>();
   if (statSeasonYear !== null) {
-    const { data: batData, error: batErr } = await supabase
-      .from("player_batting_stats_snapshots")
-      .select("player_id,level_id,ab,war")
-      .eq("refresh_run_id", refreshRunId).eq("year", statSeasonYear).eq("split_id", 1).in("player_id", relevantIds);
-    if (batErr) throw batErr;
-    const { data: pitData, error: pitErr } = await supabase
-      .from("player_pitching_stats_snapshots")
-      .select("player_id,level_id,ip,war")
-      .eq("refresh_run_id", refreshRunId).eq("year", statSeasonYear).eq("split_id", 1).in("player_id", relevantIds);
-    if (pitErr) throw pitErr;
+    const batData = await fetchByIdsChunked<{ player_id: number; level_id: number; ab: number; war: number | null }>(relevantIds, (chunk) =>
+      supabase
+        .from("player_batting_stats_snapshots")
+        .select("player_id,level_id,ab,war")
+        .eq("refresh_run_id", refreshRunId).eq("year", statSeasonYear).eq("split_id", 1).in("player_id", chunk) as never
+    );
+    const pitData = await fetchByIdsChunked<{ player_id: number; level_id: number; ip: number; war: number | null }>(relevantIds, (chunk) =>
+      supabase
+        .from("player_pitching_stats_snapshots")
+        .select("player_id,level_id,ip,war")
+        .eq("refresh_run_id", refreshRunId).eq("year", statSeasonYear).eq("split_id", 1).in("player_id", chunk) as never
+    );
 
     const batByPlayer = new Map<number, { level_id: number; ab: number; war: number | null }[]>();
-    (batData as never as { player_id: number; level_id: number; ab: number; war: number | null }[]).forEach((r) => {
+    batData.forEach((r) => {
       const arr = batByPlayer.get(r.player_id) ?? [];
       arr.push(r);
       batByPlayer.set(r.player_id, arr);
     });
     const pitByPlayer = new Map<number, { level_id: number; ip: number; war: number | null }[]>();
-    (pitData as never as { player_id: number; level_id: number; ip: number; war: number | null }[]).forEach((r) => {
+    pitData.forEach((r) => {
       const arr = pitByPlayer.get(r.player_id) ?? [];
       arr.push(r);
       pitByPlayer.set(r.player_id, arr);

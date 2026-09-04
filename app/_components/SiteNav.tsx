@@ -21,7 +21,10 @@ const NAV_ITEMS: NavItem[] = [
   // "My Team" hub page (2026-08-28) -- not built yet, this is deliberately a
   // hover-dropdown-only entry (no href) until it exists. First module:
   // Minor League System (moved here from its own top-level nav slot).
-  { label: "My Team", children: [{ href: "/org-minors", label: "Minor League System" }] },
+  { label: "My Team", children: [
+    { href: "/org-minors", label: "Minor League System" },
+    { href: "/free-agency", label: "Free Agency" },
+  ] },
   // "Reports" (2026-08-31) -- same dropdown-only-until-a-hub-page-exists
   // pattern as "My Team" above: no href of its own yet, just a home for
   // internal analysis pages as they ship. First entry: the market-rate
