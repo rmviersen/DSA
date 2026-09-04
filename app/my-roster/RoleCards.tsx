@@ -71,11 +71,12 @@ function DepthList({ rows, variant }: { rows: RosterDepthPlayer[]; variant: Vari
           </>
         ) : (
           <>
-            <col style={{ width: "38%" }} />
+            <col style={{ width: "32%" }} />
+            <col style={{ width: "10%" }} />
             <col style={{ width: "15%" }} />
-            <col style={{ width: "17%" }} />
             <col style={{ width: "15%" }} />
-            <col style={{ width: "15%" }} />
+            <col style={{ width: "14%" }} />
+            <col style={{ width: "14%" }} />
           </>
         )}
       </colgroup>
@@ -90,6 +91,7 @@ function DepthList({ rows, variant }: { rows: RosterDepthPlayer[]; variant: Vari
             </>
           ) : (
             <>
+              <th style={thStyle}>Age</th>
               <th style={thStyle}>Level</th>
               <th style={thStyle}>ETA</th>
             </>
@@ -110,6 +112,7 @@ function DepthList({ rows, variant }: { rows: RosterDepthPlayer[]; variant: Vari
               </>
             ) : (
               <>
+                <td style={{ padding: "2px 4px", color: "var(--color-text-muted)" }}>{p.age ?? "—"}</td>
                 <td style={{ padding: "2px 4px", color: "var(--color-text-muted)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{p.levelLabel}</td>
                 <td style={{ padding: "2px 4px", color: "var(--color-text-muted)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{p.eta !== null && p.eta !== undefined ? p.eta : ""}</td>
               </>

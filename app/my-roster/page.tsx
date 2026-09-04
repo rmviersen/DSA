@@ -24,11 +24,13 @@ export default async function MyRosterPage({ searchParams }: { searchParams: Pro
         <p>
           Role-by-role team analysis. <strong>Current</strong> is today&apos;s active MLB roster (same numbers as the
           Minor League System page&apos;s Role Health table, at the MLB level). <strong>Future</strong> is the org&apos;s
-          pipeline (minors + international academy) narrowed to players still under team control at least two seasons
-          from now, ranked by Potential. Rating is a top-N average (N = expected playing-time slots at that role, same
-          N both sides); Rank is where Oklahoma City lands among all 32 orgs on that same number. The list under each
-          number is the actual players it&apos;s built from. This is a first structural pass — the underlying
-          calculations are expected to be refined.
+          pipeline (minors + international academy) narrowed to players with 3+ years of remaining team control —
+          basically a view into the roster three years out — ranked by Potential. Future RP only counts players
+          actually scouted as relievers (Current RP still credits rotation-quality arms the team is really using in
+          relief today). Rating is a top-N average (N = expected playing-time slots at that role, same N both sides);
+          Rank is where Oklahoma City lands among all 32 orgs on that same number. The list under each number is the
+          actual players it&apos;s built from. This is a first structural pass — the underlying calculations are
+          expected to be refined.
         </p>
       </header>
       <RoleCards cards={cards} />

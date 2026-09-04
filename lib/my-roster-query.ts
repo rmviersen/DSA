@@ -21,21 +21,24 @@ function isPitcherRole(role: string): boolean {
 // needs-bar work -- /org-minors stays the roster-count/movement-tracking
 // tool, this is the role-first strategic view.
 //
-// FUTURE pool definition -- Rees's exact spec (2026-09-04): every org player
-// below the active MLB roster (minors + international academy) who will
-// STILL be under this team's control 2 seasons from now, i.e. excluded if
-// his contract/service-time control runs out within the next 2 seasons.
-// Read as yearsOfControl >= 3 (that count already includes the current
-// season, so 3 = this season plus two more) -- reuses trade-value.ts's
-// yearsOfControl(), built for the trade-value composite's Phase A step 1.
-// A prospect with no real MLB contract yet and 0 mlb_service_years clears
-// this automatically (falls back to the full 6-year service-time clock), so
-// in practice this filter only ever excludes a player who's already accrued
-// real MLB service time while still not on the active roster (an up-and-
-// down veteran, someone recently optioned who's nearing free agency) --
-// exactly the case where counting him toward "future" would be misleading.
-// If this reads wrong once real numbers are reviewed, it's a one-line
-// threshold/polarity change, not a redesign.
+// FUTURE pool definition -- Rees's spec, restated and reconfirmed 2026-09-04:
+// "players with 3+ years of control counting towards future pipeline,
+// basically a view into the roster in 3 years." This is the exact same
+// threshold as originally specified (yearsOfControl >= 3, which already
+// counts the current season -- so 3 = this season plus two more, i.e. the
+// player is still around for a 3rd season from now) -- reconfirmed here
+// verbatim rather than assumed unchanged, since the two phrasings ("still
+// under control 2 seasons from now" vs. "3+ years of control / a view 3
+// years out") describe the same number but don't read as obviously
+// identical. Reuses trade-value.ts's yearsOfControl(), built for the trade-
+// value composite's Phase A step 1. A prospect with no real MLB contract yet
+// and 0 mlb_service_years clears this automatically (falls back to the full
+// 6-year service-time clock), so in practice this filter only ever excludes
+// a player who's already accrued real MLB service time while still not on
+// the active roster (an up-and-down veteran, someone recently optioned who's
+// nearing free agency) -- exactly the case where counting him toward
+// "future" would be misleading. If 3 turns out to be the wrong number once
+// real numbers are reviewed, it's a one-line change, not a redesign.
 const MIN_FUTURE_YEARS_OF_CONTROL = 3;
 
 // Ranked by prospect_potential (the bust-risk-adjusted ceiling already used
@@ -93,14 +96,21 @@ export interface RoleCard {
 // role label" rule as org-minors-query.ts's rpQualityPool (2026-09-04) --
 // duplicated here in an identity-preserving form (that one is value-only;
 // this needs to keep player identity for the depth-chart list). Keep both in
-// sync if this rule ever changes. Used for BOTH current and future sides, and
-// for both "our org" and "every other org" (the league-average/rank loop
-// below) -- one selection rule everywhere, so there's no risk of the current-
-// vs-future or us-vs-them asymmetry bug already found and fixed once this
-// session.
-function pickRoleDepth(universe: DepthCandidate[], rowLabel: string, rowRoles: string[], spTopN: number, ownTopN: number): DepthCandidate[] {
+// sync if this rule ever changes.
+//
+// `allowRpOverflow` (2026-09-04 follow-up, Rees's ask): the SP-overflow rule
+// stays CURRENT-side only. His reasoning -- current bullpen quality should
+// credit "the starters currently needed in the bullpen" (a real team often
+// really is using excess rotation-quality arms in relief today, and that's
+// real bullpen strength happening right now). A pipeline prospect hasn't
+// been assigned a real bullpen inning yet, though -- there's no equivalent
+// real-world fact to credit, just a scouted role label -- so FUTURE RP
+// trusts that label exclusively, same as every other role already does.
+// Passing `allowRpOverflow: false` makes the RP row fall through to the
+// plain rowRoles-filter branch just like any non-RP role.
+function pickRoleDepth(universe: DepthCandidate[], rowLabel: string, rowRoles: string[], spTopN: number, ownTopN: number, allowRpOverflow: boolean): DepthCandidate[] {
   const byMetricDesc = (a: DepthCandidate, b: DepthCandidate) => (b.metric ?? -Infinity) - (a.metric ?? -Infinity);
-  if (rowLabel !== "RP") {
+  if (rowLabel !== "RP" || !allowRpOverflow) {
     return universe
       .filter((p) => p.role !== null && rowRoles.includes(p.role) && p.metric !== null)
       .sort(byMetricDesc)
@@ -251,18 +261,20 @@ export async function getMyRosterAnalysis(orgId: number): Promise<RoleCard[]> {
       rank: currentCell?.rank ?? null,
       totalTeams: currentCell?.totalTeams ?? null,
       rankPct: currentCell?.rankPct ?? null,
-      depthChart: pickRoleDepth(currentUniverse, label, roles, SP_TOP_N, topN * DEPTH_DISPLAY_MULTIPLIER),
+      depthChart: pickRoleDepth(currentUniverse, label, roles, SP_TOP_N, topN * DEPTH_DISPLAY_MULTIPLIER, true),
     };
 
     // futureDepth is the longer DISPLAY list; futureRating still evaluates
     // only the real topN off the front of it (pickRoleDepth returns players
     // already sorted best-first, and topNAvg re-sorts/slices to topN anyway).
-    const futureDepth = pickRoleDepth(ownFuturePool, label, roles, SP_TOP_N, topN * DEPTH_DISPLAY_MULTIPLIER);
+    // allowRpOverflow: false -- future RP trusts the role label exclusively
+    // (see pickRoleDepth's comment above).
+    const futureDepth = pickRoleDepth(ownFuturePool, label, roles, SP_TOP_N, topN * DEPTH_DISPLAY_MULTIPLIER, false);
     const futureRating = topNAvg(futureDepth.map((d) => d.metric as number), topN);
 
     const leagueFutureAverages: { orgId: number; avg: number }[] = [];
     for (const [otherOrgId, players] of futurePoolByOrg) {
-      const picked = pickRoleDepth(players, label, roles, SP_TOP_N, topN);
+      const picked = pickRoleDepth(players, label, roles, SP_TOP_N, topN, false);
       const avg = topNAvg(picked.map((d) => d.metric as number), topN);
       if (avg !== null) leagueFutureAverages.push({ orgId: otherOrgId, avg });
     }
