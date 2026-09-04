@@ -22,6 +22,7 @@ const NAV_ITEMS: NavItem[] = [
   // hover-dropdown-only entry (no href) until it exists. First module:
   // Minor League System (moved here from its own top-level nav slot).
   { label: "My Team", children: [
+    { href: "/my-roster", label: "My Roster" },
     { href: "/org-minors", label: "Minor League System" },
     { href: "/free-agency", label: "Free Agency" },
   ] },

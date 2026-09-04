@@ -4,7 +4,7 @@ import { effectiveLevel, levelLabel as canonicalLevelLabel, CANONICAL_LEVELS } f
 
 const supabase = makeSupabaseClient();
 
-async function fetchAll<T>(build: (from: number, to: number) => PromiseLike<{ data: T[] | null; error: unknown }>): Promise<T[]> {
+export async function fetchAll<T>(build: (from: number, to: number) => PromiseLike<{ data: T[] | null; error: unknown }>): Promise<T[]> {
   const all: T[] = [];
   let from = 0;
   const PAGE = 1000;
@@ -196,7 +196,7 @@ function isPitcherRole(role: string): boolean {
 // ["RP"]` here still governs the row's staffing COUNT (min/count/countPct),
 // which Rees confirmed should stay untouched -- only the quality columns
 // (orgAvg/leagueAvg/rank) use the new pool.
-const ROLE_HEALTH_ROWS: { label: string; roles: string[]; min: number; topN: number; forcePct?: number }[] = [
+export const ROLE_HEALTH_ROWS: { label: string; roles: string[]; min: number; topN: number; forcePct?: number }[] = [
   { label: "SP", roles: ["SP"], min: 5, topN: 5 },
   { label: "RP", roles: ["RP"], min: 0, topN: 5 },
   { label: "P Tot", roles: ["SP", "RP"], min: 13, topN: 10 }, // "Pitching (Total)", shortened 2026-08-28 -- was too wide for the role-health cards
@@ -232,7 +232,7 @@ function countPercentile(count: number, min: number): number | null {
 // +/-3 first pass before he set the discrete-threshold version this
 // replaces.
 const AVG_PCT_SPREAD = 5;
-function avgDiffPercentile(orgAvg: number | null, leagueAvg: number | null): number | null {
+export function avgDiffPercentile(orgAvg: number | null, leagueAvg: number | null): number | null {
   if (orgAvg === null || leagueAvg === null) return null;
   const diff = orgAvg - leagueAvg;
   return Math.max(0, Math.min(100, 50 + (diff / AVG_PCT_SPREAD) * 50));
@@ -242,7 +242,7 @@ function avgDiffPercentile(orgAvg: number | null, leagueAvg: number | null): num
 // last of N = 0 (red), linear in between. A single-team "league" (should
 // never happen in practice) falls back to neutral (50) rather than
 // dividing by zero.
-function rankPercentile(rank: number | null, totalTeams: number | null): number | null {
+export function rankPercentile(rank: number | null, totalTeams: number | null): number | null {
   if (rank === null || totalTeams === null) return null;
   if (totalTeams <= 1) return 50;
   return ((totalTeams - rank) / (totalTeams - 1)) * 100;
@@ -250,7 +250,7 @@ function rankPercentile(rank: number | null, totalTeams: number | null): number 
 
 // Average of the top `n` values (by Overall) in a pool -- powers the Org
 // talent column's "expected/playable roster strength" average above.
-function topNAvg(values: number[], n: number): number | null {
+export function topNAvg(values: number[], n: number): number | null {
   const top = [...values].sort((a, b) => b - a).slice(0, n);
   return top.length > 0 ? top.reduce((a, b) => a + b, 0) / top.length : null;
 }

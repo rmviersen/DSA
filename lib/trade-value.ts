@@ -30,7 +30,7 @@
 // extends past the free-agency threshold, roughly-even counts of 2/3/4/5 in
 // between), not a degenerate all-one-value result.
 
-import { MIN_FREE_AGENT_SERVICE_YEARS } from "./contract-classification.js";
+import { MIN_FREE_AGENT_SERVICE_YEARS } from "./contract-classification";
 
 export interface ControlYearsInput {
   contractYears: number | null; // contracts.years
