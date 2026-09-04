@@ -138,8 +138,19 @@ export function PlayerTable({ rows, showTeam, showProspectCols, showStatLevel, s
     });
   }, [filteredRows, sortKey, sortDir]);
 
+  // Headers wrap, values don't (2026-09-04, Rees's ask) -- overrides
+  // globals.css's sitewide `th { white-space: nowrap }` (shared by every
+  // table on the site, so changed here inline rather than there, to avoid
+  // touching Top Prospects/System Rankings/etc.). Allowing wrap alone isn't
+  // enough on its own -- table-layout:auto sizes a column to fit its
+  // widest UNWRAPPED content regardless of white-space, so nothing actually
+  // wraps until something caps the header's own preferred width. maxWidth
+  // does that: the header wraps within it, and the column then shrinks to
+  // roughly that width, UNLESS a value cell (still nowrap) is genuinely
+  // wider, in which case the value correctly wins and the header just
+  // wraps further to match -- values are never the thing forced to shrink.
   const th = (label: string, key: SortKey) => (
-    <th onClick={() => toggleSort(key)} style={{ cursor: "pointer", userSelect: "none", whiteSpace: "nowrap" }}>
+    <th onClick={() => toggleSort(key)} style={{ cursor: "pointer", userSelect: "none", whiteSpace: "normal", lineHeight: 1.2, maxWidth: "4.5rem" }}>
       {label}{sortKey === key ? (sortDir === "desc" ? " ▼" : " ▲") : ""}
     </th>
   );
@@ -207,7 +218,7 @@ export function PlayerTable({ rows, showTeam, showProspectCols, showStatLevel, s
         {sortedRows.length} of {rows.length} shown. Overall/Potential{showProspectCols ? "/Prospect Potential" : ""} at full precision — internal admin view, not public.
       </p>
       <div className="table-wrap">
-        <table>
+        <table className="player-table">
           <thead>
             <tr>
               {th("Name", "name")}
@@ -221,7 +232,7 @@ export function PlayerTable({ rows, showTeam, showProspectCols, showStatLevel, s
                   ingredients are there to check if you want to dig in. */}
               {th("Overall", "overall")}
               {th("Potential", "potential")}
-              {showStatLevel && <th title="The level this AB/IP/WAR line was earned at -- two players can show the same WAR from very different levels">Level</th>}
+              {showStatLevel && <th style={{ whiteSpace: "normal", lineHeight: 1.2, maxWidth: "4.5rem" }} title="The level this AB/IP/WAR line was earned at -- two players can show the same WAR from very different levels">Level</th>}
               {th("AB", "ab")}
               {th("IP", "ip")}
               {th("WAR", "war")}

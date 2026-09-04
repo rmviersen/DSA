@@ -631,6 +631,18 @@ th {
   white-space: nowrap;
 }
 
+/* PlayerTable (/players, /draft, /free-agency) only, 2026-09-04: headers
+   wrap so a column can condense to fit its actual (short, numeric) values
+   instead of the full unwrapped label width -- overridden inline per-<th>
+   in PlayerTable.tsx itself (this rule's only job is guaranteeing value
+   cells stay nowrap even as new, possibly-longer text columns get added
+   later, not just the ones that happen to be short today). Scoped to this
+   one table's own class so Top Prospects/System Rankings/etc., which share
+   the sitewide th/td rules above, are unaffected. */
+.player-table td {
+  white-space: nowrap;
+}
+
 tbody tr {
   /* Smooths the hover highlight below into a fade instead of a hard cut --
      small, but this is the "nothing feels alive" complaint's easiest fix:
