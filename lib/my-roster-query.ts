@@ -14,31 +14,38 @@ function isPitcherRole(role: string): boolean {
 // "My Roster" page (2026-09-04, Rees's ask). Full team analysis, broken down
 // role-by-role: a CURRENT card (today's MLB roster strength -- reuses
 // /org-minors' already-verified Role Health numbers as-is, no recompute) next
-// to a FUTURE card (the org's pipeline strength at that role a few years out
-// -- new), each with a rating, a leaguewide rank, and a depth chart of the
+// to a FUTURE card (a projection of the whole roster 3 years out -- see
+// below), each with a rating, a leaguewide rank, and a depth chart of the
 // actual players behind the number. This is the "identify strengths/
 // weaknesses" page Rees wants built before circling back to /free-agency's
 // needs-bar work -- /org-minors stays the roster-count/movement-tracking
 // tool, this is the role-first strategic view.
 //
-// FUTURE pool definition -- Rees's spec, restated and reconfirmed 2026-09-04:
-// "players with 3+ years of control counting towards future pipeline,
-// basically a view into the roster in 3 years." This is the exact same
-// threshold as originally specified (yearsOfControl >= 3, which already
-// counts the current season -- so 3 = this season plus two more, i.e. the
-// player is still around for a 3rd season from now) -- reconfirmed here
-// verbatim rather than assumed unchanged, since the two phrasings ("still
-// under control 2 seasons from now" vs. "3+ years of control / a view 3
-// years out") describe the same number but don't read as obviously
-// identical. Reuses trade-value.ts's yearsOfControl(), built for the trade-
-// value composite's Phase A step 1. A prospect with no real MLB contract yet
-// and 0 mlb_service_years clears this automatically (falls back to the full
-// 6-year service-time clock), so in practice this filter only ever excludes
-// a player who's already accrued real MLB service time while still not on
-// the active roster (an up-and-down veteran, someone recently optioned who's
-// nearing free agency) -- exactly the case where counting him toward
-// "future" would be misleading. If 3 turns out to be the wrong number once
-// real numbers are reviewed, it's a one-line change, not a redesign.
+// FUTURE pool definition -- Rees's spec, restated 2026-09-04: "players with
+// 3+ years of control counting towards future pipeline, basically a view
+// into the roster in 3 years." yearsOfControl >= 3 already counts the
+// current season, so 3 = this season plus two more, i.e. the player is still
+// around for a 3rd season from now. Reuses trade-value.ts's yearsOfControl(),
+// built for the trade-value composite's Phase A step 1.
+//
+// REAL BUG found and fixed 2026-09-06 (Rees: "Jeremy Porten at 1B has 5
+// years of control but is not in the future table... seeing this same issue
+// across all the roles"). The pool used to ALSO require the player be below
+// the active MLB roster (effectiveLevel !== 1) -- i.e. minors + international
+// only, no matter how much control was left on a current player. That's
+// wrong: "a view into the roster 3 years out" is the whole roster projected
+// forward, not just the pipeline underneath it -- a current player with 5
+// years of control left is obviously still on the roster in 3 years, and
+// arguably the most important data point for that view. The level
+// restriction is gone; years-of-control is now the ONLY gate, so a
+// long-controlled current MLB player and a controlled pipeline prospect
+// compete for the same future depth-chart slots on equal footing. A prospect
+// with no real MLB contract yet and 0 mlb_service_years clears the gate
+// automatically (falls back to the full 6-year service-time clock); a
+// current player who's already accrued real MLB service time only clears it
+// if his real remaining control (contract or service-time clock, whichever
+// is longer) is actually 3+ years -- see Scott Moore/Shane Drew, both real,
+// verified exclusions elsewhere in this file's git history.
 const MIN_FUTURE_YEARS_OF_CONTROL = 3;
 
 // Ranked by prospect_potential (the bust-risk-adjusted ceiling already used
@@ -189,9 +196,22 @@ export async function getMyRosterAnalysis(orgId: number): Promise<RoleCard[]> {
     };
   });
 
-  // ---- FUTURE side: one leaguewide fetch so every org's pipeline gets
-  // scored by the exact same rule OKC's is -- needed to rank OKC against
+  // ---- FUTURE side: one leaguewide fetch so every org's whole future roster
+  // gets scored by the exact same rule OKC's is -- needed to rank OKC against
   // everyone else, not just report our own number in isolation.
+  //
+  // Real bug found and fixed 2026-09-06 (Rees: "Jeremy Porten at 1B has 5
+  // years of control but is not in the future table... seeing this same
+  // issue across all the roles"). This pool used to be filtered to
+  // effectiveLevel !== 1 -- i.e. minors + international ONLY, excluding
+  // every current MLB player categorically regardless of his control years.
+  // That's wrong: "a view into the roster 3 years out" is a projection of
+  // the WHOLE roster forward, not just the pipeline below it -- a player
+  // already in the majors with 5 years of control left is obviously still
+  // part of the roster 3 years from now, arguably the most important part.
+  // The level restriction is gone; the control-years filter below is now the
+  // ONLY gate, so a long-controlled current star and a controlled pipeline
+  // prospect compete for the same future depth-chart slots on equal footing.
   const allPlayers = await fetchAll<{
     id: number; first_name: string; last_name: string; age: number | null;
     organization_id: number | null; level: number | null; league_id: number | null; mlb_service_years: number | null;
@@ -199,10 +219,10 @@ export async function getMyRosterAnalysis(orgId: number): Promise<RoleCard[]> {
     supabase.from("players").select("id,first_name,last_name,age,organization_id,level,league_id,mlb_service_years")
       .not("organization_id", "is", null).range(from, to) as never
   );
-  const pipelinePlayers = allPlayers.filter(
-    (p): p is typeof p & { organization_id: number } => p.organization_id !== null && effectiveLevel(p.level, p.league_id) !== 1
+  const futureCandidatePlayers = allPlayers.filter(
+    (p): p is typeof p & { organization_id: number } => p.organization_id !== null
   );
-  const ids = pipelinePlayers.map((p) => p.id);
+  const ids = futureCandidatePlayers.map((p) => p.id);
 
   const computedById = new Map<number, { role: string | null; overall: number | null; potential: number | null; prospect_potential: number | null; eta: number | null }>();
   const contractById = new Map<number, { years: number | null; current_year: number | null }>();
@@ -222,7 +242,7 @@ export async function getMyRosterAnalysis(orgId: number): Promise<RoleCard[]> {
   }
 
   const futurePoolByOrg = new Map<number, DepthCandidate[]>();
-  for (const p of pipelinePlayers) {
+  for (const p of futureCandidatePlayers) {
     const c = computedById.get(p.id);
     if (!c || !c.role) continue;
     const contract = contractById.get(p.id) ?? null;

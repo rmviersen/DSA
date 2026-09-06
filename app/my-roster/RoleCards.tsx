@@ -160,7 +160,7 @@ export default function RoleCards({ cards }: { cards: RoleCard[] }) {
           <h3 style={{ margin: "0 0 8px", fontSize: "1rem" }}>{card.label}</h3>
           <div style={{ display: "flex", gap: 16 }}>
             <SideColumn title="Current (MLB)" side={card.current} variant="current" />
-            <SideColumn title="Future (pipeline)" side={card.future} variant="future" />
+            <SideColumn title="Future (3 yrs out)" side={card.future} variant="future" />
           </div>
         </div>
       ))}
