@@ -192,6 +192,13 @@ const ROLE_BUCKET_THRESHOLDS = {
   ss_pot: 55, ss_range: 65,
   cf_pot: 55, cf_range: 65,
   inf_range: 50,
+  // Position-specific INF qualifier (2026-09-06 follow-up, Rees's ask -- see
+  // the INF/COF priority-order comment below for the full case this fixes).
+  // Deliberately its OWN threshold (50), lower than the corner-OF override's
+  // 55 -- a different question ("does at least one real infield fit exist
+  // at all") than the override's ("is the infield fit weak enough that a
+  // real corner-OF profile should win instead").
+  inf_pos_pot: 50,
   cof_pot: 50, cof_range: 50,
   first_base_pot: 55,
   // Corner-outfield override (2026-09-06, Rees's ask -- see the INF/COF
@@ -571,7 +578,7 @@ export function computeRatings(
   // --- Role: position-player role grouping. See ROLE_BUCKET_THRESHOLDS
   // above for the full rationale. Priority order (first match wins) is the
   // real defensive spectrum: C -> SS -> CF -> corner-OF override -> INF
-  // (2B/3B) -> COF -> 1B -> DH.
+  // (range + real 2B/3B/SS fit) -> COF -> 1B -> DH.
   // Moved ahead of Overall/Potential below (2026-08-31) -- previously
   // computed after them, back when Role was purely a display label with no
   // bearing on the formula itself. Now that fieldingWeight (right below)
@@ -598,6 +605,23 @@ export function computeRatings(
   // `ofr >= cof_range`) -- Rees's spec was exactly these four potential
   // comparisons, nothing about range; worth revisiting if that turns out
   // to matter in practice.
+  //
+  // Plain INF branch tightened same day, same session, Rees's immediate
+  // follow-up: the corner-OF override above only catches a player with a
+  // real CORNER-OUTFIELD alternative. Tim Silver has no such alternative
+  // (pot_lf=0, pot_rf=35 -- neither override nor the plain COF branch below
+  // would ever claim him) yet was STILL a clear INF misclassification: his
+  // `ifr` (50) clears `inf_range` on its own, but his best actual infield
+  // position-fit is pot_2b=45 -- under even this new, deliberately lower
+  // 50 bar (`inf_pos_pot`, distinct from the override's 55 -- this is a
+  // "does ANY real infield fit exist at all" question, not the override's
+  // "is the infield fit weak enough that outfield should win instead"
+  // question). Added a second requirement directly onto the plain INF
+  // branch: `ifr >= inf_range` AND at least one of pot_2b/pot_3b/pot_ss
+  // clears `inf_pos_pot`. Silver fails this now (all three under 50) and
+  // falls through to 1B (`pot_1b=75`, a real fit) -- exactly where he
+  // belongs, not force-fit into an infield role his potential doesn't
+  // actually support at any specific spot there.
   let role: string;
   if (r.pos === "SP" || r.pos === "RP" || r.pos === "CL") {
     role = sp_rp;
@@ -614,7 +638,12 @@ export function computeRatings(
     Math.max(zero(r.pot_lf), zero(r.pot_rf)) >= ROLE_BUCKET_THRESHOLDS.corner_of_override_pot
   ) {
     role = "COF";
-  } else if (zero(r.ifr) >= ROLE_BUCKET_THRESHOLDS.inf_range) {
+  } else if (
+    zero(r.ifr) >= ROLE_BUCKET_THRESHOLDS.inf_range &&
+    (zero(r.pot_2b) >= ROLE_BUCKET_THRESHOLDS.inf_pos_pot ||
+      zero(r.pot_3b) >= ROLE_BUCKET_THRESHOLDS.inf_pos_pot ||
+      zero(r.pot_ss) >= ROLE_BUCKET_THRESHOLDS.inf_pos_pot)
+  ) {
     role = "INF";
   } else if (Math.max(zero(r.pot_lf), zero(r.pot_rf)) >= ROLE_BUCKET_THRESHOLDS.cof_pot && zero(r.ofr) >= ROLE_BUCKET_THRESHOLDS.cof_range) {
     role = "COF";
