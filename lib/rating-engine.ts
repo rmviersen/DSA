@@ -194,6 +194,9 @@ const ROLE_BUCKET_THRESHOLDS = {
   inf_range: 50,
   cof_pot: 50, cof_range: 50,
   first_base_pot: 55,
+  // Corner-outfield override (2026-09-06, Rees's ask -- see the INF/COF
+  // priority-order comment below for the full case this fixes).
+  corner_of_override_pot: 55,
 };
 
 const zero = (v: number | null) => v ?? 0;
@@ -567,13 +570,34 @@ export function computeRatings(
 
   // --- Role: position-player role grouping. See ROLE_BUCKET_THRESHOLDS
   // above for the full rationale. Priority order (first match wins) is the
-  // real defensive spectrum: C -> SS -> CF -> INF (2B/3B) -> COF -> 1B -> DH.
+  // real defensive spectrum: C -> SS -> CF -> corner-OF override -> INF
+  // (2B/3B) -> COF -> 1B -> DH.
   // Moved ahead of Overall/Potential below (2026-08-31) -- previously
   // computed after them, back when Role was purely a display label with no
   // bearing on the formula itself. Now that fieldingWeight (right below)
   // needs to look Role up, it has to exist first. Safe to move: nothing in
   // this block depends on overall/batting/fielding, only on raw grades and
   // sp_rp/battingP/pitchingP, all already computed above this point.
+  //
+  // Corner-outfield override (2026-09-06, Rees's ask). Real case that
+  // surfaced it: Manny Jimenez (OKC) -- a real Gold Glove-caliber corner
+  // outfielder -- was landing in Role="INF" purely because the plain INF
+  // check below only looks at `ifr`, a single GENERIC infield-range grade,
+  // with no regard for whether the player actually projects at any specific
+  // infield position. Jimenez clears `ifr >= inf_range` (55 >= 50) despite
+  // his real position-fit potentials all falling short (pot_2b=50, pot_3b=45,
+  // pot_ss=40, all under 55) while his corner-outfield potential is real
+  // (pot_lf=60) -- exactly the profile this override targets. Placed BEFORE
+  // the plain INF check specifically so it can intercept and correct a
+  // player who'd otherwise slip into INF on generic range alone; a player
+  // who's genuinely a fit for a specific infield spot (any of 2B/3B/SS
+  // potential >= 55) never reaches this branch's outfield side regardless of
+  // outfield grades, so a true INF/COF two-way profile still resolves to
+  // INF, unchanged. Deliberately potential-only, no outfield-RANGE
+  // requirement (unlike the plain COF branch below, which also needs
+  // `ofr >= cof_range`) -- Rees's spec was exactly these four potential
+  // comparisons, nothing about range; worth revisiting if that turns out
+  // to matter in practice.
   let role: string;
   if (r.pos === "SP" || r.pos === "RP" || r.pos === "CL") {
     role = sp_rp;
@@ -583,6 +607,13 @@ export function computeRatings(
     role = "SS";
   } else if (isCFRole) {
     role = "CF";
+  } else if (
+    zero(r.pot_2b) < ROLE_BUCKET_THRESHOLDS.corner_of_override_pot &&
+    zero(r.pot_3b) < ROLE_BUCKET_THRESHOLDS.corner_of_override_pot &&
+    zero(r.pot_ss) < ROLE_BUCKET_THRESHOLDS.corner_of_override_pot &&
+    Math.max(zero(r.pot_lf), zero(r.pot_rf)) >= ROLE_BUCKET_THRESHOLDS.corner_of_override_pot
+  ) {
+    role = "COF";
   } else if (zero(r.ifr) >= ROLE_BUCKET_THRESHOLDS.inf_range) {
     role = "INF";
   } else if (Math.max(zero(r.pot_lf), zero(r.pot_rf)) >= ROLE_BUCKET_THRESHOLDS.cof_pot && zero(r.ofr) >= ROLE_BUCKET_THRESHOLDS.cof_range) {
