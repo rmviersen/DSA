@@ -1,4 +1,4 @@
-import { getLatestMarketRateCurves, getLatestRoleMultipliers, getTrainingContracts } from "../../../lib/market-rate-query";
+import { getLatestMarketRateCurves, getLatestRoleMultipliers, getTrainingContracts, getOffseasonMarketImpact } from "../../../lib/market-rate-query";
 import MarketRateExplorer from "./MarketRateExplorer";
 
 export const dynamic = "force-dynamic";
@@ -18,10 +18,11 @@ const pageTitleStyle = {
 } as const;
 
 export default async function MarketRatesPage() {
-  const [curves, roleMultipliers, contracts] = await Promise.all([
+  const [curves, roleMultipliers, contracts, offseasonImpact] = await Promise.all([
     getLatestMarketRateCurves(),
     getLatestRoleMultipliers(),
     getTrainingContracts(),
+    getOffseasonMarketImpact(),
   ]);
 
   if (contracts.length === 0) {
@@ -45,7 +46,7 @@ export default async function MarketRatesPage() {
         clean contract is signed — see HANDOFF.md&apos;s transaction-analysis section for the full
         methodology and every filter&apos;s reasoning.
       </p>
-      <MarketRateExplorer curves={curves} roleMultipliers={roleMultipliers} contracts={contracts} />
+      <MarketRateExplorer curves={curves} roleMultipliers={roleMultipliers} contracts={contracts} offseasonImpact={offseasonImpact} />
     </div>
   );
 }

@@ -5,7 +5,7 @@ import {
   Scatter, XAxis, YAxis, ZAxis, CartesianGrid, Legend,
   ResponsiveContainer, Line, ComposedChart,
 } from "recharts";
-import type { MarketRateCurve, RoleMultiplier, TrainingContractPoint } from "../../../lib/market-rate-query";
+import type { MarketRateCurve, RoleMultiplier, TrainingContractPoint, OffseasonImpactResult } from "../../../lib/market-rate-query";
 
 // Interactive tuning view for the market-rate curve (2026-08-31, Rees's
 // ask) -- a scatterplot of the accumulated training pool (Overall vs. AAV)
@@ -51,11 +51,21 @@ interface Props {
   curves: MarketRateCurve[];
   roleMultipliers: RoleMultiplier[];
   contracts: TrainingContractPoint[];
+  offseasonImpact: OffseasonImpactResult;
 }
 
 type PlayerTypeFilter = "all" | "hitter" | "pitcher";
 
-export default function MarketRateExplorer({ curves, roleMultipliers, contracts }: Props) {
+// Predicted AAV at a few representative Overall values (2026-09-07) -- makes
+// the before/after offseason-impact comparison concrete in real dollars,
+// not just regression coefficients nobody can eyeball a magnitude from.
+const SAMPLE_OVERALLS = [45, 55, 65];
+
+function predictedAav(fit: { intercept: number; slope: number }, overall: number): number {
+  return Math.exp(fit.intercept + fit.slope * overall);
+}
+
+export default function MarketRateExplorer({ curves, roleMultipliers, contracts, offseasonImpact }: Props) {
   const allRoles = useMemo(() => [...new Set(contracts.map((c) => c.role))].sort(), [contracts]);
   const [playerTypeFilter, setPlayerTypeFilter] = useState<PlayerTypeFilter>("all");
   const [roleFilter, setRoleFilter] = useState<Set<string>>(new Set(allRoles));
@@ -75,6 +85,25 @@ export default function MarketRateExplorer({ curves, roleMultipliers, contracts 
 
   const hitterCurve = curves.find((c) => c.playerType === "hitter");
   const pitcherCurve = curves.find((c) => c.playerType === "pitcher");
+
+  // Recent signings (2026-09-07, Rees's ask: "a view into recent contracts
+  // signing on that page, now that there should be contracts flowing since
+  // we are in free agency"). Sorted by firstObservedAt -- when
+  // scan-market-contracts.ts first recorded the deal as clean -- not
+  // seasonYear, so this always surfaces "what actually got added to the
+  // training pool most recently" regardless of which season a deal's money
+  // technically starts in.
+  const RECENT_SIGNINGS_LIMIT = 30;
+  const multiplierByRole = useMemo(() => new Map(roleMultipliers.map((r) => [r.role, r.finalMultiplier])), [roleMultipliers]);
+  function curveDrivenFairValue(c: TrainingContractPoint): number | null {
+    const curve = c.playerType === "hitter" ? hitterCurve : pitcherCurve;
+    if (!curve) return null;
+    return predictedAav(curve, c.overall) * (multiplierByRole.get(c.role) ?? 1);
+  }
+  const recentSignings = useMemo(
+    () => [...contracts].sort((a, b) => new Date(b.firstObservedAt).getTime() - new Date(a.firstObservedAt).getTime()).slice(0, RECENT_SIGNINGS_LIMIT),
+    [contracts]
+  );
 
   function toggleRole(role: string) {
     setRoleFilter((prev) => {
@@ -190,6 +219,126 @@ export default function MarketRateExplorer({ curves, roleMultipliers, contracts 
             </div>
           </div>
         ))}
+      </div>
+
+      {/* Offseason impact (2026-09-07, Rees's ask): the SAME regression,
+          fit twice against the same current Overall scale -- once WITHOUT
+          this offseason's new signings, once WITH them -- so the dollar
+          shift shown is isolated to "what free agency actually did," not
+          conflated with whatever else may have changed (a weight retune, a
+          calibration change) since the live curve was last refit. */}
+      {offseasonImpact.curves.length > 0 && (
+        <div style={cardStyle}>
+          <h2 style={sectionTitleStyle}>
+            This offseason&apos;s impact on the curve
+            <span style={{ fontWeight: 400, fontSize: "0.8125rem", color: "var(--color-text-muted)", marginLeft: "0.6rem" }}>
+              season {offseasonImpact.currentSeasonYear}
+            </span>
+          </h2>
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(320px, 1fr))", gap: "1.25rem" }}>
+            {offseasonImpact.curves.map((c) => (
+              <div key={c.playerType}>
+                <div style={{ ...statLabelStyle, marginBottom: "0.35rem" }}>
+                  {c.playerType} — {c.newContractCount} new contract{c.newContractCount === 1 ? "" : "s"} signed this offseason
+                </div>
+                {!c.before ? (
+                  <div style={{ fontSize: "0.8125rem", color: "var(--color-text-muted)" }}>
+                    No contracts existed before this offseason to compare against — {c.after.sampleSize} total, all new.
+                  </div>
+                ) : (
+                  <div style={{ overflowX: "auto" }}>
+                    <table style={{ width: "100%", borderCollapse: "collapse", fontSize: "0.8125rem" }}>
+                      <thead>
+                        <tr style={{ background: "var(--color-table-header)", textAlign: "right" }}>
+                          <th style={{ padding: "0.35rem 0.6rem", textAlign: "left", fontWeight: 700 }}></th>
+                          <th style={{ padding: "0.35rem 0.6rem", fontWeight: 700 }}>Before</th>
+                          <th style={{ padding: "0.35rem 0.6rem", fontWeight: 700 }}>After</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        <tr style={{ borderTop: "1px solid var(--color-border)" }}>
+                          <td style={{ padding: "0.35rem 0.6rem" }}>n</td>
+                          <td style={{ padding: "0.35rem 0.6rem", textAlign: "right", fontVariantNumeric: "tabular-nums" }}>{c.before.sampleSize}</td>
+                          <td style={{ padding: "0.35rem 0.6rem", textAlign: "right", fontVariantNumeric: "tabular-nums" }}>{c.after.sampleSize}</td>
+                        </tr>
+                        <tr style={{ borderTop: "1px solid var(--color-border)" }}>
+                          <td style={{ padding: "0.35rem 0.6rem" }}>R²</td>
+                          <td style={{ padding: "0.35rem 0.6rem", textAlign: "right", fontVariantNumeric: "tabular-nums" }}>{c.before.rSquared.toFixed(3)}</td>
+                          <td style={{ padding: "0.35rem 0.6rem", textAlign: "right", fontVariantNumeric: "tabular-nums" }}>{c.after.rSquared.toFixed(3)}</td>
+                        </tr>
+                        {SAMPLE_OVERALLS.map((ov) => {
+                          const before = predictedAav(c.before!, ov);
+                          const after = predictedAav(c.after, ov);
+                          const pctChange = before > 0 ? ((after - before) / before) * 100 : null;
+                          return (
+                            <tr key={ov} style={{ borderTop: "1px solid var(--color-border)" }}>
+                              <td style={{ padding: "0.35rem 0.6rem" }}>AAV @ {ov} Overall</td>
+                              <td style={{ padding: "0.35rem 0.6rem", textAlign: "right", fontVariantNumeric: "tabular-nums" }}>{fmtMoney(before)}</td>
+                              <td style={{ padding: "0.35rem 0.6rem", textAlign: "right", fontVariantNumeric: "tabular-nums", fontWeight: 700 }}>
+                                {fmtMoney(after)}
+                                {pctChange !== null && (
+                                  <span style={{ marginLeft: "0.4rem", fontWeight: 600, color: pctChange >= 0 ? "var(--color-positive, #22c55e)" : "var(--color-negative, #dc2626)" }}>
+                                    ({pctChange >= 0 ? "+" : ""}{pctChange.toFixed(0)}%)
+                                  </span>
+                                )}
+                              </td>
+                            </tr>
+                          );
+                        })}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* Recent signings (2026-09-07, Rees's ask) */}
+      <div style={cardStyle}>
+        <h2 style={sectionTitleStyle}>Recent signings</h2>
+        <div style={{ overflowX: "auto", maxHeight: 420, overflowY: "auto" }}>
+          <table style={{ width: "100%", borderCollapse: "collapse", fontSize: "0.875rem" }}>
+            <thead>
+              <tr style={{ background: "var(--color-table-header)", textAlign: "left", position: "sticky", top: 0 }}>
+                {["Player", "Role", "Overall", "AAV", "Years", "Season", "Signed", "vs. Curve"].map((h) => (
+                  <th key={h} style={{ padding: "0.5rem 0.75rem", fontWeight: 700 }}>{h}</th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {recentSignings.map((c) => {
+                const fairValue = curveDrivenFairValue(c);
+                const gapPct = fairValue !== null && fairValue > 0 ? ((fairValue - c.aav) / fairValue) * 100 : null;
+                return (
+                  <tr key={`${c.playerId}-${c.firstObservedAt}`} style={{ borderTop: "1px solid var(--color-border)" }}>
+                    <td style={{ padding: "0.45rem 0.75rem" }}>{c.playerName}</td>
+                    <td style={{ padding: "0.45rem 0.75rem", fontWeight: 700, color: colorForRole(c.role) }}>{c.role}</td>
+                    <td style={{ padding: "0.45rem 0.75rem", fontVariantNumeric: "tabular-nums" }}>{c.overall.toFixed(1)}</td>
+                    <td style={{ padding: "0.45rem 0.75rem", fontVariantNumeric: "tabular-nums" }}>{fmtMoney(c.aav)}</td>
+                    <td style={{ padding: "0.45rem 0.75rem", fontVariantNumeric: "tabular-nums" }}>{c.years}</td>
+                    <td style={{ padding: "0.45rem 0.75rem", fontVariantNumeric: "tabular-nums" }}>{c.seasonYear}</td>
+                    <td style={{ padding: "0.45rem 0.75rem", fontVariantNumeric: "tabular-nums" }}>{c.firstObservedAt.slice(0, 10)}</td>
+                    <td
+                      style={{
+                        padding: "0.45rem 0.75rem", textAlign: "right", fontVariantNumeric: "tabular-nums", fontWeight: 600,
+                        color: gapPct === null ? undefined : gapPct >= 0 ? "var(--color-positive, #22c55e)" : "var(--color-negative, #dc2626)",
+                      }}
+                    >
+                      {gapPct === null ? "—" : `${gapPct >= 0 ? "+" : ""}${gapPct.toFixed(0)}%`}
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+        <div style={{ fontSize: "0.75rem", color: "var(--color-text-muted)", marginTop: "0.5rem" }}>
+          Sorted by when each contract was first scanned as clean, newest first. &quot;vs. Curve&quot; is positive
+          (green) when a player signed for LESS than the current curve says his talent is worth, negative (red) when
+          he signed for more.
+        </div>
       </div>
 
       {/* Scatter plot */}
