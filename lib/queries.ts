@@ -248,6 +248,16 @@ export interface PlayerRow extends RatingsSlice {
   demandSalary: number | null;
   fairValueAav: number | null;
   valueGapPct: number | null;
+  // "Sign" (2026-09-06, Rees's ask) -- null for every consumer except
+  // /free-agency (same convention as the value-vs-demand fields above): would
+  // signing this free agent improve OKC's own minor-league system at his
+  // role/level? true/false when evaluable; null when there's no real stat-
+  // based level to evaluate against (see free-agency-query.ts for the exact
+  // rule). suggestedSignLevel is independent of the flag itself -- shown
+  // whenever role+Overall are available, via the same role x level Overall
+  // benchmark ladder the ETA calculation uses to find where a profile fits.
+  signFlag: boolean | null;
+  suggestedSignLevel: string | null;
   draft_year: number | null;
   draft_round: number | null;
   draft_overall_pick: number | null;
@@ -510,6 +520,7 @@ export async function fetchComputedPlayers(opts: { orgId?: number; prospectsOnly
         prospect_role_rank: c.prospect_role_rank, role: c.role, ph: c.ph,
         war: wai?.war ?? null, ab: wai?.ab ?? null, ip: wai?.ip ?? null, statLevel: wai?.statLevel ?? null,
         demandSalary: null as number | null, fairValueAav: null as number | null, valueGapPct: null as number | null,
+        signFlag: null as boolean | null, suggestedSignLevel: null as string | null,
         // StatsPlus returns literal 0, not null, for players who were never
         // drafted (international signees, etc.) -- confirmed 2026-08-19.
         // Normalize to null here so every consumer of PlayerRow gets a
@@ -609,6 +620,79 @@ export async function getRoleLevelBenchmarks(metric: RoleLevelBenchmarkMetric = 
       }),
     };
   });
+}
+
+// "Level-age" benchmarks (2026-09-06, Rees's ask) -- the standard "age
+// relative to level" scouting concept: how old is a TYPICAL player at each
+// level, leaguewide, so any individual player's own age can be read in
+// context (younger than typical = ahead of the normal development curve;
+// older = behind it / organizational filler risk). Deliberately a plain
+// average AGE per level, not a joint age+level Overall benchmark -- a
+// different, simpler question than getRoleLevelBenchmarks answers. Same
+// population rules as that function (leaguewide, effectiveLevel-normalized,
+// MLB restricted to the real active roster) so the two stay directly
+// comparable/consistent, and same "not persisted, read live" architecture --
+// no schema change, no rating-engine involvement, just a query.
+export interface LevelAgeBenchmarkCell {
+  level: number;
+  avgAge: number | null;
+  avgAgeHitter: number | null;
+  avgAgePitcher: number | null;
+  n: number;
+}
+export async function getLevelAgeBenchmarks(): Promise<LevelAgeBenchmarkCell[]> {
+  const refreshRunId = await latestRefreshRunId();
+
+  const players = await fetchAll<{ id: number; level: number | null; is_active: boolean | null; league_id: number | null; age: number | null }>((from, to) =>
+    supabase.from("players").select("id,level,is_active,league_id,age").not("level", "is", null).range(from, to) as never
+  );
+  const playerById = new Map(players.map((p) => [p.id, p]));
+
+  const computed = await fetchAll<{ player_id: number; ph: "H" | "P" | null }>((from, to) =>
+    supabase.from("player_computed").select("player_id,ph").eq("refresh_run_id", refreshRunId).range(from, to) as never
+  );
+
+  const sums = new Map<number, { sum: number; n: number; sumH: number; nH: number; sumP: number; nP: number }>();
+  for (const c of computed) {
+    const p = playerById.get(c.player_id);
+    const level = effectiveLevel(p?.level ?? null, p?.league_id ?? null);
+    if (level == null || level < 1 || level > 8) continue;
+    if (level === 1 && p?.is_active !== true) continue; // real MLB roster only -- same rule as getRoleLevelBenchmarks
+    const age = p?.age ?? null;
+    if (age === null) continue;
+    const cell = sums.get(level) ?? { sum: 0, n: 0, sumH: 0, nH: 0, sumP: 0, nP: 0 };
+    cell.sum += age;
+    cell.n += 1;
+    if (c.ph === "H") { cell.sumH += age; cell.nH += 1; }
+    else if (c.ph === "P") { cell.sumP += age; cell.nP += 1; }
+    sums.set(level, cell);
+  }
+
+  return CANONICAL_LEVELS.map((level) => {
+    const cell = sums.get(level);
+    return {
+      level,
+      avgAge: cell && cell.n > 0 ? cell.sum / cell.n : null,
+      avgAgeHitter: cell && cell.nH > 0 ? cell.sumH / cell.nH : null,
+      avgAgePitcher: cell && cell.nP > 0 ? cell.sumP / cell.nP : null,
+      n: cell?.n ?? 0,
+    };
+  });
+}
+
+// Per-player "age vs. level-age average" (2026-09-06) -- the actual metric
+// this benchmark exists to produce. Negative = younger than typical for that
+// level (ahead of the curve); positive = older (behind it). Type-specific
+// uses the hitter/pitcher split; falls back to the combined average if the
+// type-specific cell has no data yet (a thin population at an unusual
+// level/type combo) rather than returning null over a solvable gap.
+export function ageVsLevelAvg(age: number | null, level: number | null, ph: "H" | "P" | null, benchmarks: LevelAgeBenchmarkCell[]): number | null {
+  if (age === null || level === null) return null;
+  const cell = benchmarks.find((b) => b.level === level);
+  if (!cell) return null;
+  const typeAvg = ph === "P" ? cell.avgAgePitcher : ph === "H" ? cell.avgAgeHitter : null;
+  const avg = typeAvg ?? cell.avgAge;
+  return avg === null ? null : age - avg;
 }
 
 export interface ActiveWeightSet {

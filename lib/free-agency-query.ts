@@ -1,9 +1,10 @@
-import { fetchComputedPlayers, fetchByIdsChunked, latestRefreshRunId } from "./queries";
+import { fetchComputedPlayers, fetchByIdsChunked, latestRefreshRunId, getLevelAgeBenchmarks, ageVsLevelAvg, getRoleLevelBenchmarks } from "./queries";
 import type { PlayerRow } from "./queries";
 import { makeSupabaseClient } from "./supabase-client";
 import { effectiveLevel, levelLabel } from "./display-helpers";
 import { getLatestMarketRateCurves, getLatestRoleMultipliers } from "./market-rate-query";
 import { playerTypeForRole } from "./contract-classification";
+import { fetchAll, ROLE_HEALTH_ROWS, topNAvg } from "./org-minors-query";
 
 // Data layer for /free-agency (2026-09-04, Rees's ask). Kept in its own
 // file, same reasoning as every other page-specific query module this
@@ -22,6 +23,12 @@ import { playerTypeForRole } from "./contract-classification";
 export interface FreeAgentsResult {
   rows: PlayerRow[];
   totalRealFreeAgents: number;
+  // How many of totalRealFreeAgents actually have a player_computed row this
+  // refresh (2026-09-06, added alongside the DISPLAY_LIMIT cap below) --
+  // kept separate from rows.length so the page can distinguish "cut by the
+  // display cap" from "genuinely has no ratings yet this refresh" instead of
+  // conflating the two into one misleading gap.
+  totalWithRatings: number;
 }
 
 // "Real, actionable free agent" (established 2026-08-31 -- see HANDOFF.md's
@@ -69,17 +76,39 @@ export async function getFreeAgents(): Promise<FreeAgentsResult> {
     if (data.length < PAGE_SIZE) break;
     from += PAGE_SIZE;
   }
-  if (players.length === 0) return { rows: [], totalRealFreeAgents: 0 };
+  if (players.length === 0) return { rows: [], totalRealFreeAgents: 0, totalWithRatings: 0 };
 
   const lastTeamIdByPlayer = new Map(players.map((p) => [p.id, p.last_team_id]));
+  const refreshRunId = await latestRefreshRunId();
 
   // fetchComputedPlayers silently drops any id with no player_computed row
   // (a small, real slice right now -- players between team assignments this
   // exact refresh, confirmed ~12% as of 2026-09-04, mostly very young
-  // players with no meaningful position/level context anyway). Surfaced via
-  // totalRealFreeAgents vs. rows.length on the page rather than hidden.
+  // players with no meaningful position/level context anyway). Counted here
+  // (id-only, chunked) SEPARATELY from the display cap below so the two
+  // gaps can't get conflated -- "capped for display" and "genuinely has no
+  // ratings yet" are different facts the page needs to state separately.
   const ids = players.map((p) => p.id);
-  const rawRows = await fetchComputedPlayers({ playerIds: ids, limit: ids.length });
+  const idsWithRatings = await fetchByIdsChunked<{ player_id: number }>(ids, (chunk) =>
+    supabase.from("player_computed").select("player_id").eq("refresh_run_id", refreshRunId).in("player_id", chunk) as never
+  );
+  const totalWithRatings = idsWithRatings.length;
+
+  // Row cap (2026-09-06, Rees's ask -- "we don't need to display that many,
+  // it is causing the page load to take a while"). Was fetching+rendering
+  // every real free agent (2,000+ as of the international-FA fix above);
+  // capped to the top DISPLAY_LIMIT by Overall instead -- fetchComputedPlayers
+  // already sorts by Overall desc and trims to `limit` internally, so this
+  // is a straight cut, not a re-sort. 300 is a starting number, easy to
+  // adjust -- deep enough to still surface real org-depth-caliber talent (not
+  // just MLB-ready studs), not so deep that the page is back to rendering
+  // thousands of rows.
+  const DISPLAY_LIMIT = 300;
+  const rawRows = await fetchComputedPlayers({ playerIds: ids, limit: DISPLAY_LIMIT });
+  // Every downstream per-player lookup (WAR/AB/IP, demand, Sign) only needs
+  // to cover players actually being shown -- chunking the full candidate
+  // pool (thousands of ids) for those would undo the point of the cap above.
+  const displayIds = rawRows.map((r) => r.player_id);
 
   // fetchComputedPlayers resolves team_name/nickname/abbr off players.team_id
   // -- always null for a free agent (no current team). Remap to LAST team
@@ -117,7 +146,6 @@ export async function getFreeAgents(): Promise<FreeAgentsResult> {
   // snapshotted (the exact bug already caught and fixed in rating-
   // validation-query.ts and compute-draft-pick-value.ts -- same rule
   // applies here).
-  const refreshRunId = await latestRefreshRunId();
   const { data: statYearRow } = await supabase
     .from("player_batting_stats_snapshots").select("year")
     .eq("refresh_run_id", refreshRunId).order("year", { ascending: false }).limit(1).maybeSingle();
@@ -141,13 +169,17 @@ export async function getFreeAgents(): Promise<FreeAgentsResult> {
       ?? levels.reduce((best, cur) => (cur.playingTime > best.playingTime ? cur : best));
   }
 
-  const warAbIpById = new Map<number, { war: number | null; ab: number | null; ip: number | null; statLevel: string | null }>();
+  // levelNum (2026-09-06, added for the Sign feature) -- the same chosen
+  // level as statLevel, kept as the raw canonical NUMBER too (statLevel is
+  // already a display label, no good for map lookups against the level-age/
+  // role-level benchmarks below).
+  const warAbIpById = new Map<number, { war: number | null; ab: number | null; ip: number | null; statLevel: string | null; levelNum: number | null }>();
   if (statSeasonYear !== null) {
-    const batData = await fetchByIdsChunked<{ player_id: number; level_id: number; league_id: number | null; pa: number; ab: number; war: number | null }>(ids, (chunk) =>
+    const batData = await fetchByIdsChunked<{ player_id: number; level_id: number; league_id: number | null; pa: number; ab: number; war: number | null }>(displayIds, (chunk) =>
       supabase.from("player_batting_stats_snapshots").select("player_id,level_id,league_id,pa,ab,war")
         .eq("refresh_run_id", refreshRunId).eq("year", statSeasonYear).eq("split_id", 1).in("player_id", chunk) as never
     );
-    const pitData = await fetchByIdsChunked<{ player_id: number; level_id: number; league_id: number | null; ip: number; war: number | null }>(ids, (chunk) =>
+    const pitData = await fetchByIdsChunked<{ player_id: number; level_id: number; league_id: number | null; ip: number; war: number | null }>(displayIds, (chunk) =>
       supabase.from("player_pitching_stats_snapshots").select("player_id,level_id,league_id,ip,war")
         .eq("refresh_run_id", refreshRunId).eq("year", statSeasonYear).eq("split_id", 1).in("player_id", chunk) as never
     );
@@ -193,6 +225,7 @@ export async function getFreeAgents(): Promise<FreeAgentsResult> {
           ab: chosen.displayStat,
           ip: null,
           statLevel: levelLabel(effectiveLevel(chosen.level_id, chosen.league_id)),
+          levelNum: effectiveLevel(chosen.level_id, chosen.league_id),
         });
       } else if (r.ph === "P") {
         const byLevel = pitLevelsByPlayer.get(r.player_id);
@@ -204,6 +237,7 @@ export async function getFreeAgents(): Promise<FreeAgentsResult> {
           ab: null,
           ip: chosen.displayStat,
           statLevel: levelLabel(effectiveLevel(chosen.level_id, chosen.league_id)),
+          levelNum: effectiveLevel(chosen.level_id, chosen.league_id),
         });
       }
     }
@@ -223,7 +257,7 @@ export async function getFreeAgents(): Promise<FreeAgentsResult> {
   const demandImportId = (latestDemandImport as { id: number } | null)?.id ?? null;
   const demandByPlayer = new Map<number, number>();
   if (demandImportId !== null) {
-    const demandRows = await fetchByIdsChunked<{ player_id: number; demand_salary: number | null }>(ids, (chunk) =>
+    const demandRows = await fetchByIdsChunked<{ player_id: number; demand_salary: number | null }>(displayIds, (chunk) =>
       supabase.from("free_agent_demands").select("player_id,demand_salary")
         .eq("import_id", demandImportId).in("player_id", chunk) as never
     );
@@ -241,6 +275,92 @@ export async function getFreeAgents(): Promise<FreeAgentsResult> {
     return base * (multiplierByRole.get(role) ?? 1);
   }
 
+  // "Sign" (2026-09-06, Rees's ask): would signing this free agent, at the
+  // level his real stat line was earned at, improve OKC's own minor-league
+  // system at his role? Two independent pieces, both must hold:
+  //   1. Age vs. the level-age average, BY TYPE -- is he young for that
+  //      level/hitter-or-pitcher combo? (new getLevelAgeBenchmarks/
+  //      ageVsLevelAvg, queries.ts.)
+  //   2. His Overall AND Potential both beat OKC's own average at that same
+  //      role+level -- a lighter, OKC-scoped version of the Role Health
+  //      topN-average idea already built for /my-roster and /org-minors,
+  //      reused here via the same exported ROLE_HEALTH_ROWS/topNAvg helpers.
+  //      Deliberately simplified vs. those pages: no RP-specific "SP
+  //      overflow" pooling rule here, just a plain per-role average --
+  //      flagged as a real simplification, not silently applied.
+  // A role+level combo where OKC has literally zero players counts as "any
+  // real signing would help" (treated as -Infinity), not "unknown" -- no
+  // organizational depth at a spot is exactly the kind of gap this feature
+  // exists to surface, not a reason to withhold judgment.
+  const OKC_ORG_ID = 15;
+  const SIGN_ROLE_ROWS = ROLE_HEALTH_ROWS.filter((row) => row.label !== "P Tot" && row.label !== "H Tot");
+
+  const [levelAgeBenchmarks, roleLevelOverallBenchmarks, okcPlayerRows] = await Promise.all([
+    getLevelAgeBenchmarks(),
+    getRoleLevelBenchmarks("overall"),
+    fetchAll<{ id: number; level: number | null; league_id: number | null }>((from, to) =>
+      supabase.from("players").select("id,level,league_id").eq("organization_id", OKC_ORG_ID).range(from, to) as never
+    ),
+  ]);
+  const okcPlayerById = new Map(okcPlayerRows.map((p) => [p.id, p]));
+  const okcIds = okcPlayerRows.map((p) => p.id);
+  const okcComputed = await fetchByIdsChunked<{ player_id: number; role: string | null; overall: number | null; batting: number | null; potential: number | null }>(okcIds, (chunk) =>
+    supabase.from("player_computed").select("player_id,role,overall,batting,potential").eq("refresh_run_id", refreshRunId).in("player_id", chunk) as never
+  );
+  const okcByRoleLevel = new Map<string, { talent: number[]; potential: number[] }>();
+  for (const c of okcComputed) {
+    if (!c.role) continue;
+    const p = okcPlayerById.get(c.player_id);
+    const level = effectiveLevel(p?.level ?? null, p?.league_id ?? null);
+    if (level === null) continue;
+    const key = `${level}|${c.role}`;
+    const bucket = okcByRoleLevel.get(key) ?? { talent: [], potential: [] };
+    const talentMetric = playerTypeForRole(c.role) === "pitcher" ? c.overall : c.batting;
+    if (talentMetric !== null) bucket.talent.push(talentMetric);
+    if (c.potential !== null) bucket.potential.push(c.potential);
+    okcByRoleLevel.set(key, bucket);
+  }
+  function okcAvgAt(level: number, role: string): { avgTalent: number; avgPotential: number } {
+    const topN = SIGN_ROLE_ROWS.find((row) => row.roles.includes(role))?.topN ?? 1;
+    const bucket = okcByRoleLevel.get(`${level}|${role}`);
+    return {
+      avgTalent: (bucket ? topNAvg(bucket.talent, topN) : null) ?? -Infinity,
+      avgPotential: (bucket ? topNAvg(bucket.potential, topN) : null) ?? -Infinity,
+    };
+  }
+
+  // Suggested level to sign+assign (2026-09-06) -- same interpolation idea
+  // as compute-ratings.ts's ETA model (`estimateSuggestedLevel`): find where
+  // this player's real Overall lands on his OWN role's level x Overall
+  // benchmark ladder (getRoleLevelBenchmarks, the same live aggregation
+  // /glossary and the ETA model both already use), rather than inventing a
+  // second ladder just for this page.
+  const roleLevelOverallByRole = new Map(
+    roleLevelOverallBenchmarks.map((r) => [r.role, new Map(r.byLevel.map((c) => [c.level, c.avgValue]))])
+  );
+  function estimateSuggestedLevelNum(role: string, overall: number): number | null {
+    const byLevel = roleLevelOverallByRole.get(role);
+    if (!byLevel) return null;
+    const points: [number, number][] = [];
+    for (let lvl = 1; lvl <= 8; lvl++) {
+      const v = byLevel.get(lvl);
+      if (v !== null && v !== undefined) points.push([lvl, v]);
+    }
+    if (points.length === 0) return null;
+    if (overall >= points[0][1]) return points[0][0];
+    const worst = points[points.length - 1];
+    if (overall <= worst[1]) return worst[0];
+    for (let i = 0; i < points.length - 1; i++) {
+      const [levelA, valA] = points[i];
+      const [levelB, valB] = points[i + 1];
+      if (overall <= valA && overall >= valB) {
+        const frac = valA === valB ? 0 : (valA - overall) / (valA - valB);
+        return levelA + frac * (levelB - levelA);
+      }
+    }
+    return worst[0];
+  }
+
   const rows: PlayerRow[] = rawRows.map((r) => {
     const lastTeamId = lastTeamIdByPlayer.get(r.player_id);
     const team = lastTeamId != null ? teamById.get(lastTeamId) : undefined;
@@ -250,8 +370,25 @@ export async function getFreeAgents(): Promise<FreeAgentsResult> {
     const valueGapPct = demandSalary !== null && fairValue !== null && fairValue > 0
       ? ((fairValue - demandSalary) / fairValue) * 100
       : null;
+
+    let signFlag: boolean | null = null;
+    let suggestedSignLevel: string | null = null;
+    if (r.role) {
+      const suggestedLevelFrac = estimateSuggestedLevelNum(r.role, r.overall);
+      if (suggestedLevelFrac !== null) suggestedSignLevel = levelLabel(Math.round(suggestedLevelFrac));
+      if (wai?.levelNum != null) {
+        const ageDiff = ageVsLevelAvg(r.age, wai.levelNum, r.ph, levelAgeBenchmarks);
+        if (ageDiff !== null) {
+          const { avgTalent, avgPotential } = okcAvgAt(wai.levelNum, r.role);
+          signFlag = ageDiff < 0 && r.overall > avgTalent && r.potential > avgPotential;
+        }
+      }
+    }
+
     return {
       ...r,
+      signFlag,
+      suggestedSignLevel,
       team_name: team?.name ?? null,
       team_nickname: team?.nickname ?? null,
       team_abbr: lastTeamId != null ? (abbrByTeamId.get(lastTeamId) ?? null) : null,
@@ -265,5 +402,5 @@ export async function getFreeAgents(): Promise<FreeAgentsResult> {
     };
   });
 
-  return { rows, totalRealFreeAgents: players.length };
+  return { rows, totalRealFreeAgents: players.length, totalWithRatings };
 }

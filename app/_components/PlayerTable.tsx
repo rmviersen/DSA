@@ -46,14 +46,14 @@ type SortKey =
   // loses no information.
   | "contactStuff" | "powerMovement" | "eyeControl" | "speedStamina"
   | "overall" | "potential" | "ab" | "ip" | "war" | "prospect_potential" | "prospect_rank"
-  | "demand" | "fairValue" | "valueGap";
+  | "demand" | "fairValue" | "valueGap" | "sign";
 
 // r.ph is "H" for a hitter, "P" for a pitcher (null is not expected in
 // practice but falls back to the hitter side, matching every other
 // nullable-ph default in this component).
 const combined = (r: PlayerRow, hitterVal: number | null, pitcherVal: number | null) => (r.ph === "P" ? pitcherVal : hitterVal);
 
-export function PlayerTable({ rows, showTeam, showProspectCols, showStatLevel, showValueVsDemand }: { rows: PlayerRow[]; showTeam: boolean; showProspectCols: boolean; showStatLevel?: boolean; showValueVsDemand?: boolean }) {
+export function PlayerTable({ rows, showTeam, showProspectCols, showStatLevel, showValueVsDemand, showSign }: { rows: PlayerRow[]; showTeam: boolean; showProspectCols: boolean; showStatLevel?: boolean; showValueVsDemand?: boolean; showSign?: boolean }) {
   const [phFilter, setPhFilter] = useState<"all" | "H" | "P">("all");
   const [roleFilter, setRoleFilter] = useState<Set<string>>(new Set());
   const [sortKey, setSortKey] = useState<SortKey>("overall");
@@ -131,6 +131,9 @@ export function PlayerTable({ rows, showTeam, showProspectCols, showStatLevel, s
         // the bottom regardless of direction -- there's no real "unknown is
         // better/worse" answer, so it shouldn't compete with real values.
         case "valueGap": av = a.valueGapPct ?? -999; bv = b.valueGapPct ?? -999; break;
+        // Missing (null, unevaluable) sorts to the bottom regardless of
+        // direction, same reasoning as valueGap above; true before false.
+        case "sign": av = a.signFlag === true ? 1 : a.signFlag === false ? 0 : -1; bv = b.signFlag === true ? 1 : b.signFlag === false ? 0 : -1; break;
       }
       if (av < bv) return -1 * dir;
       if (av > bv) return 1 * dir;
@@ -161,7 +164,7 @@ export function PlayerTable({ rows, showTeam, showProspectCols, showStatLevel, s
   // both those props, so the empty-state row's colSpan silently under- or
   // over-counted (a cosmetic miss: the "No players match" message just
   // wouldn't span the real table width in those cases).
-  const colCount = 13 + (showTeam ? 1 : 0) + (showStatLevel ? 1 : 0) + (showValueVsDemand ? 3 : 0) + (showProspectCols ? 2 : 0);
+  const colCount = 13 + (showTeam ? 1 : 0) + (showStatLevel ? 1 : 0) + (showValueVsDemand ? 3 : 0) + (showProspectCols ? 2 : 0) + (showSign ? 1 : 0);
 
   return (
     // player-table-page marker (2026-09-04, Rees's ask) -- widens .site-main
@@ -240,6 +243,7 @@ export function PlayerTable({ rows, showTeam, showProspectCols, showStatLevel, s
               {th("Overall", "overall")}
               {th("Potential", "potential")}
               {showStatLevel && <th style={{ whiteSpace: "normal", lineHeight: 1.2, maxWidth: "4.5rem" }} title="The level this AB/IP/WAR line was earned at -- two players can show the same WAR from very different levels">Level</th>}
+              {showSign && th("Sign", "sign")}
               {th("AB", "ab")}
               {th("IP", "ip")}
               {th("WAR", "war")}
@@ -281,6 +285,11 @@ export function PlayerTable({ rows, showTeam, showProspectCols, showStatLevel, s
                 <td style={gradeStyle(r.overall)}>{fmt1(r.overall)}</td>
                 <td style={gradeStyle(r.potential)}>{fmt1(r.potential)}</td>
                 {showStatLevel && <td>{r.statLevel ?? "—"}</td>}
+                {showSign && (
+                  <td style={r.signFlag ? { color: "rgb(34,197,94)", fontWeight: 700 } : undefined} title={r.signFlag === null ? "Not enough data to evaluate (no real stat-based level on file)" : r.signFlag ? "Would improve OKC's system at this role/level" : "Would not improve OKC's system at this role/level"}>
+                    {r.signFlag === true ? "✓ " : ""}{r.suggestedSignLevel ?? "—"}
+                  </td>
+                )}
                 <td>{fmtInt(r.ab)}</td>
                 <td>{fmt1(r.ip)}</td>
                 <td>{fmt1(r.war)}</td>
