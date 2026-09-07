@@ -56,6 +56,15 @@ const combined = (r: PlayerRow, hitterVal: number | null, pitcherVal: number | n
 export function PlayerTable({ rows, showTeam, showProspectCols, showStatLevel, showValueVsDemand, showSign }: { rows: PlayerRow[]; showTeam: boolean; showProspectCols: boolean; showStatLevel?: boolean; showValueVsDemand?: boolean; showSign?: boolean }) {
   const [phFilter, setPhFilter] = useState<"all" | "H" | "P">("all");
   const [roleFilter, setRoleFilter] = useState<Set<string>>(new Set());
+  // Age filter (2026-09-06, Rees's ask) -- plain text state (not number) so
+  // an in-progress edit (e.g. a lone "-" or an empty field while retyping)
+  // doesn't fight the input; parsed to a number only where actually used
+  // below. Empty string = no bound on that side.
+  const [ageMin, setAgeMin] = useState("");
+  const [ageMax, setAgeMax] = useState("");
+  // Sign-only filter (2026-09-06, Rees's ask) -- only meaningful where the
+  // Sign column itself is shown (showSign), same gating as the column.
+  const [signOnly, setSignOnly] = useState(false);
   const [sortKey, setSortKey] = useState<SortKey>("overall");
   const [sortDir, setSortDir] = useState<"asc" | "desc">("desc");
 
@@ -93,11 +102,18 @@ export function PlayerTable({ rows, showTeam, showProspectCols, showStatLevel, s
     return ROLE_ORDER.filter((role) => present.has(role));
   }, [phFiltered]);
 
-  // Multi-select: empty set = no role filter applied.
-  const filteredRows = useMemo(
-    () => (roleFilter.size === 0 ? phFiltered : phFiltered.filter((r) => r.role !== null && roleFilter.has(r.role))),
-    [phFiltered, roleFilter]
-  );
+  // Multi-select: empty set = no role filter applied. Age min/max and
+  // sign-only chain on top -- a player missing age or a null/false Sign
+  // never matches an active bound rather than passing through by default.
+  const filteredRows = useMemo(() => {
+    let out = roleFilter.size === 0 ? phFiltered : phFiltered.filter((r) => r.role !== null && roleFilter.has(r.role));
+    const min = ageMin.trim() === "" ? null : Number(ageMin);
+    const max = ageMax.trim() === "" ? null : Number(ageMax);
+    if (min !== null && !Number.isNaN(min)) out = out.filter((r) => r.age !== null && r.age >= min);
+    if (max !== null && !Number.isNaN(max)) out = out.filter((r) => r.age !== null && r.age <= max);
+    if (signOnly) out = out.filter((r) => r.signFlag === true);
+    return out;
+  }, [phFiltered, roleFilter, ageMin, ageMax, signOnly]);
 
   const sortedRows = useMemo(() => {
     const dir = sortDir === "desc" ? -1 : 1;
@@ -218,6 +234,54 @@ export function PlayerTable({ rows, showTeam, showProspectCols, showStatLevel, s
             style={{ padding: "3px 10px", fontSize: 12, border: "1px solid var(--color-border-strong)", borderRadius: 4, background: "transparent", cursor: "pointer" }}
           >
             Clear roles
+          </button>
+        )}
+        {/* Age filter (2026-09-06, Rees's ask) -- plain min/max number
+            inputs rather than chips, since age is a continuous range, not a
+            small fixed set like H/P or Role. */}
+        <span style={{ fontSize: 12 }}>Age</span>
+        <input
+          type="number"
+          inputMode="numeric"
+          placeholder="min"
+          value={ageMin}
+          onChange={(e) => setAgeMin(e.target.value)}
+          style={{ width: 52, padding: "3px 6px", fontSize: 12, border: "1px solid var(--color-border-strong)", borderRadius: 4, background: "transparent", color: "inherit" }}
+        />
+        <span style={{ fontSize: 12, color: "var(--color-text-muted, #888)" }}>–</span>
+        <input
+          type="number"
+          inputMode="numeric"
+          placeholder="max"
+          value={ageMax}
+          onChange={(e) => setAgeMax(e.target.value)}
+          style={{ width: 52, padding: "3px 6px", fontSize: 12, border: "1px solid var(--color-border-strong)", borderRadius: 4, background: "transparent", color: "inherit" }}
+        />
+        {(ageMin !== "" || ageMax !== "") && (
+          <button
+            onClick={() => { setAgeMin(""); setAgeMax(""); }}
+            style={{ padding: "3px 10px", fontSize: 12, border: "1px solid var(--color-border-strong)", borderRadius: 4, background: "transparent", cursor: "pointer" }}
+          >
+            Clear age
+          </button>
+        )}
+        {/* Sign-only filter (2026-09-06, Rees's ask) -- only where the Sign
+            column itself is shown; not a meaningful concept elsewhere. */}
+        {showSign && (
+          <button
+            onClick={() => setSignOnly((v) => !v)}
+            aria-pressed={signOnly}
+            style={{
+              padding: "3px 10px",
+              fontSize: 12,
+              border: "1px solid var(--color-border-strong)",
+              borderRadius: 4,
+              background: signOnly ? "var(--color-navy)" : "transparent",
+              color: signOnly ? "var(--color-text-on-navy)" : "inherit",
+              cursor: "pointer",
+            }}
+          >
+            ✓ Sign only
           </button>
         )}
         <span style={{ fontSize: 11, color: "var(--color-text-muted, #888)", marginLeft: "auto" }}>
