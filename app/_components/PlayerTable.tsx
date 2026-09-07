@@ -62,6 +62,11 @@ export function PlayerTable({ rows, showTeam, showProspectCols, showStatLevel, s
   // below. Empty string = no bound on that side.
   const [ageMin, setAgeMin] = useState("");
   const [ageMax, setAgeMax] = useState("");
+  // Min Overall filter (2026-09-07, Rees's ask -- for the Rule 5 Draft
+  // Board, but generically useful anywhere, same reasoning as Age) -- min
+  // only, per the actual ask, not a range like Age; easy to add a max later
+  // if that's ever wanted too.
+  const [overallMin, setOverallMin] = useState("");
   // Sign-only filter (2026-09-06, Rees's ask) -- only meaningful where the
   // Sign column itself is shown (showSign), same gating as the column.
   const [signOnly, setSignOnly] = useState(false);
@@ -102,18 +107,21 @@ export function PlayerTable({ rows, showTeam, showProspectCols, showStatLevel, s
     return ROLE_ORDER.filter((role) => present.has(role));
   }, [phFiltered]);
 
-  // Multi-select: empty set = no role filter applied. Age min/max and
-  // sign-only chain on top -- a player missing age or a null/false Sign
-  // never matches an active bound rather than passing through by default.
+  // Multi-select: empty set = no role filter applied. Age min/max, Overall
+  // min, and sign-only chain on top -- a player missing age/overall or a
+  // null/false Sign never matches an active bound rather than passing
+  // through by default.
   const filteredRows = useMemo(() => {
     let out = roleFilter.size === 0 ? phFiltered : phFiltered.filter((r) => r.role !== null && roleFilter.has(r.role));
     const min = ageMin.trim() === "" ? null : Number(ageMin);
     const max = ageMax.trim() === "" ? null : Number(ageMax);
     if (min !== null && !Number.isNaN(min)) out = out.filter((r) => r.age !== null && r.age >= min);
     if (max !== null && !Number.isNaN(max)) out = out.filter((r) => r.age !== null && r.age <= max);
+    const minOverall = overallMin.trim() === "" ? null : Number(overallMin);
+    if (minOverall !== null && !Number.isNaN(minOverall)) out = out.filter((r) => r.overall >= minOverall);
     if (signOnly) out = out.filter((r) => r.signFlag === true);
     return out;
-  }, [phFiltered, roleFilter, ageMin, ageMax, signOnly]);
+  }, [phFiltered, roleFilter, ageMin, ageMax, overallMin, signOnly]);
 
   const sortedRows = useMemo(() => {
     const dir = sortDir === "desc" ? -1 : 1;
@@ -273,6 +281,26 @@ export function PlayerTable({ rows, showTeam, showProspectCols, showStatLevel, s
             style={{ padding: "3px 10px", fontSize: 12, border: "1px solid var(--color-border-strong)", borderRadius: 4, background: "transparent", cursor: "pointer" }}
           >
             Clear age
+          </button>
+        )}
+        {/* Min Overall filter (2026-09-07, Rees's ask, for /rule5-draft's
+            Draft Board -- generically available like Age, min-only per the
+            actual ask). */}
+        <span style={{ fontSize: 12 }}>Min Overall</span>
+        <input
+          type="number"
+          inputMode="numeric"
+          placeholder="min"
+          value={overallMin}
+          onChange={(e) => setOverallMin(e.target.value)}
+          style={{ width: 52, padding: "3px 6px", fontSize: 12, border: "1px solid var(--color-border-strong)", borderRadius: 4, background: "transparent", color: "inherit" }}
+        />
+        {overallMin !== "" && (
+          <button
+            onClick={() => setOverallMin("")}
+            style={{ padding: "3px 10px", fontSize: 12, border: "1px solid var(--color-border-strong)", borderRadius: 4, background: "transparent", cursor: "pointer" }}
+          >
+            Clear min Overall
           </button>
         )}
         {/* Sign-only filter (2026-09-06, Rees's ask) -- only where the Sign
