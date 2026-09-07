@@ -31,16 +31,17 @@ export default async function Rule5DraftPage() {
           added rule: a player must be <strong>23 or older</strong> to actually be selected — real, not redundant
           with the service-time math (79 players leaguewide are otherwise eligible but under 23).{" "}
           <strong>Players to Protect</strong> is Oklahoma City&apos;s own exposed, eligible players — sorted by
-          Overall, so the ones most worth adding to the 40-man are at the top. <strong>Rule 5 Draft Board</strong> is
-          every other org&apos;s exposed, eligible players, worth targeting to draft — capped to the top 100 of
-          whatever your current filters/sort produce (same pattern as Free Agency) since the real leaguewide pool
-          runs over 1,800. Sort by Potential (not just Overall) to surface high-upside arms/bats whose current
-          numbers don&apos;t yet reflect it.
+          Overall and capped to the top 20 of your current filters/sort, so the ones most worth adding to the 40-man
+          are the ones actually shown, not buried in a long list. <strong>Rule 5 Draft Board</strong> is every other
+          org&apos;s exposed, eligible players, worth targeting to draft — capped to the top 100 of whatever your
+          current filters/sort produce (same pattern) since the real leaguewide pool runs over 1,800. Sort by
+          Potential (not just Overall) to surface high-upside arms/bats whose current numbers don&apos;t yet reflect
+          it.
         </p>
       </header>
 
-      <h2 style={{ margin: "0 0 0.5rem" }}>Players to Protect ({toProtect.length})</h2>
-      <PlayerTable rows={toProtect} showTeam showProspectCols />
+      <h2 style={{ margin: "0 0 0.5rem" }}>Players to Protect</h2>
+      <PlayerTable rows={toProtect} showTeam showProspectCols renderLimit={20} />
 
       <h2 style={{ margin: "2rem 0 0.5rem" }}>Rule 5 Draft Board</h2>
       <PlayerTable rows={toDraft} showTeam showProspectCols renderLimit={100} />
