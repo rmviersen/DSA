@@ -29,6 +29,29 @@ export interface FreeAgentsResult {
 // (tens of thousands of amateurs who've never been rostered) -- scoping to
 // previously-rostered, non-retired players is what makes this a real,
 // approachable list rather than a database curiosity.
+//
+// Real bug found and fixed 2026-09-06 (Rees: SP Jong-su Im, a real KBO free
+// agent posting into the league this offseason, was missing from the top of
+// the page). Root cause: `last_team_id != 0` was being used as a proxy for
+// "not a domestic amateur draft-pool player who's never been rostered" --
+// true for the vast majority of that noise (2,550 of them), but Im (and 373
+// others like him -- real professionals, mostly international signings,
+// confirmed via age/name/nation spread, e.g. Korean/Japanese/Taiwanese
+// players in their late 20s-30s with real MLB-caliber ratings) legitimately
+// has `last_team_id=0` too, simply because he's never had a team_id in THIS
+// league before -- last_team_id alone can't tell "never rostered because
+// amateur" apart from "never rostered because new international pro."
+// `players.draft_eligible` is OOTP's own field for exactly this distinction
+// (true for every domestic amateur sampled, ages 15-23, avg 17.7; false for
+// every real professional free agent, ages 15-37, avg 22.0 -- the young end
+// of the false group is real international amateur free agent SIGNEES,
+// analogous to real MLB's international free agency, not draft-pool
+// prospects). Added as an OR, not a replacement, so nothing already correctly
+// included via last_team_id can be affected -- confirmed zero overlap
+// (nobody currently included via last_team_id has draft_eligible=true).
+// Verified: this adds exactly 374 real candidates (320 with usable ratings
+// this refresh, 54 between-refresh like the existing "missing ratings" slice
+// below), Im among them.
 export async function getFreeAgents(): Promise<FreeAgentsResult> {
   const supabase = makeSupabaseClient();
   const PAGE_SIZE = 1000;
@@ -38,7 +61,7 @@ export async function getFreeAgents(): Promise<FreeAgentsResult> {
     const { data, error } = await supabase
       .from("players").select("id,last_team_id")
       .eq("free_agent", true).eq("retired", false)
-      .not("last_team_id", "is", null).neq("last_team_id", 0)
+      .or("and(last_team_id.not.is.null,last_team_id.neq.0),draft_eligible.eq.false")
       .order("id").range(from, from + PAGE_SIZE - 1);
     if (error) throw error;
     if (!data || data.length === 0) break;
@@ -64,7 +87,11 @@ export async function getFreeAgents(): Promise<FreeAgentsResult> {
   // for this page -- players.team_id is correctly left alone for every
   // other consumer of that function (getTopPlayers/getTopDraftees etc.),
   // which genuinely want CURRENT team.
-  const lastTeamIds = [...new Set(rawRows.map((r) => lastTeamIdByPlayer.get(r.player_id)).filter((id): id is number => id != null))];
+  // 2026-09-06: also excludes 0 here, not just null -- new international-
+  // free-agent candidates (added above via draft_eligible) commonly carry
+  // last_team_id=0 (never rostered in this league), same "no real team"
+  // meaning as null, and 0 was never a real team id to look up anyway.
+  const lastTeamIds = [...new Set(rawRows.map((r) => lastTeamIdByPlayer.get(r.player_id)).filter((id): id is number => id != null && id !== 0))];
   const { data: teamRows, error: teamErr } = await supabase.from("teams").select("id,name,nickname").in("id", lastTeamIds);
   if (teamErr) throw teamErr;
   const teamById = new Map((teamRows as { id: number; name: string; nickname: string }[]).map((t) => [t.id, t]));

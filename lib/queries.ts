@@ -313,10 +313,40 @@ export async function fetchComputedPlayers(opts: { orgId?: number; prospectsOnly
   // ever needed a single page and behaves identically -- this only changes
   // behavior for a request that actually exceeds 1000 rows.
   type ComputedRow = { player_id: number; overall: number; potential: number; prospect_potential: number; prospect_rank: number | null; org_rank: number | null; prospect_org_rank: number | null; prospect_role_rank: number | null; role: string | null; ph: "H" | "P" | null; comp_player_id: number | null; comp_similarity: number | null };
-  const sortCol = opts.prospectsOnly ? "prospect_potential" : "overall";
+  const sortCol: "overall" | "prospect_potential" = opts.prospectsOnly ? "prospect_potential" : "overall";
   const targetCount = opts.limit + 50;
   const computed: ComputedRow[] = [];
-  {
+  if (idFilter) {
+    // Real bug found and fixed 2026-09-06: `.in("player_id", idFilter)` was
+    // passed UNCHUNKED into a single request below -- fine for the small
+    // org-scoped case (a few hundred ids), but /free-agency's full candidate
+    // pool grew past ~2,100 ids the day this broke (adding real international
+    // free agents like Jong-su Im, previously wrongly excluded -- see
+    // free-agency-query.ts), and a ~2,100-id `.in()` filter serialized into a
+    // GET request's query string blew past PostgREST's ~16KB URL/header
+    // limit (real error: HeadersOverflowError, "Your request URL is 16940
+    // characters"). `fetchByIdsChunked` (right above) exists for exactly
+    // this and was already used for this function's OTHER id-scoped lookups
+    // (ratings/batting/pitching) -- this was the one spot that still needed
+    // it. Since idFilter already defines the exact universe of ids wanted,
+    // there's no ordering/pagination to preserve per chunk -- fetch every
+    // matching row across as many chunks as needed, then sort+trim to
+    // targetCount in JS, which reproduces the exact same final `computed`
+    // array the old single-query .order()+.range() approach would have
+    // produced (same sort column, same targetCount cutoff), just without
+    // the URL-length ceiling.
+    const rows = await fetchByIdsChunked<ComputedRow>(idFilter, (chunk) => {
+      let cq = supabase
+        .from("player_computed")
+        .select("player_id,overall,potential,prospect_potential,prospect_rank,org_rank,prospect_org_rank,prospect_role_rank,role,ph,comp_player_id,comp_similarity")
+        .eq("refresh_run_id", refreshRunId)
+        .in("player_id", chunk);
+      if (opts.prospectsOnly) cq = cq.not("prospect_rank", "is", null);
+      return cq as never;
+    });
+    rows.sort((a, b) => b[sortCol] - a[sortCol]);
+    computed.push(...rows.slice(0, targetCount));
+  } else {
     const PAGE = 1000;
     let from = 0;
     while (computed.length < targetCount) {
@@ -327,7 +357,6 @@ export async function fetchComputedPlayers(opts: { orgId?: number; prospectsOnly
         .order(sortCol, { ascending: false })
         .range(from, Math.min(from + PAGE, targetCount) - 1);
       if (opts.prospectsOnly) cq = cq.not("prospect_rank", "is", null);
-      if (idFilter) cq = cq.in("player_id", idFilter);
       const { data, error } = await cq;
       if (error) throw error;
       if (!data || data.length === 0) break;
