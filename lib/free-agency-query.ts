@@ -94,17 +94,26 @@ export async function getFreeAgents(): Promise<FreeAgentsResult> {
   );
   const totalWithRatings = idsWithRatings.length;
 
-  // Row cap (2026-09-06, Rees's ask -- "we don't need to display that many,
-  // it is causing the page load to take a while"). Was fetching+rendering
-  // every real free agent (2,000+ as of the international-FA fix above);
-  // capped to the top DISPLAY_LIMIT by Overall instead -- fetchComputedPlayers
-  // already sorts by Overall desc and trims to `limit` internally, so this
-  // is a straight cut, not a re-sort. 300 is a starting number, easy to
-  // adjust -- deep enough to still surface real org-depth-caliber talent (not
-  // just MLB-ready studs), not so deep that the page is back to rendering
-  // thousands of rows.
-  const DISPLAY_LIMIT = 300;
-  const rawRows = await fetchComputedPlayers({ playerIds: ids, limit: DISPLAY_LIMIT });
+  // Row cap -- reworked 2026-09-07 (Rees's follow-up: "show up to 100
+  // players WITH filters, sorting, and all interactions included"). The
+  // original 2026-09-06 fix (cap the SERVER fetch to the top 300 by Overall)
+  // solved the load-time complaint but broke exactly the filters this page
+  // exists to support: Sign-only and a young Age range both surface players
+  // who skew well BELOW the top of the Overall-sorted list (established MLB
+  // regulars dominate the top), so capping the CANDIDATE POOL before any
+  // filter ever runs meant those filters could return next to nothing. Fix:
+  // fetch and compute for the FULL real candidate pool here (no server-side
+  // trim), and cap the RENDERED count to 100 client-side in PlayerTable,
+  // AFTER its filters/sort have already run (see PlayerTable.tsx's
+  // `renderLimit` prop) -- "up to 100" now means the top 100 of whatever
+  // you're currently looking at, never a static pre-filter snapshot.
+  // `ids.length` as the limit means fetchComputedPlayers won't trim at all
+  // (it always internally chunks/fetches every idFilter match regardless of
+  // `limit` -- see queries.ts's 2026-09-06 chunking fix -- `limit` only ever
+  // controlled the final JS-side trim, never the fetch itself, so this isn't
+  // a new query-cost class, just skipping a trim that used to happen after
+  // the real work was already done).
+  const rawRows = await fetchComputedPlayers({ playerIds: ids, limit: ids.length });
   // Every downstream per-player lookup (WAR/AB/IP, demand, Sign) only needs
   // to cover players actually being shown -- chunking the full candidate
   // pool (thousands of ids) for those would undo the point of the cap above.

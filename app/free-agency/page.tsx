@@ -17,8 +17,10 @@ export default async function FreeAgencyPage() {
       <header className="page-header">
         <h1>Free Agency</h1>
         <p>
-          Top {rows.length.toLocaleString()} (by Overall) of {totalWithRatings.toLocaleString()} real free agents with
-          ratings this refresh shown — out of {totalRealFreeAgents.toLocaleString()} total real free agents
+          Shows up to 100 players at a time, always the top 100 of whatever your current filters and sort produce —
+          use the filters below to narrow in on fewer, more specific results rather than scrolling. {totalWithRatings.toLocaleString()}{" "}
+          real free agents have ratings this refresh, out of {totalRealFreeAgents.toLocaleString()} total real free
+          agents
           {missingRatings > 0
             ? ` (${missingRatings} more are between team assignments this refresh and don't have ratings yet)`
             : ""}
@@ -37,7 +39,7 @@ export default async function FreeAgencyPage() {
           Demand means no ask has been generated yet for that player.
         </p>
       </header>
-      <PlayerTable rows={rows} showTeam showProspectCols={false} showStatLevel showSign showValueVsDemand />
+      <PlayerTable rows={rows} showTeam showProspectCols={false} showStatLevel showSign showValueVsDemand renderLimit={100} />
     </>
   );
 }

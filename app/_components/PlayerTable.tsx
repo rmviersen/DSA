@@ -53,7 +53,7 @@ type SortKey =
 // nullable-ph default in this component).
 const combined = (r: PlayerRow, hitterVal: number | null, pitcherVal: number | null) => (r.ph === "P" ? pitcherVal : hitterVal);
 
-export function PlayerTable({ rows, showTeam, showProspectCols, showStatLevel, showValueVsDemand, showSign }: { rows: PlayerRow[]; showTeam: boolean; showProspectCols: boolean; showStatLevel?: boolean; showValueVsDemand?: boolean; showSign?: boolean }) {
+export function PlayerTable({ rows, showTeam, showProspectCols, showStatLevel, showValueVsDemand, showSign, renderLimit }: { rows: PlayerRow[]; showTeam: boolean; showProspectCols: boolean; showStatLevel?: boolean; showValueVsDemand?: boolean; showSign?: boolean; renderLimit?: number }) {
   const [phFilter, setPhFilter] = useState<"all" | "H" | "P">("all");
   const [roleFilter, setRoleFilter] = useState<Set<string>>(new Set());
   // Age filter (2026-09-06, Rees's ask) -- plain text state (not number) so
@@ -156,6 +156,16 @@ export function PlayerTable({ rows, showTeam, showProspectCols, showStatLevel, s
       return 0;
     });
   }, [filteredRows, sortKey, sortDir]);
+
+  // renderLimit (2026-09-07, Rees's ask -- "show up to 100 players with
+  // filters, sorting and all interactions included"). Applied HERE, after
+  // filtering/sorting, not to `rows` itself -- capping the input instead
+  // would mean a filter (Sign-only, a young Age range) could only ever
+  // search within whatever happened to already be in the first N by
+  // Overall, which defeats filters that specifically surface players who
+  // AREN'T at the top of that list. This way "up to 100" always means the
+  // top 100 of your CURRENT view, recomputed live as filters/sort change.
+  const visibleRows = renderLimit ? sortedRows.slice(0, renderLimit) : sortedRows;
 
   // Headers wrap, values don't (2026-09-04, Rees's ask) -- overrides
   // globals.css's sitewide `th { white-space: nowrap }` (shared by every
@@ -289,7 +299,10 @@ export function PlayerTable({ rows, showTeam, showProspectCols, showStatLevel, s
         </span>
       </div>
       <p style={{ color: "var(--color-text-muted, #888)", fontSize: 12, marginTop: -6, marginBottom: 10 }}>
-        {sortedRows.length} of {rows.length} shown. Overall/Potential{showProspectCols ? "/Prospect Potential" : ""} at full precision — internal admin view, not public.
+        {renderLimit && sortedRows.length > renderLimit
+          ? `Top ${visibleRows.length} of ${sortedRows.length} matching your filters shown (${rows.length} total) — narrow the filters above to see fewer, more specific results.`
+          : `${sortedRows.length} of ${rows.length} shown.`}{" "}
+        Overall/Potential{showProspectCols ? "/Prospect Potential" : ""} at full precision — internal admin view, not public.
       </p>
       <div className="table-wrap">
         <table className="player-table">
@@ -331,7 +344,7 @@ export function PlayerTable({ rows, showTeam, showProspectCols, showStatLevel, s
             </tr>
           </thead>
           <tbody>
-            {sortedRows.map((r) => (
+            {visibleRows.map((r) => (
               <tr key={r.player_id}>
                 {/* StatsPlus profile link (2026-08-28, Rees's ask -- same
                     change made on the Minor League System page). New tab so
