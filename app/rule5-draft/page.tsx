@@ -1,0 +1,43 @@
+import { getRule5DraftBoard } from "../../lib/rule5-draft-query";
+import { PlayerTable } from "../_components/PlayerTable";
+
+export const dynamic = "force-dynamic";
+
+// Oklahoma City Outlaws, org id 15 -- same convention as every other
+// OKC-scoped page (/org-minors, /my-roster).
+const DEFAULT_ORG_ID = 15;
+
+// Rule 5 Draft board (2026-09-07, Rees's ask) -- two lists: our own exposed,
+// eligible players worth deciding whether to protect (add to the 40-man
+// before the draft), and every other org's exposed, eligible players worth
+// targeting. Full eligibility-rule writeup lives in rule5-draft-query.ts and
+// HANDOFF.md's transaction-analysis section.
+
+export default async function Rule5DraftPage() {
+  const { toProtect, toDraft } = await getRule5DraftBoard(DEFAULT_ORG_ID);
+
+  return (
+    <>
+      <header className="page-header">
+        <h1>Rule 5 Draft</h1>
+        <p>
+          A player is exposed to the Rule 5 draft once he&apos;s accrued enough professional service time for his
+          signing age (the game&apos;s own <code>years_protected_from_rule_5</code>, 4 or 5 years) and isn&apos;t
+          already on a Secondary (40-man) or active roster. This league&apos;s own added rule: a player must be{" "}
+          <strong>23 or older</strong> to actually be selected — real, not redundant with the service-time math (79
+          players leaguewide are otherwise eligible but under 23). <strong>Players to Protect</strong> is Oklahoma
+          City&apos;s own exposed, eligible players — sorted by Overall, so the ones most worth adding to the 40-man
+          are at the top. <strong>Rule 5 Draft Board</strong> is every other org&apos;s exposed, eligible players,
+          worth targeting to draft — capped to the top 100 of whatever your current filters/sort produce (same
+          pattern as Free Agency) since the real leaguewide pool runs over 1,500.
+        </p>
+      </header>
+
+      <h2 style={{ margin: "0 0 0.5rem" }}>Players to Protect ({toProtect.length})</h2>
+      <PlayerTable rows={toProtect} showTeam showProspectCols />
+
+      <h2 style={{ margin: "2rem 0 0.5rem" }}>Rule 5 Draft Board</h2>
+      <PlayerTable rows={toDraft} showTeam showProspectCols renderLimit={100} />
+    </>
+  );
+}

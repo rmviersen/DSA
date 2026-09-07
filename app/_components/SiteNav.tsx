@@ -25,6 +25,7 @@ const NAV_ITEMS: NavItem[] = [
     { href: "/my-roster", label: "My Roster" },
     { href: "/org-minors", label: "Minor League System" },
     { href: "/free-agency", label: "Free Agency" },
+    { href: "/rule5-draft", label: "Rule 5 Draft" },
   ] },
   // "Reports" (2026-08-31) -- same dropdown-only-until-a-hub-page-exists
   // pattern as "My Team" above: no href of its own yet, just a home for

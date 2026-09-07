@@ -124,7 +124,7 @@ export function PlayerTable({ rows, showTeam, showProspectCols, showStatLevel, s
         case "name": av = `${a.last_name}, ${a.first_name}`; bv = `${b.last_name}, ${b.first_name}`; break;
         case "pos": av = a.pos ?? ""; bv = b.pos ?? ""; break;
         case "role": av = a.role ?? ""; bv = b.role ?? ""; break;
-        case "team": av = a.team_abbr ?? ""; bv = b.team_abbr ?? ""; break;
+        case "team": av = a.team_abbr ?? a.team_nickname ?? ""; bv = b.team_abbr ?? b.team_nickname ?? ""; break;
         case "age": av = a.age ?? -1; bv = b.age ?? -1; break;
         case "contactStuff": av = combined(a, a.cntct, a.stf) ?? -1; bv = combined(b, b.cntct, b.stf) ?? -1; break;
         case "powerMovement": av = combined(a, a.pow, a.mov) ?? -1; bv = combined(b, b.pow, b.mov) ?? -1; break;
@@ -357,7 +357,15 @@ export function PlayerTable({ rows, showTeam, showProspectCols, showStatLevel, s
                 </td>
                 <td>{r.pos ?? "—"}</td>
                 <td>{r.role ?? "—"}</td>
-                {showTeam && <td>{r.team_abbr ?? "—"}</td>}
+                {/* team_abbr comes from team_batting_stats_snapshots, which
+                    only covers MLB-level teams (2026-09-07 finding, on the
+                    Rule 5 page -- almost every row there is a minor-league
+                    affiliate player, the first page to make this gap this
+                    visible). team_nickname (from the `teams` table itself)
+                    is always populated regardless of level, so it's a real
+                    fallback, not a guess -- e.g. "Bulls" for an AAA
+                    affiliate with no MLB-only abbreviation on file. */}
+                {showTeam && <td>{r.team_abbr ?? r.team_nickname ?? "—"}</td>}
                 <td>{r.age ?? "—"}</td>
                 <td style={gradeStyle(r.overall)}>{fmt1(r.overall)}</td>
                 <td style={gradeStyle(r.potential)}>{fmt1(r.potential)}</td>
