@@ -38,6 +38,19 @@ import { fetchAll } from "./org-minors-query";
 // practice (they're 16-19) -- same convention as every other query in this
 // codebase that has to distinguish real rostered players from that hidden
 // population.
+//
+// Real bug found and fixed 2026-09-07 (Rees: "The R5 draft board should not
+// include players that just signed major league deals, they are just
+// waiting to be placed on the active roster"). Confirmed concretely: 34 real
+// players currently pass every filter above (unprotected, eligible, 23+)
+// purely because `is_on_secondary`/`is_active` haven't caught up yet to a
+// real MLB contract they signed this very offseason (`contracts.is_major=
+// true`, `season_year` matching the current one -- these are literally the
+// same signings visible on /admin/market-rates' "Recent signings" table,
+// e.g. Danny Kimball, Aubrey Santomauro, Greg Tarver). A real current MLB
+// contract means a player isn't a genuine Rule 5 case regardless of what the
+// roster-status flags happen to say yet -- excluded via a real `contracts`
+// lookup (`is_major=true`), not a guess at which flag update is lagging.
 const MIN_RULE5_AGE = 23;
 
 export interface Rule5DraftResult {
@@ -61,10 +74,21 @@ export async function getRule5DraftBoard(orgId: number): Promise<Rule5DraftResul
       .range(from, to) as never
   );
 
+  // Every player with a CURRENT real MLB contract on file -- `contracts` is
+  // current-state (one row per player, not a time-series snapshot), so
+  // "has an is_major=true row at all" already means "right now," no extra
+  // season_year check needed.
+  const majorContractPlayerIds = new Set(
+    (await fetchAll<{ player_id: number }>((from, to) =>
+      supabase.from("contracts").select("player_id").eq("is_major", true).range(from, to) as never
+    )).map((c) => c.player_id)
+  );
+
   const eligible = candidates.filter((p) => {
     const effLvl = effectiveLevel(p.level, p.league_id);
     if (effLvl === null || effLvl < 1 || effLvl > 7) return false; // real MLB-through-Rookie levels only, no international academy
     if (p.is_on_secondary === true || p.is_active === true) return false; // already protected
+    if (majorContractPlayerIds.has(p.id)) return false; // real MLB deal on file -- not a genuine Rule 5 case regardless of roster-flag lag
     const protectionYears = p.years_protected_from_rule_5 ?? 0;
     if (protectionYears <= 0) return false; // no real threshold on file -- can't judge eligibility
     return (p.pro_service_years ?? 0) >= protectionYears;
