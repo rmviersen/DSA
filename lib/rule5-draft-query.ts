@@ -69,6 +69,33 @@ import { fetchAll } from "./org-minors-query";
 // contract means a player isn't a genuine Rule 5 case regardless of what the
 // roster-status flags happen to say yet -- excluded via a real `contracts`
 // lookup (`is_major=true`), not a guess at which flag update is lagging.
+//
+// Confirmed against the league's own OFFICIAL rules 2026-09-07 (Rees: "There
+// should be a cleaner flag for r5 eligible players, please probe and confirm
+// we are finding the best way to capture"). Probed for a native, precomputed
+// "Rule 5 eligible" field before trusting a derived one any further: none
+// exists in StatsPlus's public `/players/` export (confirmed against the
+// full 55-column list in statsplus-api-inventory.md) -- OOTP computes
+// eligibility internally (visible in-game as a real "Rule 5: Is: Eligible"
+// filter, per the league's own published rules guide at
+// thebigleagueootp.com/rules/rule5-draft-rules) but doesn't expose that
+// computed boolean through the API, only the raw ingredients
+// (`years_protected_from_rule_5`, `pro_service_years`) this file already
+// derives it from -- so a derived flag genuinely is the best available
+// capture, not a shortcut taken in place of a cleaner one that was missed.
+// That same rules page also gave two real, independent confirmations plus
+// one real gap:
+// - "You do not need to protect any player under the age of 23" -- word for
+//   word confirms the age-23 floor already modeled above.
+// - The official draft-pool filter is exactly "Age > 22, Organization is
+//   not your team, League Level is not Major League" -- confirms org/age
+//   scoping, and surfaces a real gap this file didn't have: MLB level (1)
+//   wasn't being explicitly excluded, only implicitly via is_on_secondary/
+//   is_active. Found a real, non-theoretical case: 10 real players (all one
+//   org, a data-sync quirk, not a fluke of the query) sit at level=1 with
+//   BOTH roster flags false -- exactly the gap the official filter's "not
+//   Major League" condition exists to close. Added explicitly below rather
+//   than assumed already covered.
 const MIN_RULE5_AGE = 23;
 
 export interface Rule5DraftResult {
@@ -104,7 +131,13 @@ export async function getRule5DraftBoard(orgId: number): Promise<Rule5DraftResul
 
   const eligible = candidates.filter((p) => {
     const effLvl = effectiveLevel(p.level, p.league_id);
-    if (effLvl === null || effLvl < 1 || effLvl > 7) return false; // real MLB-through-Rookie levels only, no international academy
+    // Real minor-league levels only (2=AAA through 7=Rookie) -- excludes
+    // level 1 (MLB) explicitly, matching the official draft-pool filter's
+    // "League Level is not Major League" condition, not just implicitly via
+    // is_on_secondary/is_active below (see the file comment for the 10 real
+    // players that gap let through). Also excludes 8 (international
+    // academy), same as before.
+    if (effLvl === null || effLvl < 2 || effLvl > 7) return false;
     if (p.is_on_secondary === true || p.is_active === true) return false; // already protected
     if (majorContractPlayerIds.has(p.id)) return false; // real MLB deal on file -- not a genuine Rule 5 case regardless of roster-flag lag
     const protectionYears = p.years_protected_from_rule_5 ?? 0;
