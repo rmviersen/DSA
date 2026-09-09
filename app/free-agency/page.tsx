@@ -36,7 +36,10 @@ export default async function FreeAgencyPage() {
           after a fresh export to update it); &quot;Fair Value&quot; is what the market-rate curve says that talent
           level is actually worth; &quot;Value Gap&quot; is the difference as a % of fair value — positive (green)
           means he&apos;s asking for less than he&apos;s worth, negative (red) means he&apos;s asking for more. Blank
-          Demand means no ask has been generated yet for that player.
+          Demand means no ask has been generated yet for that player. &quot;Durability&quot; is the game&apos;s own
+          injury-proneness scouting grade (Iron Man → Durable → Normal → Fragile → Wrecked, best to worst) — use the
+          filter chips above to include/exclude by tier, or the Demand min/max fields to bracket by real dollar ask
+          (in whole $M).
         </p>
       </header>
       <PlayerTable rows={rows} showTeam showProspectCols={false} showStatLevel showSign showValueVsDemand renderLimit={100} />

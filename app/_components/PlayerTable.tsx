@@ -36,6 +36,17 @@ const valueGapStyle = (pct: number | null) => (pct === null ? undefined : percen
 // roughly pitchers first, then hitter roles by defensive spectrum.
 const ROLE_ORDER = ["SP", "RP", "C", "1B", "INF", "SS", "COF", "CF", "DH"];
 
+// Injury proneness (2026-09-09, Rees's ask) -- best to worst, the real
+// distinct values confirmed in player_ratings_snapshots.prone. Colors follow
+// the sitewide gradient's own stops loosely (green=good, red=bad) rather
+// than a numeric interpolation, since this is a 5-tier category, not a
+// 20-80 grade.
+const PRONE_ORDER = ["Iron Man", "Durable", "Normal", "Fragile", "Wrecked"];
+const PRONE_COLORS: Record<string, string> = {
+  "Iron Man": "rgb(56,189,248)", Durable: "rgb(34,197,94)", Normal: "var(--color-text-muted, #888)",
+  Fragile: "rgb(249,115,22)", Wrecked: "rgb(220,38,38)",
+};
+
 type SortKey =
   | "name" | "pos" | "role" | "team" | "age"
   // Combined hitter/pitcher tool columns (2026-09-04, Rees's ask -- cuts 8
@@ -46,7 +57,7 @@ type SortKey =
   // loses no information.
   | "contactStuff" | "powerMovement" | "eyeControl" | "speedStamina"
   | "overall" | "potential" | "ab" | "ip" | "war" | "prospect_potential" | "prospect_rank"
-  | "demand" | "fairValue" | "valueGap" | "sign";
+  | "demand" | "fairValue" | "valueGap" | "sign" | "prone";
 
 // r.ph is "H" for a hitter, "P" for a pitcher (null is not expected in
 // practice but falls back to the hitter side, matching every other
@@ -70,6 +81,17 @@ export function PlayerTable({ rows, showTeam, showProspectCols, showStatLevel, s
   // Sign-only filter (2026-09-06, Rees's ask) -- only meaningful where the
   // Sign column itself is shown (showSign), same gating as the column.
   const [signOnly, setSignOnly] = useState(false);
+  // Injury Proneness filter (2026-09-09, Rees's ask) -- multi-select chips,
+  // same pattern as Role. Generic (not gated behind a prop), same reasoning
+  // as Age/Min Overall -- prone is now populated for every PlayerTable
+  // consumer, not just /free-agency.
+  const [proneFilter, setProneFilter] = useState<Set<string>>(new Set());
+  // Demand filter (2026-09-09, Rees's ask) -- only meaningful where Demand
+  // itself is shown (showValueVsDemand), same gating as those columns.
+  // Entered in whole millions (matching fmtMoney's own display convention)
+  // rather than raw dollars -- typing "5" for $5M beats typing "5000000".
+  const [demandMinM, setDemandMinM] = useState("");
+  const [demandMaxM, setDemandMaxM] = useState("");
   const [sortKey, setSortKey] = useState<SortKey>("overall");
   const [sortDir, setSortDir] = useState<"asc" | "desc">("desc");
 
@@ -95,6 +117,15 @@ export function PlayerTable({ rows, showTeam, showProspectCols, showStatLevel, s
     });
   }
 
+  function toggleProne(prone: string) {
+    setProneFilter((prev) => {
+      const next = new Set(prev);
+      if (next.has(prone)) next.delete(prone);
+      else next.add(prone);
+      return next;
+    });
+  }
+
   const phFiltered = useMemo(
     () => (phFilter === "all" ? rows : rows.filter((r) => r.ph === phFilter)),
     [rows, phFilter]
@@ -107,21 +138,33 @@ export function PlayerTable({ rows, showTeam, showProspectCols, showStatLevel, s
     return ROLE_ORDER.filter((role) => present.has(role));
   }, [phFiltered]);
 
-  // Multi-select: empty set = no role filter applied. Age min/max, Overall
-  // min, and sign-only chain on top -- a player missing age/overall or a
-  // null/false Sign never matches an active bound rather than passing
-  // through by default.
+  // Prone options, same derivation pattern as Role -- only offer chips for
+  // categories actually present in the current H/P-filtered set.
+  const proneOptions = useMemo(() => {
+    const present = new Set(phFiltered.map((r) => r.prone).filter((p): p is string => !!p));
+    return PRONE_ORDER.filter((p) => present.has(p));
+  }, [phFiltered]);
+
+  // Multi-select: empty set = no role/prone filter applied. Age min/max,
+  // Overall min, Demand min/max, and sign-only chain on top -- a player
+  // missing age/overall/demand or a null/false Sign never matches an active
+  // bound rather than passing through by default.
   const filteredRows = useMemo(() => {
     let out = roleFilter.size === 0 ? phFiltered : phFiltered.filter((r) => r.role !== null && roleFilter.has(r.role));
+    if (proneFilter.size > 0) out = out.filter((r) => r.prone !== null && proneFilter.has(r.prone));
     const min = ageMin.trim() === "" ? null : Number(ageMin);
     const max = ageMax.trim() === "" ? null : Number(ageMax);
     if (min !== null && !Number.isNaN(min)) out = out.filter((r) => r.age !== null && r.age >= min);
     if (max !== null && !Number.isNaN(max)) out = out.filter((r) => r.age !== null && r.age <= max);
     const minOverall = overallMin.trim() === "" ? null : Number(overallMin);
     if (minOverall !== null && !Number.isNaN(minOverall)) out = out.filter((r) => r.overall >= minOverall);
+    const demandMin = demandMinM.trim() === "" ? null : Number(demandMinM) * 1_000_000;
+    const demandMax = demandMaxM.trim() === "" ? null : Number(demandMaxM) * 1_000_000;
+    if (demandMin !== null && !Number.isNaN(demandMin)) out = out.filter((r) => r.demandSalary !== null && r.demandSalary >= demandMin);
+    if (demandMax !== null && !Number.isNaN(demandMax)) out = out.filter((r) => r.demandSalary !== null && r.demandSalary <= demandMax);
     if (signOnly) out = out.filter((r) => r.signFlag === true);
     return out;
-  }, [phFiltered, roleFilter, ageMin, ageMax, overallMin, signOnly]);
+  }, [phFiltered, roleFilter, proneFilter, ageMin, ageMax, overallMin, demandMinM, demandMaxM, signOnly]);
 
   const sortedRows = useMemo(() => {
     const dir = sortDir === "desc" ? -1 : 1;
@@ -158,6 +201,10 @@ export function PlayerTable({ rows, showTeam, showProspectCols, showStatLevel, s
         // Missing (null, unevaluable) sorts to the bottom regardless of
         // direction, same reasoning as valueGap above; true before false.
         case "sign": av = a.signFlag === true ? 1 : a.signFlag === false ? 0 : -1; bv = b.signFlag === true ? 1 : b.signFlag === false ? 0 : -1; break;
+        // Ranked by real durability (Iron Man best, Wrecked worst), not
+        // alphabetically -- higher score = more durable, so "desc" reads as
+        // "most durable first," consistent with every other column here.
+        case "prone": av = a.prone ? PRONE_ORDER.length - PRONE_ORDER.indexOf(a.prone) : -1; bv = b.prone ? PRONE_ORDER.length - PRONE_ORDER.indexOf(b.prone) : -1; break;
       }
       if (av < bv) return -1 * dir;
       if (av > bv) return 1 * dir;
@@ -192,13 +239,15 @@ export function PlayerTable({ rows, showTeam, showProspectCols, showStatLevel, s
     </th>
   );
 
-  // Base 13: Name/Pos/Role/Age/Overall/Potential/AB/IP/WAR + the 4 combined
-  // grade columns. Fixed 2026-09-04 to actually account for showStatLevel/
-  // showValueVsDemand -- previously hardcoded at a stale 15 that predated
-  // both those props, so the empty-state row's colSpan silently under- or
-  // over-counted (a cosmetic miss: the "No players match" message just
-  // wouldn't span the real table width in those cases).
-  const colCount = 13 + (showTeam ? 1 : 0) + (showStatLevel ? 1 : 0) + (showValueVsDemand ? 3 : 0) + (showProspectCols ? 2 : 0) + (showSign ? 1 : 0);
+  // Base 14: Name/Pos/Role/Age/Durability/Overall/Potential/AB/IP/WAR + the 4
+  // combined grade columns. Fixed 2026-09-04 to actually account for
+  // showStatLevel/showValueVsDemand -- previously hardcoded at a stale 15
+  // that predated both those props, so the empty-state row's colSpan
+  // silently under- or over-counted (a cosmetic miss: the "No players
+  // match" message just wouldn't span the real table width in those
+  // cases). Bumped 13->14 on 2026-09-09 for the new always-shown
+  // Durability column.
+  const colCount = 14 + (showTeam ? 1 : 0) + (showStatLevel ? 1 : 0) + (showValueVsDemand ? 3 : 0) + (showProspectCols ? 2 : 0) + (showSign ? 1 : 0);
 
   return (
     // player-table-page marker (2026-09-04, Rees's ask) -- widens .site-main
@@ -254,6 +303,42 @@ export function PlayerTable({ rows, showTeam, showProspectCols, showStatLevel, s
             Clear roles
           </button>
         )}
+        {/* Injury Proneness filter (2026-09-09, Rees's ask) -- same
+            multi-select-chip pattern as Role, colored by durability
+            (green=durable, red=injury-prone) rather than the neutral
+            navy-highlight Role uses, so a glance at the active chips already
+            reads as "which risk level am I including." */}
+        {proneOptions.length > 0 && <span style={{ fontSize: 12 }}>Durability</span>}
+        {proneOptions.map((prone) => {
+          const active = proneFilter.has(prone);
+          const color = PRONE_COLORS[prone] ?? "var(--color-border-strong)";
+          return (
+            <button
+              key={prone}
+              onClick={() => toggleProne(prone)}
+              aria-pressed={active}
+              style={{
+                padding: "3px 10px",
+                fontSize: 12,
+                border: `1.5px solid ${color}`,
+                borderRadius: 4,
+                background: active ? color : "transparent",
+                color: active ? "#fff" : "inherit",
+                cursor: "pointer",
+              }}
+            >
+              {prone}
+            </button>
+          );
+        })}
+        {proneFilter.size > 0 && (
+          <button
+            onClick={() => setProneFilter(new Set())}
+            style={{ padding: "3px 10px", fontSize: 12, border: "1px solid var(--color-border-strong)", borderRadius: 4, background: "transparent", cursor: "pointer" }}
+          >
+            Clear durability
+          </button>
+        )}
         {/* Age filter (2026-09-06, Rees's ask) -- plain min/max number
             inputs rather than chips, since age is a continuous range, not a
             small fixed set like H/P or Role. */}
@@ -303,6 +388,40 @@ export function PlayerTable({ rows, showTeam, showProspectCols, showStatLevel, s
             Clear min Overall
           </button>
         )}
+        {/* Demand filter (2026-09-09, Rees's ask) -- only where Demand
+            itself is shown (showValueVsDemand); not a meaningful concept
+            elsewhere. Entered in whole $M, matching fmtMoney's own display
+            convention, converted to raw dollars at filter time. */}
+        {showValueVsDemand && (
+          <>
+            <span style={{ fontSize: 12 }}>Demand ($M)</span>
+            <input
+              type="number"
+              inputMode="numeric"
+              placeholder="min"
+              value={demandMinM}
+              onChange={(e) => setDemandMinM(e.target.value)}
+              style={{ width: 52, padding: "3px 6px", fontSize: 12, border: "1px solid var(--color-border-strong)", borderRadius: 4, background: "transparent", color: "inherit" }}
+            />
+            <span style={{ fontSize: 12, color: "var(--color-text-muted, #888)" }}>–</span>
+            <input
+              type="number"
+              inputMode="numeric"
+              placeholder="max"
+              value={demandMaxM}
+              onChange={(e) => setDemandMaxM(e.target.value)}
+              style={{ width: 52, padding: "3px 6px", fontSize: 12, border: "1px solid var(--color-border-strong)", borderRadius: 4, background: "transparent", color: "inherit" }}
+            />
+            {(demandMinM !== "" || demandMaxM !== "") && (
+              <button
+                onClick={() => { setDemandMinM(""); setDemandMaxM(""); }}
+                style={{ padding: "3px 10px", fontSize: 12, border: "1px solid var(--color-border-strong)", borderRadius: 4, background: "transparent", cursor: "pointer" }}
+              >
+                Clear demand
+              </button>
+            )}
+          </>
+        )}
         {/* Sign-only filter (2026-09-06, Rees's ask) -- only where the Sign
             column itself is shown; not a meaningful concept elsewhere. */}
         {showSign && (
@@ -341,6 +460,10 @@ export function PlayerTable({ rows, showTeam, showProspectCols, showStatLevel, s
               {th("Role", "role")}
               {showTeam && th("Team", "team")}
               {th("Age", "age")}
+              {/* Durability (2026-09-09, Rees's ask) -- bio info, so grouped
+                  with Age rather than off in the ratings columns. Gives the
+                  new Injury Proneness filter something visible to look at. */}
+              {th("Durability", "prone")}
               {/* Our analysis (computed output) first, then the underlying
                   raw ratings at the end (2026-09-04, Rees's ask) -- the
                   engine's own conclusions are what you scan first, the
@@ -395,6 +518,7 @@ export function PlayerTable({ rows, showTeam, showProspectCols, showStatLevel, s
                     affiliate with no MLB-only abbreviation on file. */}
                 {showTeam && <td>{r.team_abbr ?? r.team_nickname ?? "—"}</td>}
                 <td>{r.age ?? "—"}</td>
+                <td style={r.prone ? { color: PRONE_COLORS[r.prone] } : undefined}>{r.prone ?? "—"}</td>
                 <td style={gradeStyle(r.overall)}>{fmt1(r.overall)}</td>
                 <td style={gradeStyle(r.potential)}>{fmt1(r.potential)}</td>
                 {showStatLevel && <td>{r.statLevel ?? "—"}</td>}

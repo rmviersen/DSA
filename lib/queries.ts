@@ -205,6 +205,12 @@ interface RatingsSlice {
   cntct: number | null; pow: number | null; eye: number | null; speed: number | null;
   stf: number | null; mov: number | null; ctrl: number | null; stm: number | null;
   pos: string | null;
+  // Injury proneness (2026-09-09, Rees's ask -- a filter for /free-agency).
+  // Real distinct values confirmed: "Iron Man"/"Durable"/"Normal"/"Fragile"/
+  // "Wrecked" (best to worst) -- the same field rating-engine.ts's own
+  // isBustRisk check already reads (`r.prone === "Fragile" || "Wrecked"`),
+  // just not previously surfaced to any page.
+  prone: string | null;
 }
 
 export interface PlayerRow extends RatingsSlice {
@@ -422,7 +428,7 @@ export async function fetchComputedPlayers(opts: { orgId?: number; prospectsOnly
   const ratingsData = await fetchByIdsChunked<{ player_id: number } & RatingsSlice>(relevantIds, (chunk) =>
     supabase
       .from("player_ratings_snapshots")
-      .select("player_id,cntct,pow,eye,speed,stf,mov,ctrl,stm,pos")
+      .select("player_id,cntct,pow,eye,speed,stf,mov,ctrl,stm,pos,prone")
       .eq("refresh_run_id", refreshRunId)
       .in("player_id", chunk) as never
   );
