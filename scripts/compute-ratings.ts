@@ -180,17 +180,39 @@ async function computeRatingsForRun(supabase: ReturnType<typeof makeSupabaseClie
   // ever iterated in bulk elsewhere in this file).
   const ratingsByPlayer = new Map(ratings.map((r) => [r.player_id, r]));
 
-  // "Current year" -- no field gives us this directly, so we use the most
-  // recent season we actually have stats for in this refresh. Falls back to
-  // the captured_at year if no stats snapshot exists (e.g. first run with
-  // --skip-ratings-only stats never pulled). Moved earlier in the file
-  // 2026-08-24 so the handedness-split window below can use it too -- used
-  // to only be needed for ETA math further down.
-  const { data: yearRow } = await supabase
-    .from("player_batting_stats_snapshots").select("year")
-    .eq("refresh_run_id", refreshRunId).order("year", { ascending: false }).limit(1).maybeSingle();
-  const currentYear = (yearRow as { year: number } | null)?.year ?? new Date().getFullYear();
-  console.log(`Using current_year=${currentYear}`);
+  // "Current year" -- the most recent COMPLETED season. Real bug found and
+  // fixed 2026-09-09: this used to be "whatever year we have the most recent
+  // stats for IN THIS REFRESH," which is legitimately EMPTY during the
+  // offseason (confirmed real: refresh_run_id 32 and 33, game_date
+  // 2032-01-18/2032-02-18, both show zero rows in
+  // player_batting_stats_snapshots -- the new season's games haven't been
+  // played yet, nothing to pull) -- when that happened, this fell back to
+  // `new Date().getFullYear()`, the REAL-WORLD calendar year, which has
+  // nothing to do with the in-game one. That one bad value then silently
+  // broke two different things downstream: the handedness-split window right
+  // below (searched for stats in years that don't exist in-game at all,
+  // degrading to a flat 50/50 split instead of the league's real ~75/25
+  // skew) and every prospect's ETA (`estimateEta` adds `currentYear` to a
+  // computed years-away figure -- a wrong base year means a wrong ETA for
+  // everyone, not just a blank one).
+  //
+  // Fixed per Rees's exact spec: "the calc should run strictly off the last
+  // 3 COMPLETED seasons, ignore seasons that have not started or are
+  // ongoing." Derived from the game's own calendar (gameDate/isOffseason,
+  // already computed above), never from whatever stats rows happen to exist
+  // in this one run and never from the real-world date. `isOffseason`
+  // already means "gameYear's own season has concluded" (the same signal
+  // ETA's own same-year check uses) -- exactly the condition that promotes
+  // gameYear from "not started / still in progress" to "completed": before
+  // or during gameYear's season, the last completed one is gameYear-1; once
+  // gameYear's own season has wrapped, gameYear itself counts. This holds
+  // correctly across the calendar-year boundary too (Jan-Mar of the
+  // following real year still correctly resolves back to the season that
+  // just finished the previous October, since gameYear itself has by then
+  // incremented and isOffseason's month check resets independently of it).
+  const gameYear = gameDate ? Number(gameDate.slice(0, 4)) : new Date().getFullYear();
+  const currentYear = isOffseason ? gameYear : gameYear - 1;
+  console.log(`Using current_year=${currentYear} (gameYear=${gameYear}, isOffseason=${isOffseason})`);
 
   // --- Real league handedness splits, 2026-08-24 (Rees's spec) -------
   // How much of real MLB offense/pitching, over the last 3 seasons, actually
@@ -214,14 +236,44 @@ async function computeRatingsForRun(supabase: ReturnType<typeof makeSupabaseClie
   // unpaginated version only ever saw 2,164 of them, skewing the league
   // split by ~0.1-0.2 points). Fixed by paginating with .range() INSIDE
   // each player-id chunk too, not just across chunks.
+  // Real bug found and fixed 2026-09-09, alongside the current_year fix
+  // above: this used to filter to the CURRENT refresh_run_id, which is
+  // legitimately empty during the offseason (confirmed: refresh_run_id 32
+  // and 33 have ZERO rows in either stats table, for ANY year, not just the
+  // still-unplayed new season -- the ingestion step simply has nothing to
+  // pull yet). Fixing the target YEARS alone (current_year, above) wasn't
+  // enough on its own -- asking the right years of a refresh that never
+  // captured any stats at all still returns nothing. Fixed by sourcing from
+  // whichever refresh_run_id most recently actually captured real stats for
+  // THIS table, rather than assuming the run being computed has them --
+  // correct regardless of how many stats-less offseason refreshes happen in
+  // a row, since a completed season's real totals don't change once it's
+  // over. Looked up once per table (not assumed to be the same run for
+  // both), defensively, though in practice both are ingested together.
+  //
+  // Known limit, not yet hit in practice: this trusts the single latest
+  // stats-bearing run to carry ALL 3 target years together (true today --
+  // run 31 has 2029-2031 all in one place). If a future refresh resumes
+  // stats-pulling for only the newest season without re-carrying the two
+  // before it, this would need to become a per-year (or per player/year/
+  // split) lookup across whichever runs actually have each year, similar to
+  // the career-workload dedup above in loadSharedContext -- flagging here
+  // rather than building that now for a case that hasn't happened yet.
+  async function latestStatsRunId(table: string): Promise<number> {
+    const { data } = await supabase.from(table).select("refresh_run_id").order("refresh_run_id", { ascending: false }).limit(1).maybeSingle();
+    return (data as { refresh_run_id: number } | null)?.refresh_run_id ?? refreshRunId;
+  }
+
   async function sumBySplit(table: string, statCol: string): Promise<{ vsL: number; vsR: number }> {
+    const statsRunId = await latestStatsRunId(table);
+    if (statsRunId !== refreshRunId) console.log(`  ${table}: refresh_run_id ${refreshRunId} has no stats yet -- using most recent stats-bearing run ${statsRunId} instead`);
     let vsL = 0, vsR = 0;
     for (let i = 0; i < mlbPlayerIds.length; i += 500) {
       const chunk = mlbPlayerIds.slice(i, i + 500);
       const rows = await fetchAll<{ split_id: number; [key: string]: number }>((from, to) =>
         supabase.from(table)
           .select(`${statCol},split_id`)
-          .eq("refresh_run_id", refreshRunId).in("year", last3Years).in("split_id", [2, 3]).in("player_id", chunk)
+          .eq("refresh_run_id", statsRunId).in("year", last3Years).in("split_id", [2, 3]).in("player_id", chunk)
           .range(from, to) as never
       );
       rows.forEach((row) => {
