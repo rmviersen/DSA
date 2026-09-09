@@ -513,7 +513,19 @@ export function PlayerTable({ rows, showTeam, showProspectCols, showStatLevel, s
                 <td style={{ whiteSpace: "nowrap" }}>
                   {/* Name links to our own player detail page (2026-08-29);
                       StatsPlus is a small separate "↗" link right after. */}
-                  <Link href={`/players/${r.player_id}`} style={{ color: "inherit" }}>{r.first_name} {r.last_name}</Link>
+                  <Link href={`/players/${r.player_id}`} style={{ color: r.isInjured ? "rgb(220,38,38)" : "inherit" }}>{r.first_name} {r.last_name}</Link>
+                  {/* Injury badge (2026-09-10, Rees's ask -- red name plus
+                      injury length, "in a small, discreet way so it doesn't
+                      add another wide column"). Compact text right next to
+                      the name rather than a real column; hover for the full
+                      status ("DL-60, 12 days left") via title. Only rendered
+                      when actually injured -- a healthy player's row looks
+                      exactly like it did before this. */}
+                  {r.isInjured && (
+                    <span title={r.injuryLabel} style={{ marginLeft: 4, fontSize: 10, color: "rgb(220,38,38)", opacity: 0.85 }}>
+                      ({r.injuryBadge})
+                    </span>
+                  )}
                   <a href={statsPlusPlayerUrl(r.player_id)} target="_blank" rel="noopener noreferrer" title="View on StatsPlus" style={{ marginLeft: 4, fontSize: 11, opacity: 0.7 }}>↗</a>
                 </td>
                 <td>{r.pos ?? "—"}</td>

@@ -5,7 +5,7 @@
 // under /players/[id], which is admin-only automatically (middleware.ts's
 // GUEST_ALLOWED_PATHS doesn't include it, same as /players and /org-minors).
 import { makeSupabaseClient } from "./supabase-client";
-import { levelLabel, effectiveLevel } from "./display-helpers";
+import { levelLabel, effectiveLevel, injuryStatus } from "./display-helpers";
 
 const supabase = makeSupabaseClient();
 
@@ -38,17 +38,6 @@ function heightLabel(cm: number | null): string | null {
   const feet = Math.floor(totalInches / 12);
   const inches = totalInches % 12;
   return `${feet}'${inches}"`;
-}
-
-function injuryStatusLabel(p: {
-  injury_is_injured: boolean | null;
-  is_on_dl: boolean | null;
-  is_on_dl60: boolean | null;
-  injury_left: number | null;
-}): string {
-  if (!p.injury_is_injured) return "Healthy";
-  if (!p.is_on_dl && !p.is_on_dl60) return "DTD";
-  return `DL${p.is_on_dl60 ? "-60" : ""}, ${p.injury_left ?? "?"} days left`;
 }
 
 export interface PlayerDetailBio {
@@ -381,7 +370,7 @@ export async function getPlayerDetail(playerId: number): Promise<PlayerDetail | 
     draftYear: p.draft_year, draftRound: p.draft_round, draftOverallPick: p.draft_overall_pick,
     draftTeamName: draftTeam?.nickname ?? null,
     isRetired: p.retired ?? false, isFreeAgent: p.free_agent ?? false, isHallOfFame: p.hall_of_fame ?? false,
-    injuryStatus: injuryStatusLabel(p),
+    injuryStatus: injuryStatus(p).label,
     bioText: (bioRow as { bio_text: string; refresh_run_id: number } | null)?.bio_text ?? null,
     bioStale: ((bioRow as { bio_text: string; refresh_run_id: number } | null)?.refresh_run_id ?? refreshRunId) < refreshRunId,
   };

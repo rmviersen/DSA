@@ -160,3 +160,48 @@ export function percentileStyle(pct: number | null): { color: string; fontWeight
   if (pct === null) return undefined;
   return { color: interpolateStops(Math.max(0, Math.min(100, pct)), PERCENTILE_STOPS), fontWeight: 700 };
 }
+
+// Injury status (2026-09-10, Rees's ask: red name + injury length on
+// /free-agency, "in a small, discreet way so it doesn't add another wide
+// column"). Pulled out here as the ONE shared implementation -- this exact
+// logic used to live only in player-detail-query.ts's private
+// injuryStatusLabel(); duplicating it a second time for PlayerTable would
+// have repeated the same "level=4 split"-style mistake this file's other
+// helpers were already extracted to avoid. `badge` is the compact form
+// PlayerTable's Name cell shows inline; `label` is the fuller sentence
+// player-detail-query.ts's bio section shows -- both derived from the same
+// players.injury_* columns so they can never disagree.
+//
+// Refined while building this (real data check, before shipping): the old
+// player-detail-only version showed a bare "DTD" with no day count for
+// anyone not on the DL, on the assumption DTD players don't have a real
+// number on file. Checked directly against every currently-injured player
+// (206 real rows) and that's not true -- injury_left is populated for ALL
+// of them, DTD included (196 of the 206 real injured players right now ARE
+// the not-on-DL/DTD case, every one with a real days-left number, e.g. 1-22
+// days out). So `days` is shown whenever it's on file regardless of DL
+// status -- "DTD, 3 days left" is more useful than a bare "DTD" and is
+// exactly what Rees's ask ("I want to see the length of their injury")
+// wants. injury_left === null (not currently observed in real data, but
+// possible in principle) falls back to the bare status word, same as
+// before.
+export interface InjuryStatus {
+  isInjured: boolean;
+  label: string; // "Healthy" / "DTD, 3 days left" / "DL, 12 days left" / "DL-60, 12 days left" (or the bare status word if no day count is on file)
+  badge: string | null; // null when healthy; "3d"/"12d" when a day count is on file, else the bare status word ("DTD"/"DL"/"DL-60")
+}
+export function injuryStatus(p: {
+  injury_is_injured: boolean | null;
+  is_on_dl: boolean | null;
+  is_on_dl60: boolean | null;
+  injury_left: number | null;
+}): InjuryStatus {
+  if (!p.injury_is_injured) return { isInjured: false, label: "Healthy", badge: null };
+  const statusWord = p.is_on_dl60 ? "DL-60" : p.is_on_dl ? "DL" : "DTD";
+  const days = p.injury_left;
+  return {
+    isInjured: true,
+    label: days !== null ? `${statusWord}, ${days} days left` : statusWord,
+    badge: days !== null ? `${days}d` : statusWord,
+  };
+}

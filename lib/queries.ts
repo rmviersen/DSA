@@ -1,5 +1,5 @@
 import { makeSupabaseClient } from "./supabase-client";
-import { roundGrade, levelLabel, teamLogoUrl, effectiveLevel, CANONICAL_LEVELS } from "./display-helpers";
+import { roundGrade, levelLabel, teamLogoUrl, effectiveLevel, CANONICAL_LEVELS, injuryStatus } from "./display-helpers";
 
 const supabase = makeSupabaseClient();
 
@@ -279,6 +279,17 @@ export interface PlayerRow extends RatingsSlice {
   compPlayerId: number | null;
   compPlayerName: string | null;
   compSimilarity: number | null;
+  // Injury status (2026-09-10, Rees's ask, from /free-agency: red name +
+  // injury length, "in a small, discreet way so it doesn't add another
+  // wide column"). Generic like Durability, not gated to /free-agency --
+  // an injured prospect is relevant info on /players and /draft too.
+  // isInjured drives the red name color; injuryBadge is the compact
+  // "DTD"/"12d" text shown right next to it; injuryLabel is the fuller
+  // sentence for its tooltip. See display-helpers.ts's injuryStatus() for
+  // the shared logic (also used by /players/[id]'s bio section).
+  isInjured: boolean;
+  injuryBadge: string | null;
+  injuryLabel: string;
 }
 
 // PERFORMANCE FIX (2026-08-25): this function used to fetch `players` FIRST
@@ -401,9 +412,9 @@ export async function fetchComputedPlayers(opts: { orgId?: number; prospectsOnly
 
   // Now scoped to just the (at most opts.limit + 50) winning IDs -- fits in
   // one page/chunk in every realistic case, no more per-500 looping needed.
-  const players = await fetchAll<{ id: number; first_name: string; last_name: string; age: number | null; organization_id: number | null; team_id: number | null; level: number | null; league_id: number | null; draft_year: number | null; draft_round: number | null; draft_overall_pick: number | null }>(
+  const players = await fetchAll<{ id: number; first_name: string; last_name: string; age: number | null; organization_id: number | null; team_id: number | null; level: number | null; league_id: number | null; draft_year: number | null; draft_round: number | null; draft_overall_pick: number | null; injury_is_injured: boolean | null; is_on_dl: boolean | null; is_on_dl60: boolean | null; injury_left: number | null }>(
     (from, to) =>
-      supabase.from("players").select("id,first_name,last_name,age,organization_id,team_id,level,league_id,draft_year,draft_round,draft_overall_pick").in("id", relevantIds).order("id").range(from, to) as never
+      supabase.from("players").select("id,first_name,last_name,age,organization_id,team_id,level,league_id,draft_year,draft_round,draft_overall_pick,injury_is_injured,is_on_dl,is_on_dl60,injury_left").in("id", relevantIds).order("id").range(from, to) as never
   );
   const playerById = new Map(players.map((p) => [p.id, p]));
 
@@ -516,6 +527,7 @@ export async function fetchComputedPlayers(opts: { orgId?: number; prospectsOnly
       const team = p?.team_id ? teamById.get(p.team_id) : undefined;
       const wai = warAbIpById.get(c.player_id);
       if (!p || !rt) return null;
+      const inj = injuryStatus(p);
       return {
         player_id: c.player_id,
         first_name: p.first_name, last_name: p.last_name, age: p.age,
@@ -535,6 +547,7 @@ export async function fetchComputedPlayers(opts: { orgId?: number; prospectsOnly
         compPlayerId: c.comp_player_id,
         compPlayerName: c.comp_player_id !== null ? (compNameById.get(c.comp_player_id) ?? null) : null,
         compSimilarity: c.comp_similarity,
+        isInjured: inj.isInjured, injuryBadge: inj.badge, injuryLabel: inj.label,
         ...rt,
       };
     })
