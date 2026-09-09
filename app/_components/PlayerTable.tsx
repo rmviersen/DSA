@@ -147,8 +147,11 @@ export function PlayerTable({ rows, showTeam, showProspectCols, showStatLevel, s
 
   // Multi-select: empty set = no role/prone filter applied. Age min/max,
   // Overall min, Demand min/max, and sign-only chain on top -- a player
-  // missing age/overall/demand or a null/false Sign never matches an active
-  // bound rather than passing through by default.
+  // missing age/overall or a null/false Sign never matches an active bound
+  // rather than passing through by default. Demand is the one exception:
+  // a null demandSalary passes a max filter (no ask on file reads as "no
+  // demand," not "unknown/excluded") but still fails a min filter (see the
+  // demandMax/demandMin lines below for why).
   const filteredRows = useMemo(() => {
     let out = roleFilter.size === 0 ? phFiltered : phFiltered.filter((r) => r.role !== null && roleFilter.has(r.role));
     if (proneFilter.size > 0) out = out.filter((r) => r.prone !== null && proneFilter.has(r.prone));
@@ -161,7 +164,14 @@ export function PlayerTable({ rows, showTeam, showProspectCols, showStatLevel, s
     const demandMin = demandMinM.trim() === "" ? null : Number(demandMinM) * 1_000_000;
     const demandMax = demandMaxM.trim() === "" ? null : Number(demandMaxM) * 1_000_000;
     if (demandMin !== null && !Number.isNaN(demandMin)) out = out.filter((r) => r.demandSalary !== null && r.demandSalary >= demandMin);
-    if (demandMax !== null && !Number.isNaN(demandMax)) out = out.filter((r) => r.demandSalary !== null && r.demandSalary <= demandMax);
+    // Max is a ceiling, not a range bound -- a null demand (no real ask on
+    // file, e.g. a minor-league-contract guy) is effectively "no demand,"
+    // which is always under any max, so it should pass a max filter rather
+    // than get excluded the way a genuinely-too-expensive player would be
+    // (2026-09-09 fix, Rees: "the max demand filter filters out players
+    // with no demand... that is incorrect"). Min keeps excluding nulls --
+    // "at least $X" is a real bar a no-demand player hasn't cleared.
+    if (demandMax !== null && !Number.isNaN(demandMax)) out = out.filter((r) => r.demandSalary === null || r.demandSalary <= demandMax);
     if (signOnly) out = out.filter((r) => r.signFlag === true);
     return out;
   }, [phFiltered, roleFilter, proneFilter, ageMin, ageMax, overallMin, demandMinM, demandMaxM, signOnly]);
