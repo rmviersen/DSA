@@ -18,10 +18,12 @@ const supabase = makeSupabaseClient();
 // once, or a greedy pick can leave a worse total lineup on the table.
 //
 // Decisions made answering Rees's own clarifying questions (2026-09-10):
-// - Eligibility ("min 55") checks the POTENTIAL position grade (pot_c/
-//   pot_1b/etc.), applied uniformly at 55 for every position including
-//   catcher (no lower catcher exception, unlike this engine's own TBL Pos
-//   classification elsewhere -- Rees asked for one flat number).
+// - Eligibility checks the POTENTIAL position grade (pot_c/pot_1b/etc.),
+//   min 55 at every position except catcher, which Rees corrected to 50
+//   (2026-09-10 follow-up) -- matching this engine's own existing TBL Pos
+//   classification elsewhere, which already treats catcher as a real,
+//   separate, lower bar rather than folding it into the same number as
+//   every other position.
 // - Once eligible, "overall defensive strength" is the CURRENT position
 //   grade (pos_c/pos_1b/etc.) -- the same position-specific number, not the
 //   coarser c_rating/inf_rating/of_rating tool composite shared across a
@@ -57,8 +59,13 @@ const POS_KEYS: Record<FieldPosition, { pot: keyof RatingsRow; pos: keyof Rating
   RF: { pot: "pot_rf", pos: "pos_rf" },
 };
 
-// Rees's literal spec -- one flat number, no per-position exception.
-const ELIGIBILITY_MIN = 55;
+// Eligibility threshold, per position -- 55 everywhere except catcher (50,
+// Rees's 2026-09-10 correction: catching is scarce/harder to grade the same
+// way as everywhere else, so it gets its own lower bar, same as this
+// engine's TBL Pos classification already does elsewhere).
+const ELIGIBILITY_MIN: Record<FieldPosition, number> = {
+  C: 50, "1B": 55, "2B": 55, "3B": 55, SS: 55, LF: 55, CF: 55, RF: 55,
+};
 
 // Composite lineup-selection score = battingVsHand * OFFENSE_WEIGHT +
 // positionGrade * DEFENSE_WEIGHT (DH skips the defense term entirely -- no
@@ -234,7 +241,7 @@ export async function getOptimalLineups(orgId: number): Promise<OptimalLineups> 
       const { pot, pos: posKey } = POS_KEYS[pos];
       const potVal = r[pot];
       const curVal = r[posKey];
-      eligible[pos] = potVal !== null && potVal >= ELIGIBILITY_MIN;
+      eligible[pos] = potVal !== null && potVal >= ELIGIBILITY_MIN[pos];
       if (curVal !== null) posGrade[pos] = curVal;
     }
     candidates.push({ playerId: p.id, name: `${p.first_name} ${p.last_name}`, overall: c.overall, vsL, vsR, posGrade, eligible });

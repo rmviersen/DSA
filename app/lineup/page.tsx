@@ -89,7 +89,7 @@ export default async function LineupPage({ searchParams }: { searchParams: Promi
         <p>
           Two independent 9-man lineups (this league runs with a DH always in the lineup, so no pitcher spot) — one
           built for facing a left-handed starter, one for a right-handed starter. Eligible players at each position
-          are those with a Potential position grade of at least 55 there; among those, each lineup solves for the
+          are those with a Potential position grade of at least 55 there (50 at catcher); among those, each lineup solves for the
           highest-value assignment of players to positions at once (not just the best bat at each spot in isolation —
           a player eligible at more than one position is placed wherever the whole lineup benefits most).
           &quot;Bat vs L/R&quot; is that player&apos;s Batting-shaped rating specifically against that pitcher
