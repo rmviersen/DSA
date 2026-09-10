@@ -181,11 +181,8 @@ already exists today as the one guest-facing page, separate from the
 internal `/prospects`. That partial prefix becomes the norm instead of the
 exception once this ships.
 
-**Root `/` needs a new decision.** Today it redirects straight to `/players`
-(i.e., straight into TBL). Once TBL is one of two leagues, `/` needs to
-either default to `/TBL/players` (simplest, preserves today's behavior for
-anyone with the bare domain bookmarked) or become a small league-picker page.
-Flagging as a real decision, not assuming — see §7.
+**Root `/` — decided (2026-09-10, Rees):** redirects straight to `/TBL/players`,
+preserving today's behavior for the bare domain. No league-picker page.
 
 ---
 
@@ -200,18 +197,10 @@ real questions this doesn't answer on its own:
    (Rees is the one owner of the whole platform) — flagging only because the
    code currently has no concept of "owner of league X specifically," and I
    want to confirm that's not actually wanted before building it that way.
-2. **Does Duud get a public guest tier at all?** TBL deliberately ships a
-   public Top Prospects / Farm Rankings view for other GMs in that league.
-   Duud is described as "a personal league" — does it need *any* public page,
-   or should everything under `/Duud` be owner-only with no guest allowlist
-   entries at all? This changes `GUEST_ALLOWED_PATHS` from a flat list to
-   something like a per-league list, and it's a real product decision, not a
-   technical one.
-
-Mechanically, once §4's league segment exists, `GUEST_ALLOWED_PATHS` just
-becomes a list of full paths per league (e.g. `["/TBL/prospects", "/login"]`
-today, possibly `+ ["/Duud/prospects"]` or nothing at all for Duud, depending
-on the answer above).
+2. **Does Duud get a public guest tier at all? — decided (2026-09-10, Rees):**
+   no. Duud is fully private/owner-only, no guest allowlist entries at all.
+   `GUEST_ALLOWED_PATHS` stays effectively `["/TBL/prospects", "/login"]` —
+   nothing under `/Duud` gets added to it.
 
 ---
 
@@ -229,26 +218,29 @@ where the whole site is down while the migration runs.
 
 ---
 
-## 7. Open questions — need answers before (or early in) building
+## 7. Open questions
 
-1. **SQL dump vs. CSV for Duud's ingestion.** Confirmed the SQL dump feature
-   exists and works the way Rees described; still open whether it's worth
-   the extra build cost over reusing the existing CSV pipeline for an initial
-   version (§1).
-2. **Root `/` behavior** once two leagues exist (§4): default into TBL, or a
-   picker page?
-3. **Does Duud need any public/guest-visible pages at all**, or is it fully
-   owner-only (§5)?
-4. **Does Duud have its own "my team" org**, the way TBL has OKC (org 15)?
+**Decided (2026-09-10):**
+- Duud's ingestion uses the real OOTP SQL dump, as originally asked — not the
+  CSV route (§1).
+- Root `/` redirects into `/TBL/players` (§4).
+- Duud is fully private, no guest tier at all (§5).
+
+**Still open — needed before the steps in §8 that depend on them:**
+1. **Does Duud have its own "my team" org**, the way TBL has OKC (org 15)?
    If so, what is it (needed to replace every `DEFAULT_ORG_ID = 15` with a
    per-league value on pages like `/my-roster`, `/lineup`, `/rule5-draft`,
-   `/org-minors`).
-5. **Refresh cadence for Duud** — how often will a new SQL dump actually be
+   `/org-minors`). Doesn't block steps 1-4 of §8, only step 6 onward.
+2. **Refresh cadence for Duud** — how often will a new SQL dump actually be
    produced (weekly? after every sim session?), since that determines
    whether the ingestion script needs any scheduling/reminder support or is
-   purely "run it by hand whenever there's a new file."
-6. **A real sample SQL dump** — needed before the `OotpSqlDumpAdapter`'s
-   actual column-mapping work can start (§1, §3).
+   purely "run it by hand whenever there's a new file." Doesn't block early
+   steps either.
+3. **A real sample SQL dump** — the one hard blocker. `OotpSqlDumpAdapter`'s
+   actual column-mapping work (§3) can't start without it, since I don't have
+   OOTP's internal schema to plan against otherwise. Doesn't block steps 1-4
+   of §8 (schema/query/routing/auth work is all independent of what Duud's
+   data actually looks like) — only step 5 onward.
 
 ---
 
