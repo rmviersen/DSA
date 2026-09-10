@@ -22,6 +22,7 @@ export type Database = {
           capacity: number | null
           captured_at: string
           doubles: number | null
+          dsa_league_id: number
           home_runs: number | null
           hr_lhb: number | null
           hr_rhb: number | null
@@ -39,6 +40,7 @@ export type Database = {
           capacity?: number | null
           captured_at?: string
           doubles?: number | null
+          dsa_league_id: number
           home_runs?: number | null
           hr_lhb?: number | null
           hr_rhb?: number | null
@@ -56,6 +58,7 @@ export type Database = {
           capacity?: number | null
           captured_at?: string
           doubles?: number | null
+          dsa_league_id?: number
           home_runs?: number | null
           hr_lhb?: number | null
           hr_rhb?: number | null
@@ -68,6 +71,13 @@ export type Database = {
         }
         Relationships: [
           {
+            foreignKeyName: "ballpark_factor_snapshots_league_id_fkey"
+            columns: ["dsa_league_id"]
+            isOneToOne: false
+            referencedRelation: "leagues"
+            referencedColumns: ["id"]
+          },
+          {
             foreignKeyName: "ballpark_factor_snapshots_refresh_run_id_fkey"
             columns: ["refresh_run_id"]
             isOneToOne: false
@@ -76,10 +86,10 @@ export type Database = {
           },
           {
             foreignKeyName: "ballpark_factor_snapshots_team_id_fkey"
-            columns: ["team_id"]
+            columns: ["dsa_league_id", "team_id"]
             isOneToOne: false
             referencedRelation: "teams"
-            referencedColumns: ["id"]
+            referencedColumns: ["dsa_league_id", "id"]
           },
         ]
       }
@@ -87,6 +97,7 @@ export type Database = {
         Row: {
           avg_raw_overall: number
           captured_at: string
+          dsa_league_id: number
           id: number
           level: number
           n: number
@@ -96,6 +107,7 @@ export type Database = {
         Insert: {
           avg_raw_overall: number
           captured_at?: string
+          dsa_league_id: number
           id?: never
           level: number
           n: number
@@ -105,6 +117,7 @@ export type Database = {
         Update: {
           avg_raw_overall?: number
           captured_at?: string
+          dsa_league_id?: number
           id?: never
           level?: number
           n?: number
@@ -112,6 +125,13 @@ export type Database = {
           refresh_run_id?: number
         }
         Relationships: [
+          {
+            foreignKeyName: "calibration_level_anchors_league_id_fkey"
+            columns: ["dsa_league_id"]
+            isOneToOne: false
+            referencedRelation: "leagues"
+            referencedColumns: ["id"]
+          },
           {
             foreignKeyName: "calibration_level_anchors_refresh_run_id_fkey"
             columns: ["refresh_run_id"]
@@ -129,6 +149,7 @@ export type Database = {
           contract_team_id: number | null
           current_year: number | null
           cyyoung_bonus: number | null
+          dsa_league_id: number
           id: number
           is_major: boolean | null
           last_year_option_buyout: number | null
@@ -174,6 +195,7 @@ export type Database = {
           contract_team_id?: number | null
           current_year?: number | null
           cyyoung_bonus?: number | null
+          dsa_league_id: number
           id?: never
           is_major?: boolean | null
           last_year_option_buyout?: number | null
@@ -219,6 +241,7 @@ export type Database = {
           contract_team_id?: number | null
           current_year?: number | null
           cyyoung_bonus?: number | null
+          dsa_league_id?: number
           id?: never
           is_major?: boolean | null
           last_year_option_buyout?: number | null
@@ -258,6 +281,13 @@ export type Database = {
           years?: number | null
         }
         Relationships: [
+          {
+            foreignKeyName: "contract_extension_snapshots_league_id_fkey"
+            columns: ["dsa_league_id"]
+            isOneToOne: false
+            referencedRelation: "leagues"
+            referencedColumns: ["id"]
+          },
           {
             foreignKeyName: "contract_extension_snapshots_refresh_run_id_fkey"
             columns: ["refresh_run_id"]
@@ -274,6 +304,7 @@ export type Database = {
           contract_team_id: number | null
           current_year: number | null
           cyyoung_bonus: number | null
+          dsa_league_id: number
           is_major: boolean | null
           last_year_option_buyout: number | null
           last_year_player_option: boolean | null
@@ -317,6 +348,7 @@ export type Database = {
           contract_team_id?: number | null
           current_year?: number | null
           cyyoung_bonus?: number | null
+          dsa_league_id: number
           is_major?: boolean | null
           last_year_option_buyout?: number | null
           last_year_player_option?: boolean | null
@@ -360,6 +392,7 @@ export type Database = {
           contract_team_id?: number | null
           current_year?: number | null
           cyyoung_bonus?: number | null
+          dsa_league_id?: number
           is_major?: boolean | null
           last_year_option_buyout?: number | null
           last_year_player_option?: boolean | null
@@ -399,11 +432,18 @@ export type Database = {
         }
         Relationships: [
           {
-            foreignKeyName: "contract_extensions_player_id_fkey"
-            columns: ["player_id"]
-            isOneToOne: true
-            referencedRelation: "players"
+            foreignKeyName: "contract_extensions_league_id_fkey"
+            columns: ["dsa_league_id"]
+            isOneToOne: false
+            referencedRelation: "leagues"
             referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "contract_extensions_player_id_fkey"
+            columns: ["dsa_league_id", "player_id"]
+            isOneToOne: false
+            referencedRelation: "players"
+            referencedColumns: ["dsa_league_id", "id"]
           },
         ]
       }
@@ -415,6 +455,7 @@ export type Database = {
           contract_team_id: number | null
           current_year: number | null
           cyyoung_bonus: number | null
+          dsa_league_id: number
           id: number
           is_major: boolean | null
           last_year_option_buyout: number | null
@@ -460,6 +501,7 @@ export type Database = {
           contract_team_id?: number | null
           current_year?: number | null
           cyyoung_bonus?: number | null
+          dsa_league_id: number
           id?: never
           is_major?: boolean | null
           last_year_option_buyout?: number | null
@@ -505,6 +547,7 @@ export type Database = {
           contract_team_id?: number | null
           current_year?: number | null
           cyyoung_bonus?: number | null
+          dsa_league_id?: number
           id?: never
           is_major?: boolean | null
           last_year_option_buyout?: number | null
@@ -545,6 +588,13 @@ export type Database = {
         }
         Relationships: [
           {
+            foreignKeyName: "contract_snapshots_league_id_fkey"
+            columns: ["dsa_league_id"]
+            isOneToOne: false
+            referencedRelation: "leagues"
+            referencedColumns: ["id"]
+          },
+          {
             foreignKeyName: "contract_snapshots_refresh_run_id_fkey"
             columns: ["refresh_run_id"]
             isOneToOne: false
@@ -560,6 +610,7 @@ export type Database = {
           contract_team_id: number | null
           current_year: number | null
           cyyoung_bonus: number | null
+          dsa_league_id: number
           is_major: boolean | null
           last_year_option_buyout: number | null
           last_year_player_option: boolean | null
@@ -603,6 +654,7 @@ export type Database = {
           contract_team_id?: number | null
           current_year?: number | null
           cyyoung_bonus?: number | null
+          dsa_league_id: number
           is_major?: boolean | null
           last_year_option_buyout?: number | null
           last_year_player_option?: boolean | null
@@ -646,6 +698,7 @@ export type Database = {
           contract_team_id?: number | null
           current_year?: number | null
           cyyoung_bonus?: number | null
+          dsa_league_id?: number
           is_major?: boolean | null
           last_year_option_buyout?: number | null
           last_year_player_option?: boolean | null
@@ -685,17 +738,25 @@ export type Database = {
         }
         Relationships: [
           {
-            foreignKeyName: "contracts_player_id_fkey"
-            columns: ["player_id"]
-            isOneToOne: true
-            referencedRelation: "players"
+            foreignKeyName: "contracts_league_id_fkey"
+            columns: ["dsa_league_id"]
+            isOneToOne: false
+            referencedRelation: "leagues"
             referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "contracts_player_id_fkey"
+            columns: ["dsa_league_id", "player_id"]
+            isOneToOne: false
+            referencedRelation: "players"
+            referencedColumns: ["dsa_league_id", "id"]
           },
         ]
       }
       draft_class_imports: {
         Row: {
           draft_year: number
+          dsa_league_id: number
           id: number
           imported_at: string
           notes: string | null
@@ -704,6 +765,7 @@ export type Database = {
         }
         Insert: {
           draft_year: number
+          dsa_league_id: number
           id?: never
           imported_at?: string
           notes?: string | null
@@ -712,18 +774,28 @@ export type Database = {
         }
         Update: {
           draft_year?: number
+          dsa_league_id?: number
           id?: never
           imported_at?: string
           notes?: string | null
           row_count?: number | null
           source_file?: string | null
         }
-        Relationships: []
+        Relationships: [
+          {
+            foreignKeyName: "draft_class_imports_league_id_fkey"
+            columns: ["dsa_league_id"]
+            isOneToOne: false
+            referencedRelation: "leagues"
+            referencedColumns: ["id"]
+          },
+        ]
       }
       draft_class_pool_members: {
         Row: {
           act: string | null
           draft_class_import_id: number
+          dsa_league_id: number
           id: number
           lev: string | null
           mld: number | null
@@ -737,6 +809,7 @@ export type Database = {
         Insert: {
           act?: string | null
           draft_class_import_id: number
+          dsa_league_id: number
           id?: never
           lev?: string | null
           mld?: number | null
@@ -750,6 +823,7 @@ export type Database = {
         Update: {
           act?: string | null
           draft_class_import_id?: number
+          dsa_league_id?: number
           id?: never
           lev?: string | null
           mld?: number | null
@@ -769,11 +843,18 @@ export type Database = {
             referencedColumns: ["id"]
           },
           {
+            foreignKeyName: "draft_class_pool_members_league_id_fkey"
+            columns: ["dsa_league_id"]
+            isOneToOne: false
+            referencedRelation: "leagues"
+            referencedColumns: ["id"]
+          },
+          {
             foreignKeyName: "draft_class_pool_members_player_id_fkey"
-            columns: ["player_id"]
+            columns: ["dsa_league_id", "player_id"]
             isOneToOne: false
             referencedRelation: "players"
-            referencedColumns: ["id"]
+            referencedColumns: ["dsa_league_id", "id"]
           },
         ]
       }
@@ -783,6 +864,7 @@ export type Database = {
           batting_p: number | null
           captured_at: string
           draft_rank: number | null
+          dsa_league_id: number
           fielding: number | null
           id: number
           overall: number | null
@@ -804,6 +886,7 @@ export type Database = {
           batting_p?: number | null
           captured_at: string
           draft_rank?: number | null
+          dsa_league_id: number
           fielding?: number | null
           id?: never
           overall?: number | null
@@ -825,6 +908,7 @@ export type Database = {
           batting_p?: number | null
           captured_at?: string
           draft_rank?: number | null
+          dsa_league_id?: number
           fielding?: number | null
           id?: never
           overall?: number | null
@@ -843,11 +927,18 @@ export type Database = {
         }
         Relationships: [
           {
+            foreignKeyName: "draft_computed_league_id_fkey"
+            columns: ["dsa_league_id"]
+            isOneToOne: false
+            referencedRelation: "leagues"
+            referencedColumns: ["id"]
+          },
+          {
             foreignKeyName: "draft_computed_player_id_fkey"
-            columns: ["player_id"]
+            columns: ["dsa_league_id", "player_id"]
             isOneToOne: false
             referencedRelation: "players"
-            referencedColumns: ["id"]
+            referencedColumns: ["dsa_league_id", "id"]
           },
           {
             foreignKeyName: "draft_computed_refresh_run_id_fkey"
@@ -873,6 +964,7 @@ export type Database = {
           best_player_war_per_year: number | null
           created_at: string
           draft_round: number
+          dsa_league_id: number
           id: number
           median_war_per_year: number
           pct_reached_mlb: number
@@ -888,6 +980,7 @@ export type Database = {
           best_player_war_per_year?: number | null
           created_at?: string
           draft_round: number
+          dsa_league_id: number
           id?: never
           median_war_per_year: number
           pct_reached_mlb?: number
@@ -903,6 +996,7 @@ export type Database = {
           best_player_war_per_year?: number | null
           created_at?: string
           draft_round?: number
+          dsa_league_id?: number
           id?: never
           median_war_per_year?: number
           pct_reached_mlb?: number
@@ -911,7 +1005,15 @@ export type Database = {
           sample_size?: number
           smoothed_war_per_year?: number
         }
-        Relationships: []
+        Relationships: [
+          {
+            foreignKeyName: "draft_pick_value_curve_league_id_fkey"
+            columns: ["dsa_league_id"]
+            isOneToOne: false
+            referencedRelation: "leagues"
+            referencedColumns: ["id"]
+          },
+        ]
       }
       draft_pick_value_players: {
         Row: {
@@ -919,6 +1021,7 @@ export type Database = {
           created_at: string
           draft_round: number
           draft_year: number
+          dsa_league_id: number
           id: number
           player_id: number
           reached_mlb: boolean
@@ -931,6 +1034,7 @@ export type Database = {
           created_at?: string
           draft_round: number
           draft_year: number
+          dsa_league_id: number
           id?: never
           player_id: number
           reached_mlb?: boolean
@@ -943,6 +1047,7 @@ export type Database = {
           created_at?: string
           draft_round?: number
           draft_year?: number
+          dsa_league_id?: number
           id?: never
           player_id?: number
           reached_mlb?: boolean
@@ -950,7 +1055,15 @@ export type Database = {
           war_per_year?: number
           years_since_draft?: number
         }
-        Relationships: []
+        Relationships: [
+          {
+            foreignKeyName: "draft_pick_value_players_league_id_fkey"
+            columns: ["dsa_league_id"]
+            isOneToOne: false
+            referencedRelation: "leagues"
+            referencedColumns: ["id"]
+          },
+        ]
       }
       draft_picks: {
         Row: {
@@ -958,6 +1071,7 @@ export type Database = {
           auto_pick: boolean | null
           college: boolean | null
           draft_year: number
+          dsa_league_id: number
           overall_pick: number | null
           pick_in_round: number | null
           picked_at: string | null
@@ -975,6 +1089,7 @@ export type Database = {
           auto_pick?: boolean | null
           college?: boolean | null
           draft_year: number
+          dsa_league_id: number
           overall_pick?: number | null
           pick_in_round?: number | null
           picked_at?: string | null
@@ -992,6 +1107,7 @@ export type Database = {
           auto_pick?: boolean | null
           college?: boolean | null
           draft_year?: number
+          dsa_league_id?: number
           overall_pick?: number | null
           pick_in_round?: number | null
           picked_at?: string | null
@@ -1006,18 +1122,25 @@ export type Database = {
         }
         Relationships: [
           {
-            foreignKeyName: "draft_picks_player_id_fkey"
-            columns: ["player_id"]
-            isOneToOne: true
-            referencedRelation: "players"
+            foreignKeyName: "draft_picks_league_id_fkey"
+            columns: ["dsa_league_id"]
+            isOneToOne: false
+            referencedRelation: "leagues"
             referencedColumns: ["id"]
           },
           {
+            foreignKeyName: "draft_picks_player_id_fkey"
+            columns: ["dsa_league_id", "player_id"]
+            isOneToOne: false
+            referencedRelation: "players"
+            referencedColumns: ["dsa_league_id", "id"]
+          },
+          {
             foreignKeyName: "draft_picks_team_id_fkey"
-            columns: ["team_id"]
+            columns: ["dsa_league_id", "team_id"]
             isOneToOne: false
             referencedRelation: "teams"
-            referencedColumns: ["id"]
+            referencedColumns: ["dsa_league_id", "id"]
           },
         ]
       }
@@ -1043,6 +1166,7 @@ export type Database = {
           ctrl_l: number | null
           ctrl_r: number | null
           cutt: number | null
+          dsa_league_id: number
           eye: number | null
           eye_l: number | null
           eye_r: number | null
@@ -1173,6 +1297,7 @@ export type Database = {
           ctrl_l?: number | null
           ctrl_r?: number | null
           cutt?: number | null
+          dsa_league_id: number
           eye?: number | null
           eye_l?: number | null
           eye_r?: number | null
@@ -1303,6 +1428,7 @@ export type Database = {
           ctrl_l?: number | null
           ctrl_r?: number | null
           cutt?: number | null
+          dsa_league_id?: number
           eye?: number | null
           eye_l?: number | null
           eye_r?: number | null
@@ -1412,11 +1538,20 @@ export type Database = {
           vel?: string | null
           wrkethic?: string | null
         }
-        Relationships: []
+        Relationships: [
+          {
+            foreignKeyName: "draft_prospect_ratings_snapshots_league_id_fkey"
+            columns: ["dsa_league_id"]
+            isOneToOne: false
+            referencedRelation: "leagues"
+            referencedColumns: ["id"]
+          },
+        ]
       }
       fielding_role_weights: {
         Row: {
           computed_at: string
+          dsa_league_id: number
           id: number
           ordered_slope: number
           pooled_slope: number
@@ -1429,6 +1564,7 @@ export type Database = {
         }
         Insert: {
           computed_at?: string
+          dsa_league_id: number
           id?: never
           ordered_slope: number
           pooled_slope: number
@@ -1441,6 +1577,7 @@ export type Database = {
         }
         Update: {
           computed_at?: string
+          dsa_league_id?: number
           id?: never
           ordered_slope?: number
           pooled_slope?: number
@@ -1453,6 +1590,13 @@ export type Database = {
         }
         Relationships: [
           {
+            foreignKeyName: "fielding_role_weights_league_id_fkey"
+            columns: ["dsa_league_id"]
+            isOneToOne: false
+            referencedRelation: "leagues"
+            referencedColumns: ["id"]
+          },
+          {
             foreignKeyName: "fielding_role_weights_refresh_run_id_fkey"
             columns: ["refresh_run_id"]
             isOneToOne: false
@@ -1463,6 +1607,7 @@ export type Database = {
       }
       free_agent_demand_imports: {
         Row: {
+          dsa_league_id: number
           game_date: string | null
           id: number
           imported_at: string
@@ -1470,6 +1615,7 @@ export type Database = {
           source_file: string
         }
         Insert: {
+          dsa_league_id: number
           game_date?: string | null
           id?: never
           imported_at?: string
@@ -1477,18 +1623,28 @@ export type Database = {
           source_file: string
         }
         Update: {
+          dsa_league_id?: number
           game_date?: string | null
           id?: never
           imported_at?: string
           row_count?: number
           source_file?: string
         }
-        Relationships: []
+        Relationships: [
+          {
+            foreignKeyName: "free_agent_demand_imports_league_id_fkey"
+            columns: ["dsa_league_id"]
+            isOneToOne: false
+            referencedRelation: "leagues"
+            referencedColumns: ["id"]
+          },
+        ]
       }
       free_agent_demands: {
         Row: {
           created_at: string
           demand_salary: number | null
+          dsa_league_id: number
           id: number
           import_id: number
           player_id: number
@@ -1497,6 +1653,7 @@ export type Database = {
         Insert: {
           created_at?: string
           demand_salary?: number | null
+          dsa_league_id: number
           id?: never
           import_id: number
           player_id: number
@@ -1505,6 +1662,7 @@ export type Database = {
         Update: {
           created_at?: string
           demand_salary?: number | null
+          dsa_league_id?: number
           id?: never
           import_id?: number
           player_id?: number
@@ -1518,6 +1676,13 @@ export type Database = {
             referencedRelation: "free_agent_demand_imports"
             referencedColumns: ["id"]
           },
+          {
+            foreignKeyName: "free_agent_demands_league_id_fkey"
+            columns: ["dsa_league_id"]
+            isOneToOne: false
+            referencedRelation: "leagues"
+            referencedColumns: ["id"]
+          },
         ]
       }
       game_box_scores: {
@@ -1526,6 +1691,7 @@ export type Database = {
           away_hits: number | null
           away_score: number | null
           away_team_id: number | null
+          dsa_league_id: number
           game_date: string | null
           home_errors: number | null
           home_hits: number | null
@@ -1547,6 +1713,7 @@ export type Database = {
           away_hits?: number | null
           away_score?: number | null
           away_team_id?: number | null
+          dsa_league_id: number
           game_date?: string | null
           home_errors?: number | null
           home_hits?: number | null
@@ -1568,6 +1735,7 @@ export type Database = {
           away_hits?: number | null
           away_score?: number | null
           away_team_id?: number | null
+          dsa_league_id?: number
           game_date?: string | null
           home_errors?: number | null
           home_hits?: number | null
@@ -1587,16 +1755,23 @@ export type Database = {
         Relationships: [
           {
             foreignKeyName: "game_box_scores_away_team_id_fkey"
-            columns: ["away_team_id"]
+            columns: ["dsa_league_id", "away_team_id"]
             isOneToOne: false
             referencedRelation: "teams"
-            referencedColumns: ["id"]
+            referencedColumns: ["dsa_league_id", "id"]
           },
           {
             foreignKeyName: "game_box_scores_home_team_id_fkey"
-            columns: ["home_team_id"]
+            columns: ["dsa_league_id", "home_team_id"]
             isOneToOne: false
             referencedRelation: "teams"
+            referencedColumns: ["dsa_league_id", "id"]
+          },
+          {
+            foreignKeyName: "game_box_scores_league_id_fkey"
+            columns: ["dsa_league_id"]
+            isOneToOne: false
+            referencedRelation: "leagues"
             referencedColumns: ["id"]
           },
         ]
@@ -1610,6 +1785,7 @@ export type Database = {
           away_team_id: number | null
           cup: boolean | null
           doubleheader_game: number | null
+          dsa_league_id: number
           game_date: string | null
           game_time: string | null
           game_type: number | null
@@ -1637,6 +1813,7 @@ export type Database = {
           away_team_id?: number | null
           cup?: boolean | null
           doubleheader_game?: number | null
+          dsa_league_id: number
           game_date?: string | null
           game_time?: string | null
           game_type?: number | null
@@ -1664,6 +1841,7 @@ export type Database = {
           away_team_id?: number | null
           cup?: boolean | null
           doubleheader_game?: number | null
+          dsa_league_id?: number
           game_date?: string | null
           game_time?: string | null
           game_type?: number | null
@@ -1686,16 +1864,23 @@ export type Database = {
         Relationships: [
           {
             foreignKeyName: "game_results_away_team_id_fkey"
-            columns: ["away_team_id"]
+            columns: ["dsa_league_id", "away_team_id"]
             isOneToOne: false
             referencedRelation: "teams"
-            referencedColumns: ["id"]
+            referencedColumns: ["dsa_league_id", "id"]
           },
           {
             foreignKeyName: "game_results_home_team_id_fkey"
-            columns: ["home_team_id"]
+            columns: ["dsa_league_id", "home_team_id"]
             isOneToOne: false
             referencedRelation: "teams"
+            referencedColumns: ["dsa_league_id", "id"]
+          },
+          {
+            foreignKeyName: "game_results_league_id_fkey"
+            columns: ["dsa_league_id"]
+            isOneToOne: false
+            referencedRelation: "leagues"
             referencedColumns: ["id"]
           },
           {
@@ -1707,9 +1892,34 @@ export type Database = {
           },
         ]
       }
+      leagues: {
+        Row: {
+          created_at: string
+          display_name: string
+          id: number
+          slug: string
+          source_type: string
+        }
+        Insert: {
+          created_at?: string
+          display_name: string
+          id?: never
+          slug: string
+          source_type: string
+        }
+        Update: {
+          created_at?: string
+          display_name?: string
+          id?: never
+          slug?: string
+          source_type?: string
+        }
+        Relationships: []
+      }
       market_rate_curves: {
         Row: {
           computed_at: string
+          dsa_league_id: number
           id: number
           intercept: number
           league_minimum_salary: number
@@ -1724,6 +1934,7 @@ export type Database = {
         }
         Insert: {
           computed_at?: string
+          dsa_league_id: number
           id?: never
           intercept: number
           league_minimum_salary: number
@@ -1738,6 +1949,7 @@ export type Database = {
         }
         Update: {
           computed_at?: string
+          dsa_league_id?: number
           id?: never
           intercept?: number
           league_minimum_salary?: number
@@ -1751,6 +1963,13 @@ export type Database = {
           slope?: number
         }
         Relationships: [
+          {
+            foreignKeyName: "market_rate_curves_league_id_fkey"
+            columns: ["dsa_league_id"]
+            isOneToOne: false
+            referencedRelation: "leagues"
+            referencedColumns: ["id"]
+          },
           {
             foreignKeyName: "market_rate_curves_refresh_run_id_fkey"
             columns: ["refresh_run_id"]
@@ -1766,6 +1985,7 @@ export type Database = {
           avg_curve_predicted_aav: number | null
           avg_overall_in_sample: number | null
           dh_capped: boolean
+          dsa_league_id: number
           final_multiplier: number
           id: number
           raw_multiplier: number
@@ -1779,6 +1999,7 @@ export type Database = {
           avg_curve_predicted_aav?: number | null
           avg_overall_in_sample?: number | null
           dh_capped?: boolean
+          dsa_league_id: number
           final_multiplier: number
           id?: never
           raw_multiplier: number
@@ -1792,6 +2013,7 @@ export type Database = {
           avg_curve_predicted_aav?: number | null
           avg_overall_in_sample?: number | null
           dh_capped?: boolean
+          dsa_league_id?: number
           final_multiplier?: number
           id?: never
           raw_multiplier?: number
@@ -1801,6 +2023,13 @@ export type Database = {
           shrunk_multiplier?: number
         }
         Relationships: [
+          {
+            foreignKeyName: "market_rate_role_multipliers_league_id_fkey"
+            columns: ["dsa_league_id"]
+            isOneToOne: false
+            referencedRelation: "leagues"
+            referencedColumns: ["id"]
+          },
           {
             foreignKeyName: "market_rate_role_multipliers_refresh_run_id_fkey"
             columns: ["refresh_run_id"]
@@ -1813,6 +2042,7 @@ export type Database = {
       market_rate_training_contracts: {
         Row: {
           aav: number
+          dsa_league_id: number
           first_observed_at: string
           first_observed_refresh_run_id: number
           id: number
@@ -1826,6 +2056,7 @@ export type Database = {
         }
         Insert: {
           aav: number
+          dsa_league_id: number
           first_observed_at?: string
           first_observed_refresh_run_id: number
           id?: never
@@ -1839,6 +2070,7 @@ export type Database = {
         }
         Update: {
           aav?: number
+          dsa_league_id?: number
           first_observed_at?: string
           first_observed_refresh_run_id?: number
           id?: never
@@ -1858,34 +2090,51 @@ export type Database = {
             referencedRelation: "refresh_runs"
             referencedColumns: ["id"]
           },
+          {
+            foreignKeyName: "market_rate_training_contracts_league_id_fkey"
+            columns: ["dsa_league_id"]
+            isOneToOne: false
+            referencedRelation: "leagues"
+            referencedColumns: ["id"]
+          },
         ]
       }
       org_system_bios: {
         Row: {
           bio_text: string
+          dsa_league_id: number
           generated_at: string
           organization_id: number
           refresh_run_id: number
         }
         Insert: {
           bio_text: string
+          dsa_league_id: number
           generated_at?: string
           organization_id: number
           refresh_run_id: number
         }
         Update: {
           bio_text?: string
+          dsa_league_id?: number
           generated_at?: string
           organization_id?: number
           refresh_run_id?: number
         }
         Relationships: [
           {
-            foreignKeyName: "org_system_bios_organization_id_fkey"
-            columns: ["organization_id"]
-            isOneToOne: true
-            referencedRelation: "teams"
+            foreignKeyName: "org_system_bios_league_id_fkey"
+            columns: ["dsa_league_id"]
+            isOneToOne: false
+            referencedRelation: "leagues"
             referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "org_system_bios_organization_id_fkey"
+            columns: ["dsa_league_id", "organization_id"]
+            isOneToOne: false
+            referencedRelation: "teams"
+            referencedColumns: ["dsa_league_id", "id"]
           },
         ]
       }
@@ -1893,6 +2142,7 @@ export type Database = {
         Row: {
           created_at: string
           details: Json | null
+          dsa_league_id: number
           id: number
           message: string
           refresh_run_id: number | null
@@ -1902,6 +2152,7 @@ export type Database = {
         Insert: {
           created_at?: string
           details?: Json | null
+          dsa_league_id: number
           id?: never
           message: string
           refresh_run_id?: number | null
@@ -1911,13 +2162,22 @@ export type Database = {
         Update: {
           created_at?: string
           details?: Json | null
+          dsa_league_id?: number
           id?: never
           message?: string
           refresh_run_id?: number | null
           severity?: string
           source?: string
         }
-        Relationships: []
+        Relationships: [
+          {
+            foreignKeyName: "platform_events_league_id_fkey"
+            columns: ["dsa_league_id"]
+            isOneToOne: false
+            referencedRelation: "leagues"
+            referencedColumns: ["id"]
+          },
+        ]
       }
       player_batting_stats_snapshots: {
         Row: {
@@ -1927,6 +2187,7 @@ export type Database = {
           ci: number | null
           cs: number | null
           d: number | null
+          dsa_league_id: number
           g: number | null
           game_id: number | null
           gdp: number | null
@@ -1966,6 +2227,7 @@ export type Database = {
           ci?: number | null
           cs?: number | null
           d?: number | null
+          dsa_league_id: number
           g?: number | null
           game_id?: number | null
           gdp?: number | null
@@ -2005,6 +2267,7 @@ export type Database = {
           ci?: number | null
           cs?: number | null
           d?: number | null
+          dsa_league_id?: number
           g?: number | null
           game_id?: number | null
           gdp?: number | null
@@ -2039,11 +2302,18 @@ export type Database = {
         }
         Relationships: [
           {
+            foreignKeyName: "player_batting_stats_snapshots_league_id_fkey"
+            columns: ["dsa_league_id"]
+            isOneToOne: false
+            referencedRelation: "leagues"
+            referencedColumns: ["id"]
+          },
+          {
             foreignKeyName: "player_batting_stats_snapshots_player_id_fkey"
-            columns: ["player_id"]
+            columns: ["dsa_league_id", "player_id"]
             isOneToOne: false
             referencedRelation: "players"
-            referencedColumns: ["id"]
+            referencedColumns: ["dsa_league_id", "id"]
           },
           {
             foreignKeyName: "player_batting_stats_snapshots_refresh_run_id_fkey"
@@ -2064,6 +2334,7 @@ export type Database = {
           comp_player_id: number | null
           comp_similarity: number | null
           draft_org_rank: number | null
+          dsa_league_id: number
           eta: number | null
           fielding: number | null
           id: number
@@ -2109,6 +2380,7 @@ export type Database = {
           comp_player_id?: number | null
           comp_similarity?: number | null
           draft_org_rank?: number | null
+          dsa_league_id: number
           eta?: number | null
           fielding?: number | null
           id?: never
@@ -2154,6 +2426,7 @@ export type Database = {
           comp_player_id?: number | null
           comp_similarity?: number | null
           draft_org_rank?: number | null
+          dsa_league_id?: number
           eta?: number | null
           fielding?: number | null
           id?: never
@@ -2193,17 +2466,24 @@ export type Database = {
         Relationships: [
           {
             foreignKeyName: "player_computed_comp_player_id_fkey"
-            columns: ["comp_player_id"]
+            columns: ["dsa_league_id", "comp_player_id"]
             isOneToOne: false
             referencedRelation: "players"
+            referencedColumns: ["dsa_league_id", "id"]
+          },
+          {
+            foreignKeyName: "player_computed_league_id_fkey"
+            columns: ["dsa_league_id"]
+            isOneToOne: false
+            referencedRelation: "leagues"
             referencedColumns: ["id"]
           },
           {
             foreignKeyName: "player_computed_player_id_fkey"
-            columns: ["player_id"]
+            columns: ["dsa_league_id", "player_id"]
             isOneToOne: false
             referencedRelation: "players"
-            referencedColumns: ["id"]
+            referencedColumns: ["dsa_league_id", "id"]
           },
           {
             foreignKeyName: "player_computed_refresh_run_id_fkey"
@@ -2227,6 +2507,7 @@ export type Database = {
           arm: number | null
           captured_at: string
           dp: number | null
+          dsa_league_id: number
           e: number | null
           er: number | null
           framing: number | null
@@ -2272,6 +2553,7 @@ export type Database = {
           arm?: number | null
           captured_at: string
           dp?: number | null
+          dsa_league_id: number
           e?: number | null
           er?: number | null
           framing?: number | null
@@ -2317,6 +2599,7 @@ export type Database = {
           arm?: number | null
           captured_at?: string
           dp?: number | null
+          dsa_league_id?: number
           e?: number | null
           er?: number | null
           framing?: number | null
@@ -2359,11 +2642,18 @@ export type Database = {
         }
         Relationships: [
           {
+            foreignKeyName: "player_fielding_stats_snapshots_league_id_fkey"
+            columns: ["dsa_league_id"]
+            isOneToOne: false
+            referencedRelation: "leagues"
+            referencedColumns: ["id"]
+          },
+          {
             foreignKeyName: "player_fielding_stats_snapshots_player_id_fkey"
-            columns: ["player_id"]
+            columns: ["dsa_league_id", "player_id"]
             isOneToOne: false
             referencedRelation: "players"
-            referencedColumns: ["id"]
+            referencedColumns: ["dsa_league_id", "id"]
           },
           {
             foreignKeyName: "player_fielding_stats_snapshots_refresh_run_id_fkey"
@@ -2378,6 +2668,7 @@ export type Database = {
         Row: {
           ab: number | null
           bb: number | null
+          dsa_league_id: number
           game_box_score_id: number | null
           h: number | null
           hr: number | null
@@ -2391,6 +2682,7 @@ export type Database = {
         Insert: {
           ab?: number | null
           bb?: number | null
+          dsa_league_id: number
           game_box_score_id?: number | null
           h?: number | null
           hr?: number | null
@@ -2404,6 +2696,7 @@ export type Database = {
         Update: {
           ab?: number | null
           bb?: number | null
+          dsa_league_id?: number
           game_box_score_id?: number | null
           h?: number | null
           hr?: number | null
@@ -2423,26 +2716,36 @@ export type Database = {
             referencedColumns: ["id"]
           },
           {
+            foreignKeyName: "player_game_batting_lines_league_id_fkey"
+            columns: ["dsa_league_id"]
+            isOneToOne: false
+            referencedRelation: "leagues"
+            referencedColumns: ["id"]
+          },
+          {
             foreignKeyName: "player_game_batting_lines_player_id_fkey"
-            columns: ["player_id"]
+            columns: ["dsa_league_id", "player_id"]
             isOneToOne: false
             referencedRelation: "players"
-            referencedColumns: ["id"]
+            referencedColumns: ["dsa_league_id", "id"]
           },
         ]
       }
       player_game_pitching_lines: {
         Row: {
+          dsa_league_id: number
           game_box_score_id: number | null
           id: number
           player_id: number | null
         }
         Insert: {
+          dsa_league_id: number
           game_box_score_id?: number | null
           id?: never
           player_id?: number | null
         }
         Update: {
+          dsa_league_id?: number
           game_box_score_id?: number | null
           id?: never
           player_id?: number | null
@@ -2456,11 +2759,18 @@ export type Database = {
             referencedColumns: ["id"]
           },
           {
+            foreignKeyName: "player_game_pitching_lines_league_id_fkey"
+            columns: ["dsa_league_id"]
+            isOneToOne: false
+            referencedRelation: "leagues"
+            referencedColumns: ["id"]
+          },
+          {
             foreignKeyName: "player_game_pitching_lines_player_id_fkey"
-            columns: ["player_id"]
+            columns: ["dsa_league_id", "player_id"]
             isOneToOne: false
             referencedRelation: "players"
-            referencedColumns: ["id"]
+            referencedColumns: ["dsa_league_id", "id"]
           },
         ]
       }
@@ -2477,6 +2787,7 @@ export type Database = {
           cs: number | null
           da: number | null
           dp: number | null
+          dsa_league_id: number
           er: number | null
           fb: number | null
           g: number | null
@@ -2541,6 +2852,7 @@ export type Database = {
           cs?: number | null
           da?: number | null
           dp?: number | null
+          dsa_league_id: number
           er?: number | null
           fb?: number | null
           g?: number | null
@@ -2605,6 +2917,7 @@ export type Database = {
           cs?: number | null
           da?: number | null
           dp?: number | null
+          dsa_league_id?: number
           er?: number | null
           fb?: number | null
           g?: number | null
@@ -2659,11 +2972,18 @@ export type Database = {
         }
         Relationships: [
           {
+            foreignKeyName: "player_pitching_stats_snapshots_league_id_fkey"
+            columns: ["dsa_league_id"]
+            isOneToOne: false
+            referencedRelation: "leagues"
+            referencedColumns: ["id"]
+          },
+          {
             foreignKeyName: "player_pitching_stats_snapshots_player_id_fkey"
-            columns: ["player_id"]
+            columns: ["dsa_league_id", "player_id"]
             isOneToOne: false
             referencedRelation: "players"
-            referencedColumns: ["id"]
+            referencedColumns: ["dsa_league_id", "id"]
           },
           {
             foreignKeyName: "player_pitching_stats_snapshots_refresh_run_id_fkey"
@@ -2677,6 +2997,7 @@ export type Database = {
       player_projected_splits: {
         Row: {
           computed_at: string
+          dsa_league_id: number
           id: number
           player_id: number
           pot_cntct_l: number | null
@@ -2703,6 +3024,7 @@ export type Database = {
         }
         Insert: {
           computed_at?: string
+          dsa_league_id: number
           id?: never
           player_id: number
           pot_cntct_l?: number | null
@@ -2729,6 +3051,7 @@ export type Database = {
         }
         Update: {
           computed_at?: string
+          dsa_league_id?: number
           id?: never
           player_id?: number
           pot_cntct_l?: number | null
@@ -2753,7 +3076,15 @@ export type Database = {
           pot_stf_r?: number | null
           refresh_run_id?: number
         }
-        Relationships: []
+        Relationships: [
+          {
+            foreignKeyName: "player_projected_splits_league_id_fkey"
+            columns: ["dsa_league_id"]
+            isOneToOne: false
+            referencedRelation: "leagues"
+            referencedColumns: ["id"]
+          },
+        ]
       }
       player_ratings_snapshots: {
         Row: {
@@ -2777,6 +3108,7 @@ export type Database = {
           ctrl_l: number | null
           ctrl_r: number | null
           cutt: number | null
+          dsa_league_id: number
           eye: number | null
           eye_l: number | null
           eye_r: number | null
@@ -2907,6 +3239,7 @@ export type Database = {
           ctrl_l?: number | null
           ctrl_r?: number | null
           cutt?: number | null
+          dsa_league_id: number
           eye?: number | null
           eye_l?: number | null
           eye_r?: number | null
@@ -3037,6 +3370,7 @@ export type Database = {
           ctrl_l?: number | null
           ctrl_r?: number | null
           cutt?: number | null
+          dsa_league_id?: number
           eye?: number | null
           eye_l?: number | null
           eye_r?: number | null
@@ -3148,11 +3482,18 @@ export type Database = {
         }
         Relationships: [
           {
+            foreignKeyName: "player_ratings_snapshots_league_id_fkey"
+            columns: ["dsa_league_id"]
+            isOneToOne: false
+            referencedRelation: "leagues"
+            referencedColumns: ["id"]
+          },
+          {
             foreignKeyName: "player_ratings_snapshots_player_id_fkey"
-            columns: ["player_id"]
+            columns: ["dsa_league_id", "player_id"]
             isOneToOne: false
             referencedRelation: "players"
-            referencedColumns: ["id"]
+            referencedColumns: ["dsa_league_id", "id"]
           },
           {
             foreignKeyName: "player_ratings_snapshots_refresh_run_id_fkey"
@@ -3167,6 +3508,7 @@ export type Database = {
         Row: {
           age: number | null
           captured_at: string
+          dsa_league_id: number
           id: number
           is_active: boolean | null
           last_team_id: number | null
@@ -3180,6 +3522,7 @@ export type Database = {
         Insert: {
           age?: number | null
           captured_at?: string
+          dsa_league_id: number
           id?: never
           is_active?: boolean | null
           last_team_id?: number | null
@@ -3193,6 +3536,7 @@ export type Database = {
         Update: {
           age?: number | null
           captured_at?: string
+          dsa_league_id?: number
           id?: never
           is_active?: boolean | null
           last_team_id?: number | null
@@ -3205,11 +3549,18 @@ export type Database = {
         }
         Relationships: [
           {
+            foreignKeyName: "player_snapshots_league_id_fkey"
+            columns: ["dsa_league_id"]
+            isOneToOne: false
+            referencedRelation: "leagues"
+            referencedColumns: ["id"]
+          },
+          {
             foreignKeyName: "player_snapshots_player_id_fkey"
-            columns: ["player_id"]
+            columns: ["dsa_league_id", "player_id"]
             isOneToOne: false
             referencedRelation: "players"
-            referencedColumns: ["id"]
+            referencedColumns: ["dsa_league_id", "id"]
           },
           {
             foreignKeyName: "player_snapshots_refresh_run_id_fkey"
@@ -3237,6 +3588,7 @@ export type Database = {
           draft_supplemental: boolean | null
           draft_team_id: number | null
           draft_year: number | null
+          dsa_league_id: number
           first_name: string | null
           free_agent: boolean | null
           hall_of_fame: boolean | null
@@ -3295,6 +3647,7 @@ export type Database = {
           draft_supplemental?: boolean | null
           draft_team_id?: number | null
           draft_year?: number | null
+          dsa_league_id: number
           first_name?: string | null
           free_agent?: boolean | null
           hall_of_fame?: boolean | null
@@ -3353,6 +3706,7 @@ export type Database = {
           draft_supplemental?: boolean | null
           draft_team_id?: number | null
           draft_year?: number | null
+          dsa_league_id?: number
           first_name?: string | null
           free_agent?: boolean | null
           hall_of_fame?: boolean | null
@@ -3397,47 +3751,64 @@ export type Database = {
         }
         Relationships: [
           {
-            foreignKeyName: "players_organization_id_fkey"
-            columns: ["organization_id"]
+            foreignKeyName: "players_league_id_fkey"
+            columns: ["dsa_league_id"]
             isOneToOne: false
-            referencedRelation: "teams"
+            referencedRelation: "leagues"
             referencedColumns: ["id"]
           },
           {
-            foreignKeyName: "players_team_id_fkey"
-            columns: ["team_id"]
+            foreignKeyName: "players_organization_id_fkey"
+            columns: ["dsa_league_id", "organization_id"]
             isOneToOne: false
             referencedRelation: "teams"
-            referencedColumns: ["id"]
+            referencedColumns: ["dsa_league_id", "id"]
+          },
+          {
+            foreignKeyName: "players_team_id_fkey"
+            columns: ["dsa_league_id", "team_id"]
+            isOneToOne: false
+            referencedRelation: "teams"
+            referencedColumns: ["dsa_league_id", "id"]
           },
         ]
       }
       prospect_bios: {
         Row: {
           bio_text: string
+          dsa_league_id: number
           generated_at: string
           player_id: number
           refresh_run_id: number
         }
         Insert: {
           bio_text: string
+          dsa_league_id: number
           generated_at?: string
           player_id: number
           refresh_run_id: number
         }
         Update: {
           bio_text?: string
+          dsa_league_id?: number
           generated_at?: string
           player_id?: number
           refresh_run_id?: number
         }
         Relationships: [
           {
-            foreignKeyName: "prospect_bios_player_id_fkey"
-            columns: ["player_id"]
-            isOneToOne: true
-            referencedRelation: "players"
+            foreignKeyName: "prospect_bios_league_id_fkey"
+            columns: ["dsa_league_id"]
+            isOneToOne: false
+            referencedRelation: "leagues"
             referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "prospect_bios_player_id_fkey"
+            columns: ["dsa_league_id", "player_id"]
+            isOneToOne: false
+            referencedRelation: "players"
+            referencedColumns: ["dsa_league_id", "id"]
           },
           {
             foreignKeyName: "prospect_bios_refresh_run_id_fkey"
@@ -3472,6 +3843,7 @@ export type Database = {
           control_gate_mid_threshold: number
           created_at: string
           developed_age_threshold: number
+          dsa_league_id: number
           eye: number
           fielding: number
           gap: number
@@ -3526,6 +3898,7 @@ export type Database = {
           control_gate_mid_threshold?: number
           created_at?: string
           developed_age_threshold?: number
+          dsa_league_id: number
           eye: number
           fielding: number
           gap: number
@@ -3580,6 +3953,7 @@ export type Database = {
           control_gate_mid_threshold?: number
           created_at?: string
           developed_age_threshold?: number
+          dsa_league_id?: number
           eye?: number
           fielding?: number
           gap?: number
@@ -3611,12 +3985,21 @@ export type Database = {
           stamina?: number
           stuff?: number
         }
-        Relationships: []
+        Relationships: [
+          {
+            foreignKeyName: "rating_weights_league_id_fkey"
+            columns: ["dsa_league_id"]
+            isOneToOne: false
+            referencedRelation: "leagues"
+            referencedColumns: ["id"]
+          },
+        ]
       }
       refresh_runs: {
         Row: {
           completed_at: string | null
           draft_pool_count: number | null
+          dsa_league_id: number
           free_agent_count: number | null
           game_date: string | null
           hitter_overall_mean: number | null
@@ -3636,6 +4019,7 @@ export type Database = {
         Insert: {
           completed_at?: string | null
           draft_pool_count?: number | null
+          dsa_league_id: number
           free_agent_count?: number | null
           game_date?: string | null
           hitter_overall_mean?: number | null
@@ -3655,6 +4039,7 @@ export type Database = {
         Update: {
           completed_at?: string | null
           draft_pool_count?: number | null
+          dsa_league_id?: number
           free_agent_count?: number | null
           game_date?: string | null
           hitter_overall_mean?: number | null
@@ -3671,13 +4056,22 @@ export type Database = {
           started_at?: string
           status?: string
         }
-        Relationships: []
+        Relationships: [
+          {
+            foreignKeyName: "refresh_runs_league_id_fkey"
+            columns: ["dsa_league_id"]
+            isOneToOne: false
+            referencedRelation: "leagues"
+            referencedColumns: ["id"]
+          },
+        ]
       }
       system_rank_weights: {
         Row: {
           balance_penalty: number
           blue_chip_cutoff: number
           created_at: string
+          dsa_league_id: number
           id: number
           is_active: boolean
           label: string
@@ -3687,6 +4081,7 @@ export type Database = {
           balance_penalty?: number
           blue_chip_cutoff?: number
           created_at?: string
+          dsa_league_id: number
           id?: never
           is_active?: boolean
           label: string
@@ -3696,12 +4091,21 @@ export type Database = {
           balance_penalty?: number
           blue_chip_cutoff?: number
           created_at?: string
+          dsa_league_id?: number
           id?: never
           is_active?: boolean
           label?: string
           notes?: string | null
         }
-        Relationships: []
+        Relationships: [
+          {
+            foreignKeyName: "system_rank_weights_league_id_fkey"
+            columns: ["dsa_league_id"]
+            isOneToOne: false
+            referencedRelation: "leagues"
+            referencedColumns: ["id"]
+          },
+        ]
       }
       team_batting_stats_snapshots: {
         Row: {
@@ -3715,6 +4119,7 @@ export type Database = {
           ci: number | null
           cs: number | null
           d: number | null
+          dsa_league_id: number
           gidp: number | null
           h: number | null
           hp: number | null
@@ -3754,6 +4159,7 @@ export type Database = {
           ci?: number | null
           cs?: number | null
           d?: number | null
+          dsa_league_id: number
           gidp?: number | null
           h?: number | null
           hp?: number | null
@@ -3793,6 +4199,7 @@ export type Database = {
           ci?: number | null
           cs?: number | null
           d?: number | null
+          dsa_league_id?: number
           gidp?: number | null
           h?: number | null
           hp?: number | null
@@ -3823,6 +4230,13 @@ export type Database = {
         }
         Relationships: [
           {
+            foreignKeyName: "team_batting_stats_snapshots_league_id_fkey"
+            columns: ["dsa_league_id"]
+            isOneToOne: false
+            referencedRelation: "leagues"
+            referencedColumns: ["id"]
+          },
+          {
             foreignKeyName: "team_batting_stats_snapshots_refresh_run_id_fkey"
             columns: ["refresh_run_id"]
             isOneToOne: false
@@ -3831,10 +4245,10 @@ export type Database = {
           },
           {
             foreignKeyName: "team_batting_stats_snapshots_team_id_fkey"
-            columns: ["team_id"]
+            columns: ["dsa_league_id", "team_id"]
             isOneToOne: false
             referencedRelation: "teams"
-            referencedColumns: ["id"]
+            referencedColumns: ["dsa_league_id", "id"]
           },
         ]
       }
@@ -3848,6 +4262,7 @@ export type Database = {
           captured_at: string
           depth_score: number | null
           draft_rating: number | null
+          dsa_league_id: number
           fielding: number | null
           fielding_rank: number | null
           id: number
@@ -3882,6 +4297,7 @@ export type Database = {
           captured_at: string
           depth_score?: number | null
           draft_rating?: number | null
+          dsa_league_id: number
           fielding?: number | null
           fielding_rank?: number | null
           id?: never
@@ -3916,6 +4332,7 @@ export type Database = {
           captured_at?: string
           depth_score?: number | null
           draft_rating?: number | null
+          dsa_league_id?: number
           fielding?: number | null
           fielding_rank?: number | null
           id?: never
@@ -3943,6 +4360,13 @@ export type Database = {
         }
         Relationships: [
           {
+            foreignKeyName: "team_computed_league_id_fkey"
+            columns: ["dsa_league_id"]
+            isOneToOne: false
+            referencedRelation: "leagues"
+            referencedColumns: ["id"]
+          },
+          {
             foreignKeyName: "team_computed_refresh_run_id_fkey"
             columns: ["refresh_run_id"]
             isOneToOne: false
@@ -3958,10 +4382,10 @@ export type Database = {
           },
           {
             foreignKeyName: "team_computed_team_id_fkey"
-            columns: ["team_id"]
+            columns: ["dsa_league_id", "team_id"]
             isOneToOne: false
             referencedRelation: "teams"
-            referencedColumns: ["id"]
+            referencedColumns: ["dsa_league_id", "id"]
           },
           {
             foreignKeyName: "team_computed_weights_id_fkey"
@@ -3987,6 +4411,7 @@ export type Database = {
           cg: number | null
           ci: number | null
           d: number | null
+          dsa_league_id: number
           e_f: number | null
           er: number | null
           era: number | null
@@ -4038,6 +4463,7 @@ export type Database = {
           cg?: number | null
           ci?: number | null
           d?: number | null
+          dsa_league_id: number
           e_f?: number | null
           er?: number | null
           era?: number | null
@@ -4089,6 +4515,7 @@ export type Database = {
           cg?: number | null
           ci?: number | null
           d?: number | null
+          dsa_league_id?: number
           e_f?: number | null
           er?: number | null
           era?: number | null
@@ -4128,6 +4555,13 @@ export type Database = {
         }
         Relationships: [
           {
+            foreignKeyName: "team_pitching_stats_snapshots_league_id_fkey"
+            columns: ["dsa_league_id"]
+            isOneToOne: false
+            referencedRelation: "leagues"
+            referencedColumns: ["id"]
+          },
+          {
             foreignKeyName: "team_pitching_stats_snapshots_refresh_run_id_fkey"
             columns: ["refresh_run_id"]
             isOneToOne: false
@@ -4136,15 +4570,16 @@ export type Database = {
           },
           {
             foreignKeyName: "team_pitching_stats_snapshots_team_id_fkey"
-            columns: ["team_id"]
+            columns: ["dsa_league_id", "team_id"]
             isOneToOne: false
             referencedRelation: "teams"
-            referencedColumns: ["id"]
+            referencedColumns: ["dsa_league_id", "id"]
           },
         ]
       }
       teams: {
         Row: {
+          dsa_league_id: number
           id: number
           name: string
           nickname: string
@@ -4152,6 +4587,7 @@ export type Database = {
           updated_at: string
         }
         Insert: {
+          dsa_league_id: number
           id: number
           name: string
           nickname: string
@@ -4159,6 +4595,7 @@ export type Database = {
           updated_at?: string
         }
         Update: {
+          dsa_league_id?: number
           id?: number
           name?: string
           nickname?: string
@@ -4167,17 +4604,25 @@ export type Database = {
         }
         Relationships: [
           {
+            foreignKeyName: "teams_league_id_fkey"
+            columns: ["dsa_league_id"]
+            isOneToOne: false
+            referencedRelation: "leagues"
+            referencedColumns: ["id"]
+          },
+          {
             foreignKeyName: "teams_parent_team_id_fkey"
-            columns: ["parent_team_id"]
+            columns: ["dsa_league_id", "parent_team_id"]
             isOneToOne: false
             referencedRelation: "teams"
-            referencedColumns: ["id"]
+            referencedColumns: ["dsa_league_id", "id"]
           },
         ]
       }
       trade_block_snapshots: {
         Row: {
           captured_at: string
+          dsa_league_id: number
           id: number
           note: string
           player_id: number
@@ -4185,6 +4630,7 @@ export type Database = {
         }
         Insert: {
           captured_at?: string
+          dsa_league_id: number
           id?: never
           note?: string
           player_id: number
@@ -4192,16 +4638,26 @@ export type Database = {
         }
         Update: {
           captured_at?: string
+          dsa_league_id?: number
           id?: never
           note?: string
           player_id?: number
           refresh_run_id?: number
         }
-        Relationships: []
+        Relationships: [
+          {
+            foreignKeyName: "trade_block_snapshots_league_id_fkey"
+            columns: ["dsa_league_id"]
+            isOneToOne: false
+            referencedRelation: "leagues"
+            referencedColumns: ["id"]
+          },
+        ]
       }
       trade_event_items: {
         Row: {
           cash_amount: number | null
+          dsa_league_id: number
           id: number
           pick_round: number | null
           pick_team_id: number | null
@@ -4214,6 +4670,7 @@ export type Database = {
         }
         Insert: {
           cash_amount?: number | null
+          dsa_league_id: number
           id?: never
           pick_round?: number | null
           pick_team_id?: number | null
@@ -4226,6 +4683,7 @@ export type Database = {
         }
         Update: {
           cash_amount?: number | null
+          dsa_league_id?: number
           id?: never
           pick_round?: number | null
           pick_team_id?: number | null
@@ -4238,18 +4696,25 @@ export type Database = {
         }
         Relationships: [
           {
-            foreignKeyName: "trade_event_items_pick_team_id_fkey"
-            columns: ["pick_team_id"]
+            foreignKeyName: "trade_event_items_league_id_fkey"
+            columns: ["dsa_league_id"]
             isOneToOne: false
-            referencedRelation: "teams"
+            referencedRelation: "leagues"
             referencedColumns: ["id"]
           },
           {
+            foreignKeyName: "trade_event_items_pick_team_id_fkey"
+            columns: ["dsa_league_id", "pick_team_id"]
+            isOneToOne: false
+            referencedRelation: "teams"
+            referencedColumns: ["dsa_league_id", "id"]
+          },
+          {
             foreignKeyName: "trade_event_items_player_id_fkey"
-            columns: ["player_id"]
+            columns: ["dsa_league_id", "player_id"]
             isOneToOne: false
             referencedRelation: "players"
-            referencedColumns: ["id"]
+            referencedColumns: ["dsa_league_id", "id"]
           },
           {
             foreignKeyName: "trade_event_items_trade_event_id_fkey"
@@ -4263,6 +4728,7 @@ export type Database = {
       trade_events: {
         Row: {
           captured_at: string
+          dsa_league_id: number
           id: number
           status: string
           team_a_id: number | null
@@ -4274,6 +4740,7 @@ export type Database = {
         }
         Insert: {
           captured_at?: string
+          dsa_league_id: number
           id?: never
           status?: string
           team_a_id?: number | null
@@ -4285,6 +4752,7 @@ export type Database = {
         }
         Update: {
           captured_at?: string
+          dsa_league_id?: number
           id?: never
           status?: string
           team_a_id?: number | null
@@ -4296,18 +4764,25 @@ export type Database = {
         }
         Relationships: [
           {
-            foreignKeyName: "trade_events_team_a_id_fkey"
-            columns: ["team_a_id"]
+            foreignKeyName: "trade_events_league_id_fkey"
+            columns: ["dsa_league_id"]
             isOneToOne: false
-            referencedRelation: "teams"
+            referencedRelation: "leagues"
             referencedColumns: ["id"]
           },
           {
-            foreignKeyName: "trade_events_team_b_id_fkey"
-            columns: ["team_b_id"]
+            foreignKeyName: "trade_events_team_a_id_fkey"
+            columns: ["dsa_league_id", "team_a_id"]
             isOneToOne: false
             referencedRelation: "teams"
-            referencedColumns: ["id"]
+            referencedColumns: ["dsa_league_id", "id"]
+          },
+          {
+            foreignKeyName: "trade_events_team_b_id_fkey"
+            columns: ["dsa_league_id", "team_b_id"]
+            isOneToOne: false
+            referencedRelation: "teams"
+            referencedColumns: ["dsa_league_id", "id"]
           },
         ]
       }
@@ -4315,6 +4790,7 @@ export type Database = {
         Row: {
           control_years_decay_rate: number
           created_at: string
+          dsa_league_id: number
           id: number
           is_active: boolean
           label: string
@@ -4323,6 +4799,7 @@ export type Database = {
         Insert: {
           control_years_decay_rate?: number
           created_at?: string
+          dsa_league_id: number
           id?: never
           is_active?: boolean
           label: string
@@ -4331,16 +4808,26 @@ export type Database = {
         Update: {
           control_years_decay_rate?: number
           created_at?: string
+          dsa_league_id?: number
           id?: never
           is_active?: boolean
           label?: string
           notes?: string | null
         }
-        Relationships: []
+        Relationships: [
+          {
+            foreignKeyName: "trade_value_weights_league_id_fkey"
+            columns: ["dsa_league_id"]
+            isOneToOne: false
+            referencedRelation: "leagues"
+            referencedColumns: ["id"]
+          },
+        ]
       }
       weight_tuning_coefficients: {
         Row: {
           current_weight: number | null
+          dsa_league_id: number
           id: number
           implied_weight: number
           raw_coefficient: number
@@ -4351,6 +4838,7 @@ export type Database = {
         }
         Insert: {
           current_weight?: number | null
+          dsa_league_id: number
           id?: never
           implied_weight: number
           raw_coefficient: number
@@ -4361,6 +4849,7 @@ export type Database = {
         }
         Update: {
           current_weight?: number | null
+          dsa_league_id?: number
           id?: never
           implied_weight?: number
           raw_coefficient?: number
@@ -4370,6 +4859,13 @@ export type Database = {
           weight_tuning_run_id?: number
         }
         Relationships: [
+          {
+            foreignKeyName: "weight_tuning_coefficients_league_id_fkey"
+            columns: ["dsa_league_id"]
+            isOneToOne: false
+            referencedRelation: "leagues"
+            referencedColumns: ["id"]
+          },
           {
             foreignKeyName: "weight_tuning_coefficients_weight_tuning_run_id_fkey"
             columns: ["weight_tuning_run_id"]
@@ -4382,6 +4878,7 @@ export type Database = {
       weight_tuning_runs: {
         Row: {
           computed_at: string
+          dsa_league_id: number
           id: number
           r_squared: number
           refresh_run_id: number
@@ -4391,6 +4888,7 @@ export type Database = {
         }
         Insert: {
           computed_at?: string
+          dsa_league_id: number
           id?: never
           r_squared: number
           refresh_run_id: number
@@ -4400,6 +4898,7 @@ export type Database = {
         }
         Update: {
           computed_at?: string
+          dsa_league_id?: number
           id?: never
           r_squared?: number
           refresh_run_id?: number
@@ -4408,6 +4907,13 @@ export type Database = {
           target_metric?: string
         }
         Relationships: [
+          {
+            foreignKeyName: "weight_tuning_runs_league_id_fkey"
+            columns: ["dsa_league_id"]
+            isOneToOne: false
+            referencedRelation: "leagues"
+            referencedColumns: ["id"]
+          },
           {
             foreignKeyName: "weight_tuning_runs_refresh_run_id_fkey"
             columns: ["refresh_run_id"]

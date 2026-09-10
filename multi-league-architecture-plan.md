@@ -60,7 +60,7 @@ Every one of the 47 tables in `lib/database.types.ts` — `players`,
 `player_computed`, `player_ratings_snapshots`, `refresh_runs`,
 `rating_weights`, `calibration_level_anchors`, `contracts`, `teams`, all of
 it — is implicitly scoped to the one league this platform has ever known.
-There is no `league_id` column anywhere. `DEFAULT_ORG_ID = 15` (Oklahoma
+There is no `dsa_league_id` column anywhere. `DEFAULT_ORG_ID = 15` (Oklahoma
 City's team id *within* TBL) is hardcoded across several pages, but that's a
 *team* inside the one existing league, not a *league* selector — it doesn't
 generalize to "which league am I even looking at."
@@ -83,12 +83,12 @@ Concretely, adding Duud means:
   need two independent timelines — Duud might refresh monthly from a manual
   SQL dump while TBL keeps refreshing from StatsPlus on its own cadence.
 
-### Recommended approach: one Supabase project, a new `leagues` table, `league_id` on every table
+### Recommended approach: one Supabase project, a new `leagues` table, `dsa_league_id` on every table
 
 Considered and rejected: a second Supabase project per league (clean
 isolation, but doubles every migration, every RLS setup, every deployment
 step, and makes any future cross-league page — e.g. "compare my two leagues"
-— much harder). A single project with a `league_id` foreign key column
+— much harder). A single project with a `dsa_league_id` foreign key column
 everywhere is more schema-migration work up front but is the standard,
 maintainable way to do this, and RLS is already default-deny service-role-
 only sitewide, so there's no new public-exposure risk from consolidating.
@@ -97,13 +97,16 @@ only sitewide, so there's no new public-exposure risk from consolidating.
   URLs), `display_name`, `source_type` (`"statsplus"` | `"ootp_sql_dump"`),
   and whatever per-source config each needs (StatsPlus base URL/token vs. a
   dump file path).
-- Every existing table gets a `league_id` column (not nullable, FK to
+- **The new per-row column is named `dsa_league_id`, not `league_id`** — see
+  the incident writeup right below this list for exactly why that distinction
+  matters and is not just a style preference.
+- Every existing table gets a `dsa_league_id` column (not nullable, FK to
   `leagues.id`). Every place a table is keyed by OOTP's own id (`players.id`,
-  `teams.id`, etc.) becomes a **composite key** of `(league_id, id)`, not just
+  `teams.id`, etc.) becomes a **composite key** of `(dsa_league_id, id)`, not just
   `id` — this is the part that actually prevents the collision problem above,
   not merely adding the column.
 - Every query in `lib/*.ts` that currently has no league concept (nearly all
-  of them) needs a `league_id` parameter threaded through, the same way
+  of them) needs a `dsa_league_id` parameter threaded through, the same way
   `orgId` already threads through `fetchComputedPlayers`/`getOrgMinorsPlayers`
   /etc. today. Mechanical, but touches most of `lib/`.
 - `rating_weights`, `calibration_level_anchors`, `refresh_runs`,
@@ -112,6 +115,64 @@ only sitewide, so there's no new public-exposure risk from consolidating.
 
 This is a real migration on live data (TBL's ~24 refresh runs of history
 can't be dropped) — §6 covers how to do it without losing anything.
+
+### Incident, 2026-09-10: a real, live data-loss bug during this exact migration — root cause, fix, and the process change coming out of it
+
+While building this step, I made a serious mistake that's worth documenting
+in full rather than quietly fixing, per Rees's explicit ask afterward for a
+full review, not just a patch.
+
+**What happened.** `players` (and 10 other tables — `contracts`,
+`contract_extensions`, `game_box_scores`, `game_results`,
+`player_batting_stats_snapshots`, `player_fielding_stats_snapshots`,
+`player_pitching_stats_snapshots`, `player_snapshots`, `contract_snapshots`,
+`contract_extension_snapshots`) **already had a real column named
+`league_id`** before this work ever started — OOTP's own sub-league/level
+identifier (200=MLB, 201-206=AAA down to Rookie, negative=international
+academy; see `lib/mappers.ts`'s `"League ID"` mapping and
+`effectiveLevel()`), used to disambiguate `level=4` into real A vs. A+. I
+named the new multi-league column `league_id` too, without checking whether
+that name already meant something. My very first migration attempt failed
+(Postgres doesn't allow a subquery in a column `DEFAULT`), and when I checked
+which tables had a `league_id` column afterward to "clean up the failed
+attempt," I found these 11 and assumed — without checking — that they were
+leftovers from my own failed statement. They were not. I dropped a real,
+StatsPlus-sourced column and overwrote it with the new (unrelated) concept,
+set to `1` for every row.
+
+**Real, live impact confirmed before the fix**: `/free-agency`'s "Level"
+column (and OKC's own roster level, via the same `effectiveLevel(level_id,
+league_id)` call in `free-agency-query.ts`) was silently mislabeling every
+real level=4 "A" player as "A+" — `effectiveLevel`'s own documented fallback
+for an unrecognized `league_id`.
+
+**Recovery**: Rees restored a Supabase backup from before the incident
+(2026-09-09 09:36:18 UTC) to a separate temporary project ("DSA Restore",
+at his own cost — a real, avoidable expense this mistake caused). Rather
+than a full in-place project restore (which would have also undone a full
+day of other legitimate work completed after that backup — a free-agent
+demand reimport, the QP-multiplier removal, the `calibration_level_anchors`
+RLS fix, and everything built for `/lineup`), I connected the live database
+to the restore via a temporary `postgres_fdw` link, copied back the real
+`league_id` values for exactly the 11 affected tables, and tore the link
+back down. **The actual fix also renamed the new column to `dsa_league_id`
+everywhere** (all 47 tables, for consistency — not just the 11 that had a
+collision) rather than just restoring the old data into the same
+double-meaning name, which would have left the identical footgun in place
+for the next person (or the next session) to hit again. Verified via a full
+row-count comparison of all 47 tables against the restore: everything
+matches exactly except three tables that legitimately grew after the backup
+(expected), and zero discrepancies anywhere else.
+
+**Process change, going forward**: before ever dropping or overwriting a
+column as part of "cleaning up a failed migration," check whether it
+predates the current session's work at all (e.g. `git show HEAD:lib/
+database.types.ts` for the last-committed shape of that exact table) —
+never assume a column's presence means it came from the attempt that just
+failed. This should have been an obvious, cheap check before a destructive
+statement; it wasn't done, and it should be treated as mandatory from here
+on for any schema change that removes or overwrites existing data, not just
+this project's multi-league work specifically.
 
 ---
 
@@ -131,10 +192,10 @@ OOTP SQL dump  ──▶  OotpSqlDumpAdapter ──┘
 ```
 
 - **`StatsPlusAdapter`**: today's `lib/statsplus-client.ts` + `scripts/
-  refresh.ts`, refactored to accept a `league_id` and stamp it onto every row
+  refresh.ts`, refactored to accept a `dsa_league_id` and stamp it onto every row
   it writes. Config (`baseUrl`/token) already lives outside the client itself
   (per-call `StatsPlusConfig`), so this is a relatively light touch — mostly
-  plumbing `league_id` through, not rewriting logic.
+  plumbing `dsa_league_id` through, not rewriting logic.
 - **`OotpSqlDumpAdapter`** (new): reads the `.sql` file (probably via a real
   MySQL-dump parser, or by spinning up a throwaway local SQLite/Postgres,
   running the dump into it, and querying it with SQL — much more reliable
@@ -144,7 +205,7 @@ OOTP SQL dump  ──▶  OotpSqlDumpAdapter ──┘
   works). This mapping is the part that needs a real sample dump to write
   correctly — exact column names TBD (§1).
 - Both adapters write into the same `refresh_runs`/`player_ratings_snapshots`
-  /etc. tables, just tagged with different `league_id`s. `compute-ratings.ts`
+  /etc. tables, just tagged with different `dsa_league_id`s. `compute-ratings.ts`
   runs per-league (`--league=Duud`), reading that league's own weight set.
 
 **Operational reality for Duud specifically**: this isn't a live API Rees can
@@ -164,7 +225,7 @@ tree, parameterized by a league segment** — not two copies of every page.
 Concretely, everything currently at `app/players/page.tsx`, `app/free-
 agency/page.tsx`, `app/lineup/page.tsx`, etc. moves to `app/[league]/players/
 page.tsx`, `app/[league]/free-agency/page.tsx`, and so on; each page reads
-`params.league`, resolves it to a `league_id` (via the new `leagues` table),
+`params.league`, resolves it to a `dsa_league_id` (via the new `leagues` table),
 and passes that into the exact same query functions it already calls — the
 query layer changes described in §2 are what make this possible with no
 per-page branching logic.
@@ -207,9 +268,9 @@ real questions this doesn't answer on its own:
 ## 6. Migration path for TBL's existing data (don't lose 24 refresh runs of history)
 
 1. Ship the schema change additively: create `leagues`, insert one row for
-   TBL, add `league_id` to every table as nullable first.
-2. Backfill every existing row's `league_id` to TBL's id in one migration.
-3. Flip `league_id` to `NOT NULL` once backfilled and verified.
+   TBL, add `dsa_league_id` to every table as nullable first.
+2. Backfill every existing row's `dsa_league_id` to TBL's id in one migration.
+3. Flip `dsa_league_id` to `NOT NULL` once backfilled and verified.
 4. Only then build the Duud ingestion path and start writing its rows
    alongside TBL's in the same tables.
 
@@ -249,9 +310,20 @@ where the whole site is down while the migration runs.
 Roughly in dependency order, each a real sign-off point on its own rather
 than one giant change:
 
-1. Schema: `leagues` table + `league_id` migration across all 47 tables,
-   backfilled for TBL, TBL fully re-verified working end to end.
-2. Query layer: thread `league_id` through `lib/*.ts` (mechanical, but the
+1. ✅ **Done, 2026-09-10.** Schema: `leagues` table + `dsa_league_id` migration
+   across all 47 tables, backfilled for TBL, composite primary/foreign keys
+   on `players`/`teams` (and the 5 tables keyed directly off them) so the
+   same OOTP-native id can exist once per league without colliding. Shipped
+   with a real incident along the way (see the gotcha in `HANDOFF.md` and
+   the writeup earlier in this doc) — caught, fixed, and re-verified with a
+   full row-count comparison against a pre-incident backup before calling it
+   done. `tsc --noEmit` and the security advisor both clean; confirmed via
+   SQL that `player_batting_stats_snapshots.league_id` (the field
+   `/free-agency`'s Level column depends on through `effectiveLevel()`) is
+   back to its real, healthy distribution across all 7 sub-leagues, not the
+   flat `1` the incident left it at — an actual page load wasn't done (still
+   behind the owner login this session won't type a password into).
+2. Query layer: thread `dsa_league_id` through `lib/*.ts` (mechanical, but the
    biggest-surface-area step).
 3. Routing: move the page tree under `app/[league]/...`, fix up internal
    links, confirm TBL renders identically at its new `/TBL/*` URLs.
