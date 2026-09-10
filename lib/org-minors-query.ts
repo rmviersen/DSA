@@ -49,7 +49,11 @@ const MINOR_LEVELS = [2, 3, 4, 5, 6];
 // if they'll be back within 7 days (injury_left <= 7) -- "healthy within a
 // 2-week sim." A healthy (not injured at all) player always counts.
 const HEALTHY_WITHIN_DAYS = 7;
-function isAvailable(p: { injury_is_injured: boolean | null; is_on_dl: boolean | null; is_on_dl60: boolean | null; injury_left: number | null }): boolean {
+// Exported 2026-09-10 for /lineup's optimizer (lib/lineup-optimizer-query.ts)
+// to reuse -- same "who's realistically available" question, same answer,
+// rather than a second, possibly-drifting definition of "injured enough to
+// exclude."
+export function isAvailable(p: { injury_is_injured: boolean | null; is_on_dl: boolean | null; is_on_dl60: boolean | null; injury_left: number | null }): boolean {
   if (!p.injury_is_injured) return true;
   if (!p.is_on_dl && !p.is_on_dl60) return true; // DTD -- always counts
   return (p.injury_left ?? Infinity) <= HEALTHY_WITHIN_DAYS;

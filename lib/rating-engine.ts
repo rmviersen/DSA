@@ -303,6 +303,42 @@ const countAtLeast = (threshold: number, ...grades: (number | null)[]) =>
   // compile error and blocks the production build entirely.
   grades.reduce<number>((n, g) => n + (g !== null && g >= threshold ? 1 : 0), 0);
 
+// A hitter's Batting-shaped value against ONE specific pitcher handedness --
+// same weighted tool-grade formula as the rest of Batting, just fed the
+// vs-L or vs-R split grade for each tool instead of the flat one. Pulled out
+// of computeRatings()'s internal battingPitchingSide() on 2026-09-10 so
+// /lineup's optimizer (Rees's ask: optimize the lineup separately vs.
+// lefties and righties) can call the exact same formula the engine already
+// uses for its own Platoon field, against a live roster snapshot, without
+// re-deriving it a second time and risking drift if the weights or formula
+// shape ever change. Deliberately typed against the narrow slice of fields
+// it actually reads (not the full RatingsInput/WeightSet) so the optimizer
+// can call it with a plain raw player_ratings_snapshots row and the active
+// rating_weights row, cast to nothing -- both already satisfy these shapes
+// structurally, and computeRatings' own call site below still passes its
+// full RatingsInput/WeightSet without any change, since a wider type always
+// satisfies a narrower one.
+export interface BattingVsHandInput {
+  cntct_l: number | null; cntct_r: number | null;
+  gap_l: number | null; gap_r: number | null;
+  pow_l: number | null; pow_r: number | null;
+  eye_l: number | null; eye_r: number | null;
+  speed: number | null;
+}
+export function computeBattingVsHand(
+  r: BattingVsHandInput,
+  w: Pick<WeightSet, "contact" | "gap" | "power" | "eye" | "speed">,
+  side: "l" | "r"
+): number {
+  return (
+    zero(side === "l" ? r.cntct_l : r.cntct_r) * w.contact +
+    zero(side === "l" ? r.gap_l : r.gap_r) * w.gap +
+    zero(side === "l" ? r.pow_l : r.pow_r) * w.power +
+    zero(side === "l" ? r.eye_l : r.eye_r) * w.eye +
+    zero(r.speed) * w.speed
+  );
+}
+
 export function computeRatings(
   r: RatingsInput, w: WeightSet, splits: HandednessSplits,
   // Role -> relative fielding-weight multiplier (fielding_role_weights,
@@ -699,18 +735,17 @@ export function computeRatings(
         ].filter(Boolean).join(" ");
 
   // --- Platoon: handedness-split value gap, using the same weighted formula
-  // shape as Batting/Pitching but fed by vL/vR split grades.
+  // shape as Batting/Pitching but fed by vL/vR split grades. Hitter side
+  // pulled out into computeBattingVsHand() (below) so /lineup's optimizer
+  // (2026-09-10) can call the exact same formula directly against a live
+  // roster instead of duplicating it -- see that function's own comment.
   const battingPitchingSide = (side: "l" | "r") =>
     ph === "P"
       ? zero(side === "l" ? r.stf_l : r.stf_r) * w.stuff +
         zero(side === "l" ? r.mov_l : r.mov_r) * w.movement +
         zero(side === "l" ? r.ctrl_l : r.ctrl_r) * w.control +
         zero(r.stm) * w.stamina + qp * w.qp_multiplier
-      : zero(side === "l" ? r.cntct_l : r.cntct_r) * w.contact +
-        zero(side === "l" ? r.gap_l : r.gap_r) * w.gap +
-        zero(side === "l" ? r.pow_l : r.pow_r) * w.power +
-        zero(side === "l" ? r.eye_l : r.eye_r) * w.eye +
-        zero(r.speed) * w.speed;
+      : computeBattingVsHand(r, w, side);
 
   const vsL = battingPitchingSide("l");
   const vsR = battingPitchingSide("r");

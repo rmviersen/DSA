@@ -23,6 +23,7 @@ const NAV_ITEMS: NavItem[] = [
   // Minor League System (moved here from its own top-level nav slot).
   { label: "My Team", children: [
     { href: "/my-roster", label: "My Roster" },
+    { href: "/lineup", label: "Optimal Lineup" },
     { href: "/org-minors", label: "Minor League System" },
     { href: "/free-agency", label: "Free Agency" },
     { href: "/rule5-draft", label: "Rule 5 Draft" },
