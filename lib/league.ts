@@ -45,6 +45,53 @@ export async function getDefaultLeagueId(): Promise<number> {
   return getLeagueId(makeSupabaseClient());
 }
 
+// CLI helper (2026-09-11) for scripts/*.ts -- reads a `--league=<slug>`
+// argument off process.argv, defaulting to TBL so every script's existing
+// automation (GitHub Actions, cron, a bare `npm run compute-ratings`)
+// keeps working completely unchanged unless someone explicitly asks for
+// Duud. Added while auditing every regression/weight-tuning script for the
+// "each league needs its own separately-computed weights, not one shared
+// set" scoping pass -- see multi-league-architecture-plan.md and HANDOFF.md
+// gotcha 39 for the full story of what this closes.
+export function leagueSlugFromArgv(defaultSlug: string = DEFAULT_LEAGUE_SLUG): string {
+  const arg = process.argv.find((a) => a.startsWith("--league="));
+  return arg ? arg.slice("--league=".length) : defaultSlug;
+}
+
+// Resolves "what season is this league's own current in-game year," sourced
+// from that league's own latest refresh_runs.game_date -- NOT a hardcoded
+// literal year. Added alongside leagueSlugFromArgv() for the same reason:
+// several regression scripts had "2031" hardcoded as "the current season,"
+// which only ever meant TBL's current season at the moment that code was
+// written, and would silently return zero rows for any other league (Duud's
+// current season is 2027) -- and will eventually go stale for TBL itself
+// once it moves past 2031 too.
+export async function getCurrentSeasonYear(supabase: SupabaseClient, leagueId: number): Promise<number> {
+  const { data, error } = await supabase
+    .from("refresh_runs").select("game_date").eq("dsa_league_id", leagueId).eq("status", "succeeded")
+    .not("game_date", "is", null).order("id", { ascending: false }).limit(1).maybeSingle();
+  if (error) throw new Error(`Could not resolve current season year: ${error.message}`);
+  const gameDate = (data as { game_date: string | null } | null)?.game_date;
+  if (!gameDate) throw new Error(`No succeeded refresh_runs with a game_date found for league ${leagueId} -- can't determine the current season year.`);
+  return Number(gameDate.slice(0, 4));
+}
+
+// Resolves this league's own OOTP-native `players.league_id` value for the
+// real MLB level -- NOT the same number across leagues (TBL=200, Duud=203,
+// confirmed via real data). Several regression scripts hardcoded `=== 200`
+// as "is this a real MLB roster player," found while auditing them for
+// per-league correctness (2026-09-11) -- that would have silently excluded
+// every one of Duud's real MLB players (wrong league_id), not blended data
+// across leagues, but still a real bug once those scripts ever run for
+// anything but TBL. `leagues.mlb_league_id` is the source of truth now.
+export async function getMlbLeagueId(supabase: SupabaseClient, leagueId: number): Promise<number> {
+  const { data, error } = await supabase.from("leagues").select("mlb_league_id").eq("id", leagueId).single();
+  if (error || !data) throw new Error(`Could not resolve mlb_league_id for league ${leagueId}: ${error?.message}`);
+  const mlbLeagueId = (data as { mlb_league_id: number | null }).mlb_league_id;
+  if (mlbLeagueId == null) throw new Error(`League ${leagueId} has no mlb_league_id set on the leagues table.`);
+  return mlbLeagueId;
+}
+
 // The real per-request resolver for every page under app/[league]/... --
 // Step 3 of the multi-league plan (2026-09-10). Turns the URL's league slug
 // into a real id, or 404s if it's not a real league (a typo'd URL, or a

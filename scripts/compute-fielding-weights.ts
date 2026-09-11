@@ -1,6 +1,6 @@
 import "dotenv/config";
 import { makeSupabaseClient } from "../lib/supabase-client.js";
-import { getLeagueId } from "../lib/league.js";
+import { getLeagueId, leagueSlugFromArgv } from "../lib/league.js";
 import { getRatingValidationPoints } from "../lib/rating-validation-query.js";
 import { fitLine, isotonicRegressionNonIncreasing } from "../lib/regression.js";
 
@@ -57,7 +57,7 @@ const MAX_MULTIPLIER = 3;
 
 async function main() {
   const supabase = makeSupabaseClient();
-  const leagueId = await getLeagueId(supabase);
+  const leagueId = await getLeagueId(supabase, leagueSlugFromArgv());
 
   console.log("Loading rating-validation hitter data...");
   const points = await getRatingValidationPoints(leagueId);

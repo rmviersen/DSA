@@ -1,6 +1,6 @@
 import "dotenv/config";
 import { makeSupabaseClient } from "../lib/supabase-client.js";
-import { getLeagueId } from "../lib/league.js";
+import { getLeagueId, leagueSlugFromArgv } from "../lib/league.js";
 import {
   computeAAV, computeLeagueMinimumSalary, isCleanFreeAgentContract, playerTypeForRole,
   type ContractSalaryFields,
@@ -44,7 +44,7 @@ interface ContractSnapshotRow extends ContractSalaryFields {
 
 async function main() {
   const supabase = makeSupabaseClient();
-  const leagueId = await getLeagueId(supabase);
+  const leagueId = await getLeagueId(supabase, leagueSlugFromArgv());
 
   console.log("Finding latest refresh run with contract snapshots...");
   const { data: contractRunRow, error: contractRunErr } = await supabase

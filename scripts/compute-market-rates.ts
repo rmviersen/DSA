@@ -1,6 +1,6 @@
 import "dotenv/config";
 import { makeSupabaseClient } from "../lib/supabase-client.js";
-import { getLeagueId } from "../lib/league.js";
+import { getLeagueId, leagueSlugFromArgv } from "../lib/league.js";
 import { PITCHER_ROLES, computeLeagueMinimumSalary, type PlayerType } from "../lib/contract-classification.js";
 import { fitLine } from "../lib/regression.js";
 
@@ -64,7 +64,7 @@ interface TrainingContract { playerId: number; overall: number; role: string; aa
 
 async function main() {
   const supabase = makeSupabaseClient();
-  const leagueId = await getLeagueId(supabase);
+  const leagueId = await getLeagueId(supabase, leagueSlugFromArgv());
 
   console.log("Loading accumulated training contracts (market_rate_training_contracts)...");
   const training = await fetchAll<{ player_id: number; overall: number; role: string; aav: number }>((from, to) =>

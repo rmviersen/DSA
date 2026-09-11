@@ -2,7 +2,7 @@ import "dotenv/config";
 import { makeSupabaseClient } from "../lib/supabase-client.js";
 import { computeRatings, type RatingsInput, type WeightSet, type HandednessSplits } from "../lib/rating-engine.js";
 import { effectiveLevel } from "../lib/display-helpers.js";
-import { getLeagueId } from "../lib/league.js";
+import { getLeagueId, leagueSlugFromArgv } from "../lib/league.js";
 
 const PAGE_SIZE = 1000;
 
@@ -1025,7 +1025,7 @@ async function computeRatingsForRun(supabase: ReturnType<typeof makeSupabaseClie
 
 async function main() {
   const supabase = makeSupabaseClient();
-  const leagueId = await getLeagueId(supabase);
+  const leagueId = await getLeagueId(supabase, leagueSlugFromArgv());
   const shared = await loadSharedContext(supabase, leagueId);
 
   // --all (2026-09-02, Rees's ask: "run a full refresh of all of the data

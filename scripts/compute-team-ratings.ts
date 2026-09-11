@@ -1,6 +1,6 @@
 import "dotenv/config";
 import { makeSupabaseClient } from "../lib/supabase-client.js";
-import { getLeagueId } from "../lib/league.js";
+import { getLeagueId, leagueSlugFromArgv } from "../lib/league.js";
 
 const PAGE_SIZE = 1000;
 
@@ -67,7 +67,7 @@ interface PlayerRow {
 
 async function main() {
   const supabase = makeSupabaseClient();
-  const leagueId = await getLeagueId(supabase);
+  const leagueId = await getLeagueId(supabase, leagueSlugFromArgv());
 
   console.log("Finding latest refresh run with computed player ratings...");
   const { data: pcRow, error: pcErr } = await supabase

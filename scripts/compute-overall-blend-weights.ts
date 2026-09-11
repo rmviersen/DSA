@@ -2,7 +2,7 @@ import "dotenv/config";
 import { makeSupabaseClient } from "../lib/supabase-client.js";
 import { fitMultipleLinear } from "../lib/regression.js";
 import { persistWeightTuningRun } from "../lib/weight-tuning-persist.js";
-import { getLeagueId } from "../lib/league.js";
+import { getLeagueId, leagueSlugFromArgv, getCurrentSeasonYear, getMlbLeagueId } from "../lib/league.js";
 
 // Step 3 of the decomposed offense/defense redesign, finally buildable now
 // that Batting, Fielding, and Baserunning have each been individually tuned
@@ -47,35 +47,37 @@ const MIN_PA = 100; // same threshold as every other hitter-side regression this
 
 async function main() {
   const supabase = makeSupabaseClient();
-  const leagueId = await getLeagueId(supabase);
+  const leagueId = await getLeagueId(supabase, leagueSlugFromArgv());
+  const currentYear = await getCurrentSeasonYear(supabase, leagueId);
+  const mlbLeagueId = await getMlbLeagueId(supabase, leagueId);
 
   console.log("Finding latest refresh run with player_computed...");
   const { data: computedRunRow } = await supabase
-    .from("player_computed").select("refresh_run_id").order("refresh_run_id", { ascending: false }).limit(1).maybeSingle();
+    .from("player_computed").select("refresh_run_id").eq("dsa_league_id", leagueId).order("refresh_run_id", { ascending: false }).limit(1).maybeSingle();
   if (!computedRunRow) throw new Error("No player_computed rows found.");
   const computedRunId = (computedRunRow as { refresh_run_id: number }).refresh_run_id;
 
-  console.log("Finding latest refresh run with 2031 MLB batting stats...");
+  console.log(`Finding latest refresh run with ${currentYear} MLB batting stats...`);
   const { data: statsRunRow } = await supabase
-    .from("player_batting_stats_snapshots").select("refresh_run_id").eq("year", 2031).eq("level_id", 1).eq("split_id", 1)
+    .from("player_batting_stats_snapshots").select("refresh_run_id").eq("dsa_league_id", leagueId).eq("year", currentYear).eq("level_id", 1).eq("split_id", 1)
     .order("refresh_run_id", { ascending: false }).limit(1).maybeSingle();
-  if (!statsRunRow) throw new Error("No 2031 MLB batting stats found.");
+  if (!statsRunRow) throw new Error(`No ${currentYear} MLB batting stats found.`);
   const statsRunId = (statsRunRow as { refresh_run_id: number }).refresh_run_id;
 
-  console.log("Loading players (for the real-MLB-roster filter: league_id=200, mlb_service_days>0)...");
+  console.log(`Loading players (for the real-MLB-roster filter: league_id=${mlbLeagueId}, mlb_service_days>0)...`);
   const players = await fetchAll<{ id: number; league_id: number | null; mlb_service_days: number | null }>((from, to) =>
-    supabase.from("players").select("id, league_id, mlb_service_days").range(from, to) as never
+    supabase.from("players").select("id, league_id, mlb_service_days").eq("dsa_league_id", leagueId).range(from, to) as never
   );
   const playerMeta = new Map(players.map((p) => [p.id, p]));
   const isRealMlbPlayer = (playerId: number) => {
     const meta = playerMeta.get(playerId);
-    return !!meta && meta.league_id === 200 && (meta.mlb_service_days ?? 0) > 0;
+    return !!meta && meta.league_id === mlbLeagueId && (meta.mlb_service_days ?? 0) > 0;
   };
 
-  console.log("Loading 2031 MLB batting stats (pa, war)...");
+  console.log(`Loading ${currentYear} MLB batting stats (pa, war)...`);
   const battingRows = await fetchAll<{ player_id: number; pa: number | null; war: number | null }>((from, to) =>
     supabase.from("player_batting_stats_snapshots").select("player_id, pa, war")
-      .eq("year", 2031).eq("level_id", 1).eq("split_id", 1).eq("refresh_run_id", statsRunId)
+      .eq("year", currentYear).eq("level_id", 1).eq("split_id", 1).eq("refresh_run_id", statsRunId)
       .range(from, to) as never
   );
   const byPlayer = new Map<number, { pa: number; war: number }>();
@@ -86,11 +88,11 @@ async function main() {
     cur.war += b.war ?? 0;
     byPlayer.set(b.player_id, cur);
   }
-  console.log(`  ${byPlayer.size} real MLB hitters with any 2031 PA`);
+  console.log(`  ${byPlayer.size} real MLB hitters with any ${currentYear} PA`);
 
   console.log("Loading Batting/Fielding/Baserunning composites + role...");
   const computed = await fetchAll<{ player_id: number; role: string | null; batting: number | null; fielding: number | null; baserunning: number | null }>((from, to) =>
-    supabase.from("player_computed").select("player_id, role, batting, fielding, baserunning").eq("refresh_run_id", computedRunId).range(from, to) as never
+    supabase.from("player_computed").select("player_id, role, batting, fielding, baserunning").eq("dsa_league_id", leagueId).eq("refresh_run_id", computedRunId).range(from, to) as never
   );
   const computedByPlayer = new Map(computed.map((c) => [c.player_id, c]));
   const PITCHER_ROLES = new Set(["SP", "RP", "CL"]);
@@ -144,7 +146,7 @@ async function main() {
   // which was its own stale-snapshot bug (always reported 1 here even
   // after batting's real weight shipped, since this select never asked for
   // the new column).
-  const { data: weightRow } = await supabase.from("rating_weights").select("batting, fielding, baserunning").eq("is_active", true).maybeSingle();
+  const { data: weightRow } = await supabase.from("rating_weights").select("batting, fielding, baserunning").eq("dsa_league_id", leagueId).eq("is_active", true).maybeSingle();
   const current = weightRow as { batting: number; fielding: number; baserunning: number } | null;
   const currentByLabel: Record<string, number | null> = {
     Batting: current?.batting ?? null, Fielding: current?.fielding ?? null, Baserunning: current?.baserunning ?? null,

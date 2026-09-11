@@ -2,7 +2,7 @@ import "dotenv/config";
 import { makeSupabaseClient } from "../lib/supabase-client.js";
 import { fitMultipleLinear } from "../lib/regression.js";
 import { persistWeightTuningRun } from "../lib/weight-tuning-persist.js";
-import { getLeagueId } from "../lib/league.js";
+import { getLeagueId, leagueSlugFromArgv, getCurrentSeasonYear, getMlbLeagueId } from "../lib/league.js";
 
 // Pitching weight-tuning (rebuilt 2026-09-02, Rees's corrections to the
 // original version). Runs BOTH targets side by side (Rees's follow-up ask,
@@ -85,24 +85,26 @@ function addTotals(a: PitchCategories, b: PitchCategories): PitchCategories {
 
 async function main() {
   const supabase = makeSupabaseClient();
-  const leagueId = await getLeagueId(supabase);
+  const leagueId = await getLeagueId(supabase, leagueSlugFromArgv());
+  const currentYear = await getCurrentSeasonYear(supabase, leagueId);
+  const mlbLeagueId = await getMlbLeagueId(supabase, leagueId);
 
   console.log("Finding latest refresh run with player_computed...");
   const { data: computedRunRow } = await supabase
-    .from("player_computed").select("refresh_run_id").order("refresh_run_id", { ascending: false }).limit(1).maybeSingle();
+    .from("player_computed").select("refresh_run_id").eq("dsa_league_id", leagueId).order("refresh_run_id", { ascending: false }).limit(1).maybeSingle();
   if (!computedRunRow) throw new Error("No player_computed rows found.");
   const computedRunId = (computedRunRow as { refresh_run_id: number }).refresh_run_id;
 
-  console.log("Finding latest refresh run with 2031 MLB pitching stats...");
+  console.log(`Finding latest refresh run with ${currentYear} MLB pitching stats...`);
   const { data: statsRunRow } = await supabase
-    .from("player_pitching_stats_snapshots").select("refresh_run_id").eq("year", 2031).eq("level_id", 1).eq("split_id", 1)
+    .from("player_pitching_stats_snapshots").select("refresh_run_id").eq("dsa_league_id", leagueId).eq("year", currentYear).eq("level_id", 1).eq("split_id", 1)
     .order("refresh_run_id", { ascending: false }).limit(1).maybeSingle();
-  if (!statsRunRow) throw new Error("No 2031 MLB pitching stats found.");
+  if (!statsRunRow) throw new Error(`No ${currentYear} MLB pitching stats found.`);
   const statsRunId = (statsRunRow as { refresh_run_id: number }).refresh_run_id;
 
   console.log("Loading ballpark factors (latest snapshot per team)...");
   const parkRows = await fetchAll<{ team_id: number; refresh_run_id: number; home_runs: number | null }>((from, to) =>
-    supabase.from("ballpark_factor_snapshots").select("team_id, refresh_run_id, home_runs").range(from, to) as never
+    supabase.from("ballpark_factor_snapshots").select("team_id, refresh_run_id, home_runs").eq("dsa_league_id", leagueId).range(from, to) as never
   );
   const hrFactorByTeam = new Map<number, number>();
   const parkRunIdByTeam = new Map<number, number>();
@@ -113,20 +115,20 @@ async function main() {
     parkRunIdByTeam.set(p.team_id, p.refresh_run_id);
   }
 
-  console.log("Loading players (for the real-MLB-roster filter: league_id=200, mlb_service_days>0)...");
+  console.log(`Loading players (for the real-MLB-roster filter: league_id=${mlbLeagueId}, mlb_service_days>0)...`);
   const players = await fetchAll<{ id: number; league_id: number | null; mlb_service_days: number | null }>((from, to) =>
-    supabase.from("players").select("id, league_id, mlb_service_days").range(from, to) as never
+    supabase.from("players").select("id, league_id, mlb_service_days").eq("dsa_league_id", leagueId).range(from, to) as never
   );
   const playerMeta = new Map(players.map((p) => [p.id, p]));
   const isRealMlbPlayer = (playerId: number) => {
     const meta = playerMeta.get(playerId);
-    return !!meta && meta.league_id === 200 && (meta.mlb_service_days ?? 0) > 0;
+    return !!meta && meta.league_id === mlbLeagueId && (meta.mlb_service_days ?? 0) > 0;
   };
 
-  console.log("Loading 2031 MLB pitching stats (bb, hp, k, hra, ip, er, war)...");
+  console.log(`Loading ${currentYear} MLB pitching stats (bb, hp, k, hra, ip, er, war)...`);
   const pitchingRows = await fetchAll<{ player_id: number; team_id: number | null; bb: number | null; hp: number | null; k: number | null; hra: number | null; ip: number | null; er: number | null; war: number | null }>((from, to) =>
     supabase.from("player_pitching_stats_snapshots").select("player_id, team_id, bb, hp, k, hra, ip, er, war")
-      .eq("year", 2031).eq("level_id", 1).eq("split_id", 1).eq("refresh_run_id", statsRunId)
+      .eq("year", currentYear).eq("level_id", 1).eq("split_id", 1).eq("refresh_run_id", statsRunId)
       .range(from, to) as never
   );
 
@@ -142,7 +144,7 @@ async function main() {
     byPlayerAdjusted.set(p.player_id, addTotals(byPlayerAdjusted.get(p.player_id) ?? emptyTotals(), { ...stint, hr: adjustedHr }));
     warByPlayer.set(p.player_id, (warByPlayer.get(p.player_id) ?? 0) + (p.war ?? 0));
   }
-  console.log(`  ${byPlayerRaw.size} real MLB pitchers with any 2031 IP`);
+  console.log(`  ${byPlayerRaw.size} real MLB pitchers with any ${currentYear} IP`);
 
   // League baseline stays RAW/unadjusted (same reasoning as the hitting
   // side) -- the real, observed run environment, not itself park-adjusted.
@@ -154,15 +156,15 @@ async function main() {
   // ERA, the standard real-sabermetric FIP construction.
   const fipConstant = leagueEra - (13 * leagueTotals.hr + 3 * (leagueTotals.bb + leagueTotals.hp) - 2 * leagueTotals.k) / leagueTotals.ip;
   const leagueFip = fip(leagueTotals, fipConstant);
-  console.log(`League baseline (real 2031 MLB pitchers): ERA=${leagueEra.toFixed(2)}, FIP=${leagueFip.toFixed(2)} (constant=${fipConstant.toFixed(3)})`);
+  console.log(`League baseline (real ${currentYear} MLB pitchers): ERA=${leagueEra.toFixed(2)}, FIP=${leagueFip.toFixed(2)} (constant=${fipConstant.toFixed(3)})`);
 
   console.log("Loading pitching grades + role...");
   const ratings = await fetchAll<{ player_id: number; stf: number | null; mov: number | null; ctrl: number | null; stm: number | null }>((from, to) =>
-    supabase.from("player_ratings_snapshots").select("player_id, stf, mov, ctrl, stm").eq("refresh_run_id", computedRunId).range(from, to) as never
+    supabase.from("player_ratings_snapshots").select("player_id, stf, mov, ctrl, stm").eq("dsa_league_id", leagueId).eq("refresh_run_id", computedRunId).range(from, to) as never
   );
   const ratingsByPlayer = new Map(ratings.map((r) => [r.player_id, r]));
   const computed = await fetchAll<{ player_id: number; role: string | null; qp: number | null }>((from, to) =>
-    supabase.from("player_computed").select("player_id, role, qp").eq("refresh_run_id", computedRunId).range(from, to) as never
+    supabase.from("player_computed").select("player_id, role, qp").eq("dsa_league_id", leagueId).eq("refresh_run_id", computedRunId).range(from, to) as never
   );
   const computedByPlayer = new Map(computed.map((c) => [c.player_id, c]));
 
@@ -211,7 +213,7 @@ async function main() {
     const sum = clamped.reduce((s, c) => s + c, 0);
     const normalized = sum > 0 ? clamped.map((c) => c / sum) : clamped.map(() => 0);
 
-    const { data: weightRow } = await supabase.from("rating_weights").select("stuff, movement, control, stamina").eq("is_active", true).maybeSingle();
+    const { data: weightRow } = await supabase.from("rating_weights").select("stuff, movement, control, stamina").eq("dsa_league_id", leagueId).eq("is_active", true).maybeSingle();
     const current = weightRow as { stuff: number; movement: number; control: number; stamina: number } | null;
     const currentByLabel: Record<string, number | null> = {
       Stuff: current?.stuff ?? null, Movement: current?.movement ?? null, Control: current?.control ?? null, Stamina: current?.stamina ?? null,

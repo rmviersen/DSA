@@ -525,6 +525,36 @@ than one giant change:
      expected state at this point, not a bug.
 6. Duud's own `rating_weights`/calibration, computed fresh against its own
    player pool (never inherited from TBL's tuned numbers).
+   - ✅ **Prerequisite done, 2026-09-11** (Step 6 itself — actually running
+     the calibration for Duud — not started yet): audited and fixed every
+     regression/weight-tuning script for real per-league scoping, per
+     Rees's explicit call that a majority of the rating engine is
+     regression against a league's OWN performance data, so TBL and Duud
+     each need their own separately-computed weights/market
+     rates/trade-and-draft values, never one shared set.
+     - Found this was worse than "not ready for Duud yet": **5 scripts had
+       zero league filtering on their training-data queries at all**
+       (`compute-baserunning-weights.ts`, `compute-fielding-defensive-
+       weights.ts`, `compute-hitting-weights.ts`, `compute-overall-blend-
+       weights.ts`, `compute-pitching-weights.ts`) — a live risk the moment
+       Duud's importer (Step 5) landed real rows in the same shared tables,
+       since `id` collides across leagues. The other 6 were already
+       correctly scoped from Step 2, confirmed by reading every query site,
+       not assumed. All fixed; all 11 now also accept `--league=<slug>`
+       (defaulting to TBL, so no existing automation changes behavior)
+       so any of them can actually be pointed at Duud.
+     - A real **database-level** rule also needed fixing: `rating_weights`
+       only allowed one active weight set across the *entire* table, not
+       one per league. Widened to allow one per league.
+     - Two more real per-league bugs caught in the same 5 scripts: they
+       hardcoded TBL's own `league_id=200` as "real MLB roster player"
+       (Duud's is 203 — fixed with a new `leagues.mlb_league_id` column)
+       and hardcoded `year=2031` as "the current season" (fixed with a new
+       helper reading each league's own latest game date — verified as a
+       genuine improvement for TBL too: its game date had already advanced
+       to 2032, and the old hardcoded code would have silently kept using
+       stale 2031 data forever without ever noticing).
+     - Full detail: `HANDOFF.md` gotcha 39.
 7. Duud goes live at `/Duud/*`.
 
 This is a multi-session undertaking, not a single sitting — each numbered

@@ -1,6 +1,6 @@
 import "dotenv/config";
 import { makeSupabaseClient } from "../lib/supabase-client.js";
-import { getLeagueId } from "../lib/league.js";
+import { getLeagueId, leagueSlugFromArgv } from "../lib/league.js";
 import { isotonicRegressionNonIncreasing } from "../lib/regression.js";
 
 // Trade-value engine, Phase A step 2 (2026-09-04) -- draft-pick value curve.
@@ -108,7 +108,7 @@ function quantileMedian(sorted: number[]): number {
 
 async function main() {
   const supabase = makeSupabaseClient();
-  const leagueId = await getLeagueId(supabase);
+  const leagueId = await getLeagueId(supabase, leagueSlugFromArgv());
 
   console.log("Finding latest refresh run and current in-game year...");
   const { data: latestRunRow, error: runErr } = await supabase
