@@ -149,16 +149,29 @@ async function main() {
         : [2029, 2030, 2031]; // defensive fallback only if the game date couldn't be read at all
     console.log(`Pulling stats for year(s): ${years.join(", ")}`);
 
+    // dsa_league_id,<id> conflict targets below (2026-09-11 fix): Step 1 of
+    // the multi-league migration (2026-09-10) widened players/teams/
+    // contracts/contract_extensions/draft_picks to composite primary keys
+    // (dsa_league_id, id) / (dsa_league_id, player_id) so the same OOTP-
+    // native id can exist once per league. This file's onConflict strings
+    // were never updated to match -- found 2026-09-11 while building Duud's
+    // importer (which upserts into these same tables) and confirmed via
+    // refresh_runs that every automated refresh since the Step 1 migration
+    // had actually been FAILING ("no unique or exclusion constraint
+    // matching the ON CONFLICT specification"), leaving TBL's data stale
+    // for about two days with no other visible symptom. Postgres requires
+    // onConflict to name the real constraint's exact column set, not just
+    // enough columns to be unique in practice.
     console.log("Pulling teams...");
-    await upsertBatched(supabase, "teams", (await sp.teams()).map(map.mapTeam), "id", leagueId);
+    await upsertBatched(supabase, "teams", (await sp.teams()).map(map.mapTeam), "dsa_league_id,id", leagueId);
 
     console.log("Pulling players...");
-    await upsertBatched(supabase, "players", (await sp.players()).map(map.mapPlayer), "id", leagueId);
+    await upsertBatched(supabase, "players", (await sp.players()).map(map.mapPlayer), "dsa_league_id,id", leagueId);
 
     console.log("Pulling contracts...");
     {
       const rows = await sp.contracts();
-      await upsertBatched(supabase, "contracts", rows.map(map.mapContract), "player_id", leagueId);
+      await upsertBatched(supabase, "contracts", rows.map(map.mapContract), "dsa_league_id,player_id", leagueId);
       // Also append to the history table (2026-08-31, Rees's ask) -- same raw
       // rows, no second fetch. Trade-value analysis needs "what did this
       // contract look like at the time," which the current-state table above
@@ -169,7 +182,7 @@ async function main() {
     console.log("Pulling contract extensions...");
     {
       const rows = await sp.contractExtensions();
-      await upsertBatched(supabase, "contract_extensions", rows.map(map.mapContractExtension), "player_id", leagueId);
+      await upsertBatched(supabase, "contract_extensions", rows.map(map.mapContractExtension), "dsa_league_id,player_id", leagueId);
       await insertBatched(supabase, "contract_extension_snapshots", rows.map((r) => map.mapContractExtensionSnapshot(r, refreshRunId, capturedAt)), leagueId);
     }
 
@@ -190,7 +203,7 @@ async function main() {
         (data as { id: number; draft_year: number | null }[]).forEach((p) => draftYearByPlayerId.set(p.id, p.draft_year));
       }
       const mapped = draftRows.map((r) => map.mapDraftPick(r, draftYearByPlayerId.get(Number(r["ID"])) ?? null));
-      await upsertBatched(supabase, "draft_picks", mapped, "player_id", leagueId);
+      await upsertBatched(supabase, "draft_picks", mapped, "dsa_league_id,player_id", leagueId);
     }
 
     for (const year of years) {
