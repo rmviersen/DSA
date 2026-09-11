@@ -565,3 +565,64 @@ than one giant change:
 This is a multi-session undertaking, not a single sitting — each numbered
 step above is a natural place to pause, verify, and get a go-ahead on the
 next one.
+
+---
+
+## 9. Future, deliberately deferred: WPR (a new WAR-adjacent stat)
+
+Raised 2026-09-11 alongside the dump-trimming conversation, then explicitly
+deferred by Rees until steps 1–7 above are actually complete — noted here so
+the research already done isn't lost in the meantime.
+
+**What it is**: a new, additive stat, NOT a replacement for `rating-engine.ts`'s
+scouting-grade Overall/Potential. Rees already built and validated a real
+version of this against real MLB data in his other project (WARroom,
+`C:\Dev\WARroom\warroom` — same person, unrelated codebase): `wpr` = `bwpr`
+(batting: wOBA-based runs above average + a positional adjustment off
+innings-by-position + a PA-scaled replacement floor) + `fwpr` (fielding:
+Statcast OAA 2016+, or an innings-weighted RF/9 z-score fallback before
+that) + `brwpr` (baserunning: stolen-base linear weights, plus a
+Statcast-based tier for 2015+). Pitching gets its own parallel `pwpr`
+(FIP-based runs above average + a replacement floor, using a bigger
+replacement constant than batting). All four divide by the same
+`RPW = 9 × (lgR/lgIP) × 1.5 + 3` runs-per-win constant. Real source read in
+full before writing this summary (not worked from prose alone):
+`pipeline/calc_batting_season_metrics.py`, `calculations/batting_calcs.py`,
+`calc_fielding_season_metrics.py`, `calculations/pitching_calcs.py`,
+`calculations/baserunning_calcs.py`, `calc_wpr_season_metrics.py`.
+
+**Two constraints confirmed with Rees, binding on the eventual design:**
+1. Must work identically for both TBL and Duud — scoped to only fields that
+   exist in both data feeds (StatsPlus and the OOTP dump), not a per-league
+   variant of the formula.
+2. Additive only — sits alongside the existing rating engine, never replaces
+   it. Different question (real production value vs. a scouting projection).
+
+**Where OOTP can plausibly beat the real-MLB version, not just match it**
+(Rees's own instinct going in, confirmed by reading the source):
+- **Fielding** — the real-MLB pre-2016 fallback is a crude RF/9 z-score.
+  OOTP's `player_fielding_stats_snapshots` tracks fielding chances by
+  difficulty tier (`opps_0`–`opps_5`, each with a make/miss count) —
+  conceptually closer to what Statcast's OAA actually measures (did the
+  fielder make a play of this difficulty) than a simple rate stat.
+- **Pitching replacement runs** — the real version estimates batters-faced
+  via a proxy formula (`(lgPA/lgIP) × IP`) because the underlying data
+  doesn't have it directly. OOTP's stats snapshots have real `bf` outright.
+- **Baserunning** — the real version falls back to a stolen-base-only signal
+  for most of MLB history because it lacks a measured speed input pre-2015.
+  OOTP has a direct 20-80 scouting grade for speed on every player, not an
+  inferred proxy.
+
+**The real gap, not just a formula swap**: wOBA scale, the FIP constant, and
+stolen-base run values are all season-specific *published real-MLB*
+constants (FanGraphs' annual "guts" table) — no Duud/TBL equivalent exists.
+Needs either one fixed representative weight set for the sim, or (more
+correct, more work) Duud/TBL's own league-average-derived constants each
+season, the way WARroom's `league_batting_averages`/`park_factors` work for
+real MLB.
+
+**Explicitly deferred, 2026-09-11**: no code, no schema, no further design
+work until steps 1–7 above are done. Revisit then — starting point should be
+a short written plan (same treatment the multi-league work itself got)
+mapping every formula to this platform's exact schema field-for-field,
+before any implementation.
