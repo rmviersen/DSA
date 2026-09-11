@@ -92,6 +92,25 @@ export async function getMlbLeagueId(supabase: SupabaseClient, leagueId: number)
   return mlbLeagueId;
 }
 
+// Resolves this league's own "my organization" for the owner-perspective
+// pages (My Roster, Lineup, Rule 5 Draft, Org Minors) -- was a hardcoded
+// `const DEFAULT_ORG_ID = 15` (Oklahoma City, TBL's org) copy-pasted into
+// each of those 4 page.tsx files, found 2026-09-11 while bringing up Duud
+// (Step 7): every one of those pages would have shown TBL's own org
+// (or nothing meaningful) as Duud's default, not the White Sox -- confirmed
+// with Rees back when Step 5 started ("my org is the Chicago White Sox").
+// Self-contained (own Supabase client) to match resolveLeagueId()'s own
+// page-convenience style -- these 4 call sites are all page.tsx files,
+// which don't hold a Supabase client of their own by design.
+export async function resolveDefaultOrgId(leagueId: number): Promise<number> {
+  const supabase = makeSupabaseClient();
+  const { data, error } = await supabase.from("leagues").select("default_org_id").eq("id", leagueId).single();
+  if (error || !data) throw new Error(`Could not resolve default_org_id for league ${leagueId}: ${error?.message}`);
+  const defaultOrgId = (data as { default_org_id: number | null }).default_org_id;
+  if (defaultOrgId == null) throw new Error(`League ${leagueId} has no default_org_id set on the leagues table.`);
+  return defaultOrgId;
+}
+
 // The real per-request resolver for every page under app/[league]/... --
 // Step 3 of the multi-league plan (2026-09-10). Turns the URL's league slug
 // into a real id, or 404s if it's not a real league (a typo'd URL, or a

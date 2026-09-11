@@ -1,12 +1,8 @@
 import { getRule5DraftBoard } from "../../../lib/rule5-draft-query";
-import { resolveLeagueId } from "../../../lib/league";
+import { resolveLeagueId, resolveDefaultOrgId } from "../../../lib/league";
 import { PlayerTable } from "../../_components/PlayerTable";
 
 export const dynamic = "force-dynamic";
-
-// Oklahoma City Outlaws, org id 15 -- same convention as every other
-// OKC-scoped page (/org-minors, /my-roster).
-const DEFAULT_ORG_ID = 15;
 
 // Rule 5 Draft board (2026-09-07, Rees's ask) -- two lists: our own exposed,
 // eligible players worth deciding whether to protect (add to the 40-man
@@ -17,7 +13,8 @@ const DEFAULT_ORG_ID = 15;
 export default async function Rule5DraftPage({ params }: { params: Promise<{ league: string }> }) {
   const { league } = await params;
   const leagueId = await resolveLeagueId(league);
-  const { toProtect, toDraft } = await getRule5DraftBoard(leagueId, DEFAULT_ORG_ID);
+  const orgId = await resolveDefaultOrgId(leagueId);
+  const { toProtect, toDraft } = await getRule5DraftBoard(leagueId, orgId);
 
   return (
     <>
@@ -33,7 +30,7 @@ export default async function Rule5DraftPage({ params }: { params: Promise<{ lea
           Level is not Major League&quot; filter the game&apos;s own Draft Pool screen uses. This league&apos;s own
           added rule: a player must be <strong>23 or older</strong> to actually be selected — real, not redundant
           with the service-time math (79 players leaguewide are otherwise eligible but under 23).{" "}
-          <strong>Players to Protect</strong> is Oklahoma City&apos;s own exposed, eligible players — sorted by
+          <strong>Players to Protect</strong> is your organization&apos;s own exposed, eligible players — sorted by
           Overall and capped to the top 20 of your current filters/sort, so the ones most worth adding to the 40-man
           are the ones actually shown, not buried in a long list. <strong>Rule 5 Draft Board</strong> is every other
           org&apos;s exposed, eligible players, worth targeting to draft — capped to the top 100 of whatever your

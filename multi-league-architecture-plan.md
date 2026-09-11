@@ -604,7 +604,37 @@ than one giant change:
        qualifying SP, 7 mature draft classes) mean their output is a
        reasonable first look, not something to act on yet — same as any
        young save's real data would be.
-7. Duud goes live at `/Duud/*`.
+7. ✅ **Done, 2026-09-11.** Duud goes live at `/Duud/*`.
+   - Given every other step already built the routing/auth/data layers
+     generically (Steps 1-4) and Step 6 gave Duud real computed ratings,
+     this step turned out to be exactly one real category of bug: a
+     hardcoded "my organization" (`DEFAULT_ORG_ID = 15`, Oklahoma City)
+     copy-pasted into 4 page.tsx files (`my-roster`, `lineup`,
+     `org-minors`, `rule5-draft`) plus baked directly into
+     `lib/free-agency-query.ts` with no parameter to override it at all —
+     every one of those pages, for Duud, would have shown TBL's own org
+     (or nothing meaningful) instead of the White Sox. Fixed with a new
+     `leagues.default_org_id` column and `lib/league.ts`'s
+     `resolveDefaultOrgId()`. Also genericized several places where the
+     resulting page copy said "Oklahoma City" by name in body text/tooltips
+     (found via a full text sweep, not just the numeric constant).
+   - **Verified directly against real data for both leagues** (not just
+     Duud, to confirm no TBL regression): `getFreeAgents`,
+     `getMyRosterAnalysis`, `getOptimalLineups`, `getOrgMinorsPlayers`, and
+     `getRule5DraftBoard` all called exactly as their pages call them,
+     confirming both TBL (org 15) and Duud (org 5) resolve real, sane data.
+   - **One real, lower-severity gap found and deliberately NOT fixed**:
+     `effectiveLevel()`'s A-vs-A+ disambiguation is a TBL-specific literal
+     that can never fire for Duud (whose level=4 players span 6 different
+     `league_id`s, none matching TBL's `204`) — every Duud "A" player
+     currently displays as "A+". Needs Rees's own knowledge of Duud's real
+     league structure to fix correctly, not a guess. Full detail:
+     `HANDOFF.md` gotcha 41.
+   - This closes the multi-league architecture's build order (§8) end to
+     end — Duud has its own data pipeline (Step 5), its own computed
+     ratings (Step 6), and now renders through the exact same routing,
+     auth, and page code TBL always has (Steps 1-4, 7), with no
+     Duud-specific fork anywhere in the front end.
 
 This is a multi-session undertaking, not a single sitting — each numbered
 step above is a natural place to pause, verify, and get a go-ahead on the

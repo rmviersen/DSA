@@ -550,7 +550,7 @@ export function PlayerTable({ rows, showTeam, showProspectCols, showStatLevel, s
                 <td style={gradeStyle(r.potential)}>{fmt1(r.potential)}</td>
                 {showStatLevel && <td>{r.statLevel ?? "—"}</td>}
                 {showSign && (
-                  <td style={r.signFlag ? { color: "rgb(34,197,94)", fontWeight: 700 } : undefined} title={r.signFlag === null ? "Not enough data to evaluate (no real stat-based level on file)" : r.signFlag ? "Would improve OKC's system at this role/level" : "Would not improve OKC's system at this role/level"}>
+                  <td style={r.signFlag ? { color: "rgb(34,197,94)", fontWeight: 700 } : undefined} title={r.signFlag === null ? "Not enough data to evaluate (no real stat-based level on file)" : r.signFlag ? "Would improve your organization's system at this role/level" : "Would not improve your organization's system at this role/level"}>
                     {r.signFlag === true ? "✓ " : ""}{r.suggestedSignLevel ?? "—"}
                   </td>
                 )}

@@ -192,9 +192,9 @@ export default function MinorsTable({ rows, teamCounts, roleHealth }: { rows: Mi
           DL counts only if back within 7 days; injured-and-excluded shown in
           parens), graded against the role's staffing minimum. Org/Lg = each
           team's own top-N Overall average at that role/level (N = expected
-          playing-time slots, e.g. top 5 for SP) -- Org is Oklahoma City's
+          playing-time slots, e.g. top 5 for SP) -- Org is this organization's
           number, Lg is that number averaged across every team in the
-          league. Rank is Oklahoma City's position among every team's Org
+          league. Rank is this organization's position among every team's Org
           number, best-first. Cnt/Org/Rank are all graded on the same 5-color
           gradient used for Overall grades elsewhere on the site (red ->
           orange -> yellow -> green -> blue); Lg is shown plain, it's the
@@ -203,8 +203,8 @@ export default function MinorsTable({ rows, teamCounts, roleHealth }: { rows: Mi
       <h2 style={{ fontSize: 14, marginBottom: 6 }}>Role health by level</h2>
       <p style={{ color: "var(--color-text-muted, #888)", marginTop: 0, marginBottom: 10, fontSize: 11 }}>
         Cnt = healthy headcount vs. the role&rsquo;s staffing minimum (injured-and-excluded shown in parens). Org/Lg = top-N Overall average
-        (N = expected playing-time slots) for Oklahoma City vs. the leaguewide average of every team&rsquo;s own number. Rank = Oklahoma
-        City&rsquo;s position among all teams&rsquo; Org numbers, best-first. Cnt/Org/Rank colored red&rarr;orange&rarr;yellow&rarr;green&rarr;blue, worst to best.
+        (N = expected playing-time slots) for this organization vs. the leaguewide average of every team&rsquo;s own number. Rank = this
+        organization&rsquo;s position among all teams&rsquo; Org numbers, best-first. Cnt/Org/Rank colored red&rarr;orange&rarr;yellow&rarr;green&rarr;blue, worst to best.
       </p>
       <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(230px, 1fr))", gap: 12, marginBottom: 16 }}>
         {levelCards.map((card) => (

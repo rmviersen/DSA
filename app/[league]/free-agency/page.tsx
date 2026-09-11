@@ -1,5 +1,5 @@
 import { getFreeAgents } from "../../../lib/free-agency-query";
-import { resolveLeagueId } from "../../../lib/league";
+import { resolveLeagueId, resolveDefaultOrgId } from "../../../lib/league";
 import { PlayerTable } from "../../_components/PlayerTable";
 
 export const dynamic = "force-dynamic";
@@ -12,7 +12,8 @@ export const dynamic = "force-dynamic";
 export default async function FreeAgencyPage({ params }: { params: Promise<{ league: string }> }) {
   const { league } = await params;
   const leagueId = await resolveLeagueId(league);
-  const { rows, totalRealFreeAgents, totalWithRatings } = await getFreeAgents(leagueId);
+  const myOrgId = await resolveDefaultOrgId(leagueId);
+  const { rows, totalRealFreeAgents, totalWithRatings } = await getFreeAgents(leagueId, myOrgId);
   const missingRatings = totalRealFreeAgents - totalWithRatings;
 
   return (
@@ -29,9 +30,9 @@ export default async function FreeAgencyPage({ params }: { params: Promise<{ lea
             : ""}
           . &quot;Team&quot; shows each player&apos;s last team, not a current roster (free agents have none). &quot;Level&quot;
           shows which level the AB/IP/WAR line was actually earned at — the same WAR number means something very
-          different at MLB vs. AAA. &quot;Sign&quot; flags (✓, green) a player who&apos;d improve OKC&apos;s own
+          different at MLB vs. AAA. &quot;Sign&quot; flags (✓, green) a player who&apos;d improve your organization&apos;s own
           minor-league system: young for his level (vs. the leaguewide age-at-level average, by hitter/pitcher) AND
-          his Overall and Potential both beat OKC&apos;s own average at that same role and level. The level shown next
+          his Overall and Potential both beat your organization&apos;s own average at that same role and level. The level shown next
           to the flag (or in that column when unflagged) is where his Overall best fits on the role&apos;s own
           level-benchmark ladder — where to actually sign and assign him. Blank/dash means there&apos;s no real
           stat-based level on file to evaluate him against yet. &quot;Demand&quot; is each player&apos;s real AAV ask

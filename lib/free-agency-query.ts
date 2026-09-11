@@ -59,7 +59,7 @@ export interface FreeAgentsResult {
 // Verified: this adds exactly 374 real candidates (320 with usable ratings
 // this refresh, 54 between-refresh like the existing "missing ratings" slice
 // below), Im among them.
-export async function getFreeAgents(leagueId: number): Promise<FreeAgentsResult> {
+export async function getFreeAgents(leagueId: number, myOrgId: number): Promise<FreeAgentsResult> {
   const supabase = makeSupabaseClient();
   const PAGE_SIZE = 1000;
   const players: { id: number; last_team_id: number }[] = [];
@@ -286,53 +286,57 @@ export async function getFreeAgents(leagueId: number): Promise<FreeAgentsResult>
   }
 
   // "Sign" (2026-09-06, Rees's ask): would signing this free agent, at the
-  // level his real stat line was earned at, improve OKC's own minor-league
-  // system at his role? Two independent pieces, both must hold:
+  // level his real stat line was earned at, improve MY organization's own
+  // minor-league system at his role? Two independent pieces, both must hold:
   //   1. Age vs. the level-age average, BY TYPE -- is he young for that
   //      level/hitter-or-pitcher combo? (new getLevelAgeBenchmarks/
   //      ageVsLevelAvg, queries.ts.)
-  //   2. His Overall AND Potential both beat OKC's own average at that same
-  //      role+level -- a lighter, OKC-scoped version of the Role Health
-  //      topN-average idea already built for /my-roster and /org-minors,
-  //      reused here via the same exported ROLE_HEALTH_ROWS/topNAvg helpers.
-  //      Deliberately simplified vs. those pages: no RP-specific "SP
-  //      overflow" pooling rule here, just a plain per-role average --
-  //      flagged as a real simplification, not silently applied.
-  // A role+level combo where OKC has literally zero players counts as "any
-  // real signing would help" (treated as -Infinity), not "unknown" -- no
-  // organizational depth at a spot is exactly the kind of gap this feature
-  // exists to surface, not a reason to withhold judgment.
-  const OKC_ORG_ID = 15;
+  //   2. His Overall AND Potential both beat my org's own average at that
+  //      same role+level -- a lighter, org-scoped version of the Role
+  //      Health topN-average idea already built for /my-roster and
+  //      /org-minors, reused here via the same exported
+  //      ROLE_HEALTH_ROWS/topNAvg helpers. Deliberately simplified vs.
+  //      those pages: no RP-specific "SP overflow" pooling rule here, just
+  //      a plain per-role average -- flagged as a real simplification, not
+  //      silently applied.
+  // A role+level combo where my org has literally zero players counts as
+  // "any real signing would help" (treated as -Infinity), not "unknown" --
+  // no organizational depth at a spot is exactly the kind of gap this
+  // feature exists to surface, not a reason to withhold judgment.
+  //
+  // `myOrgId` was a hardcoded `OKC_ORG_ID = 15` (TBL's own org) until
+  // 2026-09-11 (Step 7, bringing up Duud) -- now a real parameter, resolved
+  // per-league by the caller via lib/league.ts's resolveDefaultOrgId().
   const SIGN_ROLE_ROWS = ROLE_HEALTH_ROWS.filter((row) => row.label !== "P Tot" && row.label !== "H Tot");
 
-  const [levelAgeBenchmarks, roleLevelOverallBenchmarks, okcPlayerRows] = await Promise.all([
+  const [levelAgeBenchmarks, roleLevelOverallBenchmarks, myOrgPlayerRows] = await Promise.all([
     getLevelAgeBenchmarks(leagueId),
     getRoleLevelBenchmarks(leagueId, "overall"),
     fetchAll<{ id: number; level: number | null; league_id: number | null }>((from, to) =>
-      supabase.from("players").select("id,level,league_id").eq("dsa_league_id", leagueId).eq("organization_id", OKC_ORG_ID).range(from, to) as never
+      supabase.from("players").select("id,level,league_id").eq("dsa_league_id", leagueId).eq("organization_id", myOrgId).range(from, to) as never
     ),
   ]);
-  const okcPlayerById = new Map(okcPlayerRows.map((p) => [p.id, p]));
-  const okcIds = okcPlayerRows.map((p) => p.id);
-  const okcComputed = await fetchByIdsChunked<{ player_id: number; role: string | null; overall: number | null; batting: number | null; potential: number | null }>(okcIds, (chunk) =>
+  const myOrgPlayerById = new Map(myOrgPlayerRows.map((p) => [p.id, p]));
+  const myOrgIds = myOrgPlayerRows.map((p) => p.id);
+  const myOrgComputed = await fetchByIdsChunked<{ player_id: number; role: string | null; overall: number | null; batting: number | null; potential: number | null }>(myOrgIds, (chunk) =>
     supabase.from("player_computed").select("player_id,role,overall,batting,potential").eq("refresh_run_id", refreshRunId).in("player_id", chunk) as never
   );
-  const okcByRoleLevel = new Map<string, { talent: number[]; potential: number[] }>();
-  for (const c of okcComputed) {
+  const myOrgByRoleLevel = new Map<string, { talent: number[]; potential: number[] }>();
+  for (const c of myOrgComputed) {
     if (!c.role) continue;
-    const p = okcPlayerById.get(c.player_id);
+    const p = myOrgPlayerById.get(c.player_id);
     const level = effectiveLevel(p?.level ?? null, p?.league_id ?? null);
     if (level === null) continue;
     const key = `${level}|${c.role}`;
-    const bucket = okcByRoleLevel.get(key) ?? { talent: [], potential: [] };
+    const bucket = myOrgByRoleLevel.get(key) ?? { talent: [], potential: [] };
     const talentMetric = playerTypeForRole(c.role) === "pitcher" ? c.overall : c.batting;
     if (talentMetric !== null) bucket.talent.push(talentMetric);
     if (c.potential !== null) bucket.potential.push(c.potential);
-    okcByRoleLevel.set(key, bucket);
+    myOrgByRoleLevel.set(key, bucket);
   }
-  function okcAvgAt(level: number, role: string): { avgTalent: number; avgPotential: number } {
+  function myOrgAvgAt(level: number, role: string): { avgTalent: number; avgPotential: number } {
     const topN = SIGN_ROLE_ROWS.find((row) => row.roles.includes(role))?.topN ?? 1;
-    const bucket = okcByRoleLevel.get(`${level}|${role}`);
+    const bucket = myOrgByRoleLevel.get(`${level}|${role}`);
     return {
       avgTalent: (bucket ? topNAvg(bucket.talent, topN) : null) ?? -Infinity,
       avgPotential: (bucket ? topNAvg(bucket.potential, topN) : null) ?? -Infinity,
@@ -389,7 +393,7 @@ export async function getFreeAgents(leagueId: number): Promise<FreeAgentsResult>
       if (wai?.levelNum != null) {
         const ageDiff = ageVsLevelAvg(r.age, wai.levelNum, r.ph, levelAgeBenchmarks);
         if (ageDiff !== null) {
-          const { avgTalent, avgPotential } = okcAvgAt(wai.levelNum, r.role);
+          const { avgTalent, avgPotential } = myOrgAvgAt(wai.levelNum, r.role);
           signFlag = ageDiff < 0 && r.overall > avgTalent && r.potential > avgPotential;
         }
       }

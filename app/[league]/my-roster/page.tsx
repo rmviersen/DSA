@@ -1,9 +1,6 @@
 import { getMyRosterAnalysis } from "@/lib/my-roster-query";
-import { resolveLeagueId } from "@/lib/league";
+import { resolveLeagueId, resolveDefaultOrgId } from "@/lib/league";
 import RoleCards from "./RoleCards";
-
-// Oklahoma City Outlaws, org id 15 -- same convention/source as /org-minors.
-const DEFAULT_ORG_ID = 15;
 
 export const dynamic = "force-dynamic";
 
@@ -22,8 +19,8 @@ export default async function MyRosterPage({
 }) {
   const { league } = await params;
   const search = await searchParams;
-  const orgId = search.org ? Number(search.org) : DEFAULT_ORG_ID;
   const leagueId = await resolveLeagueId(league);
+  const orgId = search.org ? Number(search.org) : await resolveDefaultOrgId(leagueId);
   const cards = await getMyRosterAnalysis(leagueId, orgId);
 
   return (
@@ -39,7 +36,7 @@ export default async function MyRosterPage({
           veteran) is excluded from Future even if he&apos;s a Current mainstay today. Future RP only counts players
           actually scouted as relievers (Current RP still credits rotation-quality arms the team is really using in
           relief today). Rating is a top-N average (N = expected playing-time slots at that role, same N both sides);
-          Rank is where Oklahoma City lands among all 32 orgs on that same number. The list under each number is the
+          Rank is where your organization lands among every org in the league on that same number. The list under each number is the
           actual players it&apos;s built from. This is a first structural pass — the underlying calculations are
           expected to be refined.
         </p>

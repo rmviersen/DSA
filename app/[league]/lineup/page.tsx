@@ -1,13 +1,9 @@
 import Link from "next/link";
 import { getOptimalLineups, type LineupSlot, type LineupSlotPlayer } from "@/lib/lineup-optimizer-query";
 import { gradeStyle } from "@/lib/display-helpers";
-import { resolveLeagueId } from "@/lib/league";
+import { resolveLeagueId, resolveDefaultOrgId } from "@/lib/league";
 
 export const dynamic = "force-dynamic";
-
-// Oklahoma City Outlaws, org id 15 -- same convention as every other "my
-// roster"-scoped page (/my-roster, /org-minors, /rule5-draft).
-const DEFAULT_ORG_ID = 15;
 
 const fmt1 = (n: number | null) => (n === null || n === undefined ? "—" : n.toFixed(1));
 
@@ -87,8 +83,8 @@ export default async function LineupPage({
 }) {
   const { league } = await params;
   const search = await searchParams;
-  const orgId = search.org ? Number(search.org) : DEFAULT_ORG_ID;
   const leagueId = await resolveLeagueId(league);
+  const orgId = search.org ? Number(search.org) : await resolveDefaultOrgId(leagueId);
   const { vsLHP, vsRHP } = await getOptimalLineups(leagueId, orgId);
 
   return (
