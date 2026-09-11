@@ -2,6 +2,7 @@ import "dotenv/config";
 import { makeSupabaseClient } from "../lib/supabase-client.js";
 import { fitMultipleLinear } from "../lib/regression.js";
 import { persistWeightTuningRun } from "../lib/weight-tuning-persist.js";
+import { getLeagueId } from "../lib/league.js";
 
 // Baserunning analysis (2026-09-01, Rees's ask), same shape as
 // compute-hitting-weights.ts: regress a real outcome against the grades
@@ -42,6 +43,7 @@ const MIN_PA = 100; // same qualifying threshold as compute-hitting-weights.ts /
 
 async function main() {
   const supabase = makeSupabaseClient();
+  const leagueId = await getLeagueId(supabase);
 
   console.log("Finding latest refresh run with player_computed (for grades/role)...");
   const { data: computedRunRow } = await supabase
@@ -160,6 +162,7 @@ async function main() {
   console.log("\nSaving this run to weight_tuning_runs/weight_tuning_coefficients (for /admin/weight-tuning)...");
   await persistWeightTuningRun(supabase, {
     refreshRunId: computedRunId,
+    leagueId,
     stream: "baserunning",
     targetMetric: "UBR / 100 PA",
     rSquared: fit.rSquared,

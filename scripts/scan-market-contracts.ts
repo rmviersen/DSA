@@ -1,5 +1,6 @@
 import "dotenv/config";
 import { makeSupabaseClient } from "../lib/supabase-client.js";
+import { getLeagueId } from "../lib/league.js";
 import {
   computeAAV, computeLeagueMinimumSalary, isCleanFreeAgentContract, playerTypeForRole,
   type ContractSalaryFields,
@@ -43,10 +44,11 @@ interface ContractSnapshotRow extends ContractSalaryFields {
 
 async function main() {
   const supabase = makeSupabaseClient();
+  const leagueId = await getLeagueId(supabase);
 
   console.log("Finding latest refresh run with contract snapshots...");
   const { data: contractRunRow, error: contractRunErr } = await supabase
-    .from("contract_snapshots").select("refresh_run_id").order("refresh_run_id", { ascending: false }).limit(1).single();
+    .from("contract_snapshots").select("refresh_run_id").eq("dsa_league_id", leagueId).order("refresh_run_id", { ascending: false }).limit(1).single();
   if (contractRunErr || !contractRunRow) {
     console.log("No contract_snapshots found anywhere yet -- nothing to scan.");
     return;
@@ -56,7 +58,7 @@ async function main() {
 
   console.log("Finding latest refresh run with player_computed...");
   const { data: computedRunRow, error: computedRunErr } = await supabase
-    .from("player_computed").select("refresh_run_id").order("refresh_run_id", { ascending: false }).limit(1).single();
+    .from("player_computed").select("refresh_run_id").eq("dsa_league_id", leagueId).order("refresh_run_id", { ascending: false }).limit(1).single();
   if (computedRunErr || !computedRunRow) {
     console.log("No player_computed rows found anywhere yet -- can't classify Overall/role, nothing to scan.");
     return;
@@ -80,7 +82,7 @@ async function main() {
 
   console.log("Loading players (service time, retired status)...");
   const players = await fetchAll<{ id: number; mlb_service_years: number | null; retired: boolean | null }>((from, to) =>
-    supabase.from("players").select("id, mlb_service_years, retired").order("id").range(from, to) as never
+    supabase.from("players").select("id, mlb_service_years, retired").eq("dsa_league_id", leagueId).order("id").range(from, to) as never
   );
   const playerById = new Map(players.map((p) => [p.id, p]));
 
@@ -99,7 +101,7 @@ async function main() {
 
   console.log("Loading already-recorded training contracts...");
   const existing = await fetchAll<{ player_id: number; season_year: number; years: number; salary0: number }>((from, to) =>
-    supabase.from("market_rate_training_contracts").select("player_id, season_year, years, salary0").range(from, to) as never
+    supabase.from("market_rate_training_contracts").select("player_id, season_year, years, salary0").eq("dsa_league_id", leagueId).range(from, to) as never
   );
   const existingKeys = new Set(existing.map((e) => `${e.player_id}|${e.season_year}|${e.years}|${e.salary0}`));
   console.log(`  ${existingKeys.size} distinct clean contracts already on file`);
@@ -107,6 +109,7 @@ async function main() {
   const newRows: {
     player_id: number; season_year: number; years: number; salary0: number; aav: number;
     overall: number; role: string; player_type: "hitter" | "pitcher"; first_observed_refresh_run_id: number;
+    dsa_league_id: number;
   }[] = [];
   let skippedNotClean = 0;
 
@@ -131,6 +134,7 @@ async function main() {
       player_id: c.player_id, season_year: seasonYear, years, salary0, aav,
       overall: pc.overall, role: pc.role, player_type: playerTypeForRole(pc.role),
       first_observed_refresh_run_id: contractsRunId,
+      dsa_league_id: leagueId,
     });
   }
 

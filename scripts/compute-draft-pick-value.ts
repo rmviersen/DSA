@@ -1,5 +1,6 @@
 import "dotenv/config";
 import { makeSupabaseClient } from "../lib/supabase-client.js";
+import { getLeagueId } from "../lib/league.js";
 import { isotonicRegressionNonIncreasing } from "../lib/regression.js";
 
 // Trade-value engine, Phase A step 2 (2026-09-04) -- draft-pick value curve.
@@ -59,11 +60,12 @@ async function upsertBatched<T extends Record<string, unknown>>(
   supabase: any,
   table: string,
   rows: T[],
-  onConflict: string
+  onConflict: string,
+  leagueId: number
 ): Promise<void> {
   const MAX_ATTEMPTS = 3;
   for (let i = 0; i < rows.length; i += 500) {
-    const batch = rows.slice(i, i + 500);
+    const batch = rows.slice(i, i + 500).map((r) => ({ ...r, dsa_league_id: leagueId }));
     let ok = false, lastErr: unknown;
     for (let attempt = 1; attempt <= MAX_ATTEMPTS && !ok; attempt++) {
       const { error } = await supabase.from(table).upsert(batch as never[], { onConflict });
@@ -87,11 +89,12 @@ async function latestRunForYear(
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   supabase: any,
   table: "player_batting_stats_snapshots" | "player_pitching_stats_snapshots",
-  year: number
+  year: number,
+  leagueId: number
 ): Promise<number | null> {
   const { data } = await supabase
     .from(table).select("refresh_run_id")
-    .eq("year", year).eq("level_id", REAL_MLB_LEVEL_ID).eq("split_id", OVERALL_SPLIT_ID)
+    .eq("dsa_league_id", leagueId).eq("year", year).eq("level_id", REAL_MLB_LEVEL_ID).eq("split_id", OVERALL_SPLIT_ID)
     .order("refresh_run_id", { ascending: false }).limit(1).maybeSingle();
   return (data as { refresh_run_id: number } | null)?.refresh_run_id ?? null;
 }
@@ -105,10 +108,11 @@ function quantileMedian(sorted: number[]): number {
 
 async function main() {
   const supabase = makeSupabaseClient();
+  const leagueId = await getLeagueId(supabase);
 
   console.log("Finding latest refresh run and current in-game year...");
   const { data: latestRunRow, error: runErr } = await supabase
-    .from("refresh_runs").select("id, game_date").order("id", { ascending: false }).limit(1).single();
+    .from("refresh_runs").select("id, game_date").eq("dsa_league_id", leagueId).order("id", { ascending: false }).limit(1).single();
   if (runErr || !latestRunRow) throw new Error(`No refresh_runs found: ${runErr?.message}`);
   const refreshRunId = (latestRunRow as { id: number; game_date: string | null }).id;
   const gameDate = (latestRunRow as { id: number; game_date: string | null }).game_date;
@@ -119,7 +123,7 @@ async function main() {
   console.log("Loading drafted players (draft_year 2001+ with a real round)...");
   const allDrafted = await fetchAll<{ id: number; draft_year: number; draft_round: number }>((from, to) =>
     supabase.from("players").select("id, draft_year, draft_round")
-      .gte("draft_year", 2001).not("draft_round", "is", null).order("id").range(from, to) as never
+      .eq("dsa_league_id", leagueId).gte("draft_year", 2001).not("draft_round", "is", null).order("id").range(from, to) as never
   );
   const eligible = allDrafted.filter((p) => currentYear - p.draft_year >= MIN_YEARS_SINCE_DRAFT);
   console.log(`  ${allDrafted.length} total drafted players since 2001, ${eligible.length} with >= ${MIN_YEARS_SINCE_DRAFT} years since draft`);
@@ -146,8 +150,8 @@ async function main() {
   console.log(`Sweeping real MLB batting/pitching WAR, ${sweepFromYear}-${currentYear}...`);
   const eligibleIds = new Set(eligible.map((p) => p.id));
   for (let year = sweepFromYear; year <= currentYear; year++) {
-    const battingRun = await latestRunForYear(supabase, "player_batting_stats_snapshots", year);
-    const pitchingRun = await latestRunForYear(supabase, "player_pitching_stats_snapshots", year);
+    const battingRun = await latestRunForYear(supabase, "player_batting_stats_snapshots", year, leagueId);
+    const pitchingRun = await latestRunForYear(supabase, "player_pitching_stats_snapshots", year, leagueId);
     if (battingRun != null) {
       const rows = await fetchAll<{ player_id: number; war: number | null; pa: number | null }>((from, to) =>
         supabase.from("player_batting_stats_snapshots").select("player_id, war, pa")
@@ -254,11 +258,12 @@ async function main() {
       best_player_war_per_year: r.best.war_per_year,
       best_player_career_war: r.best.career_war,
     })),
-    "refresh_run_id,draft_round"
+    "refresh_run_id,draft_round",
+    leagueId
   );
 
   console.log(`Writing draft_pick_value_players (${playerRows.length} rows)...`);
-  await upsertBatched(supabase, "draft_pick_value_players", playerRows, "refresh_run_id,player_id");
+  await upsertBatched(supabase, "draft_pick_value_players", playerRows, "refresh_run_id,player_id", leagueId);
 
   console.log("Done.");
 }

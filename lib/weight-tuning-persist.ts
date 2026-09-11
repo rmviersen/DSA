@@ -21,6 +21,7 @@ export async function persistWeightTuningRun(
   supabase: SupabaseClient<any>,
   opts: {
     refreshRunId: number;
+    leagueId: number;
     stream: "hitting" | "baserunning" | "pitching" | "overall_blend" | "pitching_sp" | "pitching_rp" | "pitching_sp_war" | "pitching_rp_war" | "fielding_defensive";
     targetMetric: string;
     rSquared: number;
@@ -33,6 +34,7 @@ export async function persistWeightTuningRun(
     .upsert(
       {
         refresh_run_id: opts.refreshRunId,
+        dsa_league_id: opts.leagueId,
         stream: opts.stream,
         target_metric: opts.targetMetric,
         r_squared: opts.rSquared,
@@ -48,6 +50,7 @@ export async function persistWeightTuningRun(
   const { error: coefErr } = await supabase.from("weight_tuning_coefficients").upsert(
     opts.coefficients.map((c) => ({
       weight_tuning_run_id: runId,
+      dsa_league_id: opts.leagueId,
       variable_key: c.key,
       variable_label: c.label,
       raw_coefficient: c.rawCoefficient,

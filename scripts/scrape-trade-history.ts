@@ -2,6 +2,7 @@ import "dotenv/config";
 import * as cheerio from "cheerio";
 import { makeStatsPlusClient } from "../lib/statsplus-client.js";
 import { makeSupabaseClient } from "../lib/supabase-client.js";
+import { getLeagueId } from "../lib/league.js";
 
 // Phase 2 of the transaction-history/market-analysis work (2026-08-31,
 // Rees's ask), REWRITTEN the same day after Rees caught a real accuracy
@@ -183,6 +184,7 @@ function buildAbbrIndex($: cheerio.CheerioAPI, rows: ReturnType<cheerio.CheerioA
 
 async function main() {
   const supabase = makeSupabaseClient();
+  const leagueId = await getLeagueId(supabase);
   const sp = makeStatsPlusClient({ baseUrl: process.env.STATSPLUS_BASE_URL! });
 
   console.log("Fetching the full trade ledger (/trade/#recent)...");
@@ -242,6 +244,7 @@ async function main() {
     const { data: eventRow, error: upsertErr } = await supabase.from("trade_events")
       .upsert({
         trade_key: trade.key, trade_date: trade.tradeDate, status: trade.status,
+        dsa_league_id: leagueId,
         team_a_id: trade.teamA.id, team_a_name: trade.teamA.name,
         team_b_id: trade.teamB.id, team_b_name: trade.teamB.name,
       } as never, { onConflict: "trade_key" })
@@ -256,9 +259,9 @@ async function main() {
     // idempotent without needing to track what was there before.
     await supabase.from("trade_event_items").delete().eq("trade_event_id", tradeEventId);
     const toRow = (side: "a" | "b", item: TradeItem) => {
-      if (item.kind === "player") return { trade_event_id: tradeEventId, side, player_id: item.playerId, retained_salary_pct: item.retainedSalaryPct };
-      if (item.kind === "cash") return { trade_event_id: tradeEventId, side, cash_amount: item.cashAmount };
-      return { trade_event_id: tradeEventId, side, pick_year: item.pickYear, pick_round: item.pickRound, pick_team_id: item.pickTeamId, pick_team_name: item.pickTeamAbbr };
+      if (item.kind === "player") return { trade_event_id: tradeEventId, dsa_league_id: leagueId, side, player_id: item.playerId, retained_salary_pct: item.retainedSalaryPct };
+      if (item.kind === "cash") return { trade_event_id: tradeEventId, dsa_league_id: leagueId, side, cash_amount: item.cashAmount };
+      return { trade_event_id: tradeEventId, dsa_league_id: leagueId, side, pick_year: item.pickYear, pick_round: item.pickRound, pick_team_id: item.pickTeamId, pick_team_name: item.pickTeamAbbr };
     };
     const itemRows = [
       ...trade.itemsA.map((i) => toRow("a", i)),

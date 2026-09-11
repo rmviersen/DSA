@@ -2,6 +2,7 @@ import "dotenv/config";
 import { execFileSync } from "node:child_process";
 import { makeStatsPlusClient } from "../lib/statsplus-client.js";
 import { makeSupabaseClient } from "../lib/supabase-client.js";
+import { getLeagueId } from "../lib/league.js";
 import * as map from "../lib/mappers.js";
 
 const BATCH_SIZE = 500;
@@ -21,9 +22,15 @@ async function withRetry<T>(label: string, fn: () => Promise<T>): Promise<T> {
   throw lastErr;
 }
 
-async function upsertBatched(supabase: ReturnType<typeof makeSupabaseClient>, table: string, rows: unknown[], conflictCols: string) {
+// Both batching helpers stamp `dsa_league_id` onto every row here, in ONE
+// place, rather than touching every individual `map.mapXxx()` call site --
+// the mappers' job is translating StatsPlus's raw shape into ours, and which
+// platform league this run is for isn't part of that raw shape, it's caller
+// context (2026-09-10, multi-league architecture; see lib/league.ts's
+// comment for why this is `dsa_league_id`, never the bare `league_id` name).
+async function upsertBatched(supabase: ReturnType<typeof makeSupabaseClient>, table: string, rows: Record<string, unknown>[], conflictCols: string, leagueId: number) {
   for (let i = 0; i < rows.length; i += BATCH_SIZE) {
-    const batch = rows.slice(i, i + BATCH_SIZE);
+    const batch = rows.slice(i, i + BATCH_SIZE).map((r) => ({ ...r, dsa_league_id: leagueId }));
     await withRetry(`${table} upsert (rows ${i}-${i + batch.length})`, async () => {
       const { error } = await supabase.from(table).upsert(batch as never[], { onConflict: conflictCols });
       if (error) throw new Error(`${table} upsert failed: ${error.message}`);
@@ -31,9 +38,9 @@ async function upsertBatched(supabase: ReturnType<typeof makeSupabaseClient>, ta
   }
 }
 
-async function insertBatched(supabase: ReturnType<typeof makeSupabaseClient>, table: string, rows: unknown[]) {
+async function insertBatched(supabase: ReturnType<typeof makeSupabaseClient>, table: string, rows: Record<string, unknown>[], leagueId: number) {
   for (let i = 0; i < rows.length; i += BATCH_SIZE) {
-    const batch = rows.slice(i, i + BATCH_SIZE);
+    const batch = rows.slice(i, i + BATCH_SIZE).map((r) => ({ ...r, dsa_league_id: leagueId }));
     await withRetry(`${table} insert (rows ${i}-${i + batch.length})`, async () => {
       const { error } = await supabase.from(table).insert(batch as never[]);
       if (error) throw new Error(`${table} insert failed: ${error.message}`);
@@ -60,6 +67,9 @@ async function main() {
   const skipRatings = process.argv.includes("--skip-ratings");
 
   const supabase = makeSupabaseClient();
+  // This script is the StatsPlus-sourced pipeline -- always TBL until Duud's
+  // own OotpSqlDumpAdapter exists as a separate script (multi-league plan §3).
+  const leagueId = await getLeagueId(supabase);
   const sp = makeStatsPlusClient({
     baseUrl: process.env.STATSPLUS_BASE_URL!,
     apiToken: process.env.STATSPLUS_API_TOKEN,
@@ -106,7 +116,7 @@ async function main() {
 
   const { data: run, error: runErr } = await supabase
     .from("refresh_runs")
-    .insert({ status: "running", ratings_included: wantsRatings })
+    .insert({ status: "running", ratings_included: wantsRatings, dsa_league_id: leagueId })
     .select()
     .single();
   if (runErr || !run) throw new Error(`Could not start refresh_run: ${runErr?.message}`);
@@ -140,27 +150,27 @@ async function main() {
     console.log(`Pulling stats for year(s): ${years.join(", ")}`);
 
     console.log("Pulling teams...");
-    await upsertBatched(supabase, "teams", (await sp.teams()).map(map.mapTeam), "id");
+    await upsertBatched(supabase, "teams", (await sp.teams()).map(map.mapTeam), "id", leagueId);
 
     console.log("Pulling players...");
-    await upsertBatched(supabase, "players", (await sp.players()).map(map.mapPlayer), "id");
+    await upsertBatched(supabase, "players", (await sp.players()).map(map.mapPlayer), "id", leagueId);
 
     console.log("Pulling contracts...");
     {
       const rows = await sp.contracts();
-      await upsertBatched(supabase, "contracts", rows.map(map.mapContract), "player_id");
+      await upsertBatched(supabase, "contracts", rows.map(map.mapContract), "player_id", leagueId);
       // Also append to the history table (2026-08-31, Rees's ask) -- same raw
       // rows, no second fetch. Trade-value analysis needs "what did this
       // contract look like at the time," which the current-state table above
       // can never answer since it's overwritten every refresh.
-      await insertBatched(supabase, "contract_snapshots", rows.map((r) => map.mapContractSnapshot(r, refreshRunId, capturedAt)));
+      await insertBatched(supabase, "contract_snapshots", rows.map((r) => map.mapContractSnapshot(r, refreshRunId, capturedAt)), leagueId);
     }
 
     console.log("Pulling contract extensions...");
     {
       const rows = await sp.contractExtensions();
-      await upsertBatched(supabase, "contract_extensions", rows.map(map.mapContractExtension), "player_id");
-      await insertBatched(supabase, "contract_extension_snapshots", rows.map((r) => map.mapContractExtensionSnapshot(r, refreshRunId, capturedAt)));
+      await upsertBatched(supabase, "contract_extensions", rows.map(map.mapContractExtension), "player_id", leagueId);
+      await insertBatched(supabase, "contract_extension_snapshots", rows.map((r) => map.mapContractExtensionSnapshot(r, refreshRunId, capturedAt)), leagueId);
     }
 
     console.log("Pulling draft results...");
@@ -175,20 +185,20 @@ async function main() {
       const draftYearByPlayerId = new Map<number, number | null>();
       for (let i = 0; i < draftPlayerIds.length; i += BATCH_SIZE) {
         const chunk = draftPlayerIds.slice(i, i + BATCH_SIZE);
-        const { data, error } = await supabase.from("players").select("id,draft_year").in("id", chunk);
+        const { data, error } = await supabase.from("players").select("id,draft_year").eq("dsa_league_id", leagueId).in("id", chunk);
         if (error) throw new Error(`players lookup for draft_picks failed: ${error.message}`);
         (data as { id: number; draft_year: number | null }[]).forEach((p) => draftYearByPlayerId.set(p.id, p.draft_year));
       }
       const mapped = draftRows.map((r) => map.mapDraftPick(r, draftYearByPlayerId.get(Number(r["ID"])) ?? null));
-      await upsertBatched(supabase, "draft_picks", mapped, "player_id");
+      await upsertBatched(supabase, "draft_picks", mapped, "player_id", leagueId);
     }
 
     for (const year of years) {
       for (const lid of LEAGUE_IDS) {
         console.log(`Pulling player batting/pitching/fielding stats for ${year}, league ${lid}...`);
-        await insertBatched(supabase, "player_batting_stats_snapshots", (await sp.playerBatting(year, lid)).map((r) => map.mapPlayerBatting(r, refreshRunId, capturedAt)));
-        await insertBatched(supabase, "player_pitching_stats_snapshots", (await sp.playerPitching(year, lid)).map((r) => map.mapPlayerPitching(r, refreshRunId, capturedAt)));
-        await insertBatched(supabase, "player_fielding_stats_snapshots", (await sp.playerFielding(year, lid)).map((r) => map.mapPlayerFielding(r, refreshRunId, capturedAt)));
+        await insertBatched(supabase, "player_batting_stats_snapshots", (await sp.playerBatting(year, lid)).map((r) => map.mapPlayerBatting(r, refreshRunId, capturedAt)), leagueId);
+        await insertBatched(supabase, "player_pitching_stats_snapshots", (await sp.playerPitching(year, lid)).map((r) => map.mapPlayerPitching(r, refreshRunId, capturedAt)), leagueId);
+        await insertBatched(supabase, "player_fielding_stats_snapshots", (await sp.playerFielding(year, lid)).map((r) => map.mapPlayerFielding(r, refreshRunId, capturedAt)), leagueId);
       }
 
       // Unlike the player endpoints, teambatstats/teampitchstats ignore `lid`
@@ -197,16 +207,16 @@ async function main() {
       // looping over LEAGUE_IDS here just re-inserts the same rows and
       // violates the unique constraint on the second pass.
       console.log(`Pulling team batting/pitching stats for ${year}...`);
-      await insertBatched(supabase, "team_batting_stats_snapshots", (await sp.teamBatting(year)).map((r) => map.mapTeamBatting(r, refreshRunId, year, capturedAt)));
-      await insertBatched(supabase, "team_pitching_stats_snapshots", (await sp.teamPitching(year)).map((r) => map.mapTeamPitching(r, refreshRunId, year, capturedAt)));
+      await insertBatched(supabase, "team_batting_stats_snapshots", (await sp.teamBatting(year)).map((r) => map.mapTeamBatting(r, refreshRunId, year, capturedAt)), leagueId);
+      await insertBatched(supabase, "team_pitching_stats_snapshots", (await sp.teamPitching(year)).map((r) => map.mapTeamPitching(r, refreshRunId, year, capturedAt)), leagueId);
     }
 
     if (wantsRatings) {
       console.log("Storing game history (already pulled during cookie validation above)...");
-      await upsertBatched(supabase, "game_results", gameHistoryRows!.map((r) => map.mapGameResult(r, refreshRunId)), "statsplus_game_id");
+      await upsertBatched(supabase, "game_results", gameHistoryRows!.map((r) => map.mapGameResult(r, refreshRunId)), "statsplus_game_id", leagueId);
 
       console.log("Pulling ratings (async job — this can take a few minutes)...");
-      await insertBatched(supabase, "player_ratings_snapshots", (await sp.ratings()).map((r) => map.mapPlayerRatings(r, refreshRunId, capturedAt)));
+      await insertBatched(supabase, "player_ratings_snapshots", (await sp.ratings()).map((r) => map.mapPlayerRatings(r, refreshRunId, capturedAt)), leagueId);
     } else {
       console.log("Skipping ratings/game history — --skip-ratings passed.");
     }
@@ -226,9 +236,9 @@ async function main() {
       if (error) throw error;
       return count ?? 0;
     }
-    const mlbCount = await playerCount((q) => q.select("*", { count: "exact", head: true }).eq("level", 1).gte("league_id", 0).neq("retired", true).neq("free_agent", true));
-    const minorLeagueCount = await playerCount((q) => q.select("*", { count: "exact", head: true }).gte("level", 2).lte("level", 6).neq("retired", true).neq("free_agent", true));
-    const internationalCount = await playerCount((q) => q.select("*", { count: "exact", head: true }).eq("level", 1).lt("league_id", 0).neq("retired", true).neq("free_agent", true));
+    const mlbCount = await playerCount((q) => q.select("*", { count: "exact", head: true }).eq("dsa_league_id", leagueId).eq("level", 1).gte("league_id", 0).neq("retired", true).neq("free_agent", true));
+    const minorLeagueCount = await playerCount((q) => q.select("*", { count: "exact", head: true }).eq("dsa_league_id", leagueId).gte("level", 2).lte("level", 6).neq("retired", true).neq("free_agent", true));
+    const internationalCount = await playerCount((q) => q.select("*", { count: "exact", head: true }).eq("dsa_league_id", leagueId).eq("level", 1).lt("league_id", 0).neq("retired", true).neq("free_agent", true));
     // Bug found 2026-08-28 via the first real run: retired players ALSO
     // have free_agent=true (confirmed directly against real data), so these
     // two need the same .neq("retired", true) guard the three roster
@@ -237,9 +247,9 @@ async function main() {
     // draft_pool_count happened to come out right anyway (no retired row
     // currently has draft_eligible=true), but the guard belongs here too --
     // relying on that coincidence would be a real, if currently-invisible, bug.
-    const draftPoolCount = await playerCount((q) => q.select("*", { count: "exact", head: true }).eq("free_agent", true).eq("draft_eligible", true).neq("retired", true));
-    const freeAgentCount = await playerCount((q) => q.select("*", { count: "exact", head: true }).eq("free_agent", true).eq("draft_eligible", false).neq("retired", true));
-    const retiredCount = await playerCount((q) => q.select("*", { count: "exact", head: true }).eq("retired", true));
+    const draftPoolCount = await playerCount((q) => q.select("*", { count: "exact", head: true }).eq("dsa_league_id", leagueId).eq("free_agent", true).eq("draft_eligible", true).neq("retired", true));
+    const freeAgentCount = await playerCount((q) => q.select("*", { count: "exact", head: true }).eq("dsa_league_id", leagueId).eq("free_agent", true).eq("draft_eligible", false).neq("retired", true));
+    const retiredCount = await playerCount((q) => q.select("*", { count: "exact", head: true }).eq("dsa_league_id", leagueId).eq("retired", true));
     console.log(`  MLB ${mlbCount}, Minors ${minorLeagueCount}, Int'l ${internationalCount}, Draft pool ${draftPoolCount}, Free agents ${freeAgentCount}, Retired ${retiredCount}`);
 
     await supabase.from("refresh_runs").update({

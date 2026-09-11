@@ -2,6 +2,7 @@ import "dotenv/config";
 import { parse } from "csv-parse/sync";
 import { readFileSync } from "fs";
 import { makeSupabaseClient } from "../lib/supabase-client.js";
+import { getLeagueId } from "../lib/league.js";
 
 // Free agent contract demands (2026-09-04, Rees's ask). StatsPlus does not
 // expose this anywhere -- confirmed thoroughly (see statsplus-api-inventory.md's
@@ -45,17 +46,18 @@ function parseDemand(raw: string): number | null {
 async function main() {
   const csvPath = getArg("file") ?? DEFAULT_CSV_PATH;
   const supabase = makeSupabaseClient();
+  const leagueId = await getLeagueId(supabase);
 
   const raw = parse(readFileSync(csvPath, "utf-8"), { columns: true, skip_empty_lines: true }) as Array<Record<string, string>>;
   console.log(`Read ${raw.length} rows from ${csvPath}`);
 
   const { data: latestRun } = await supabase
-    .from("refresh_runs").select("game_date").order("id", { ascending: false }).limit(1).maybeSingle();
+    .from("refresh_runs").select("game_date").eq("dsa_league_id", leagueId).order("id", { ascending: false }).limit(1).maybeSingle();
   const gameDate = (latestRun as { game_date: string | null } | null)?.game_date ?? null;
 
   const { data: importRow, error: importErr } = await supabase
     .from("free_agent_demand_imports")
-    .insert({ source_file: csvPath, row_count: raw.length, game_date: gameDate })
+    .insert({ source_file: csvPath, row_count: raw.length, game_date: gameDate, dsa_league_id: leagueId })
     .select("id")
     .single();
   if (importErr || !importRow) throw new Error(`Failed to create import record: ${importErr?.message}`);
@@ -71,6 +73,7 @@ async function main() {
     }
     return {
       import_id: importId,
+      dsa_league_id: leagueId,
       player_id: Number(r["ID"]),
       demand_salary: demand,
       sign_difficulty: r["Sign"] || null,
@@ -84,7 +87,7 @@ async function main() {
   const ids = rows.map((r) => r.player_id);
   const known = new Set<number>();
   for (let i = 0; i < ids.length; i += 500) {
-    const { data } = await supabase.from("players").select("id").in("id", ids.slice(i, i + 500));
+    const { data } = await supabase.from("players").select("id").eq("dsa_league_id", leagueId).in("id", ids.slice(i, i + 500));
     (data as { id: number }[] | null)?.forEach((p) => known.add(p.id));
   }
   const unknown = ids.filter((id) => !known.has(id));

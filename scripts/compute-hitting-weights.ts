@@ -2,6 +2,7 @@ import "dotenv/config";
 import { makeSupabaseClient } from "../lib/supabase-client.js";
 import { fitMultipleLinear } from "../lib/regression.js";
 import { persistWeightTuningRun } from "../lib/weight-tuning-persist.js";
+import { getLeagueId } from "../lib/league.js";
 
 // Step 1 of the decomposed offense/defense redesign (2026-09-01, Rees's
 // ask, replacing the retired role-calibrated fielding weight -- see the
@@ -123,6 +124,7 @@ const emptyCategories = (): HitCategories => ({ ab: 0, bb: 0, hp: 0, sf: 0, sing
 
 async function main() {
   const supabase = makeSupabaseClient();
+  const leagueId = await getLeagueId(supabase);
 
   console.log("Finding latest refresh run with player_computed (for grades/role)...");
   const { data: computedRunRow } = await supabase
@@ -275,6 +277,7 @@ async function main() {
   console.log("\nSaving this run to weight_tuning_runs/weight_tuning_coefficients (for /admin/weight-tuning)...");
   await persistWeightTuningRun(supabase, {
     refreshRunId: computedRunId,
+    leagueId,
     stream: "hitting",
     targetMetric: "OPS+ (park-adjusted)",
     rSquared: fit.rSquared,

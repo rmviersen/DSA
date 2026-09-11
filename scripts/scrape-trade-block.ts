@@ -1,6 +1,7 @@
 import "dotenv/config";
 import { makeStatsPlusClient } from "../lib/statsplus-client.js";
 import { makeSupabaseClient } from "../lib/supabase-client.js";
+import { getLeagueId } from "../lib/league.js";
 
 // Phase 1 of the transaction-history/market-analysis work (2026-08-31,
 // Rees's ask). Scrapes the league's public trade block page -- see
@@ -24,11 +25,12 @@ function extractTradeBlockPids(html: string): Record<string, string> {
 
 async function main() {
   const supabase = makeSupabaseClient();
+  const leagueId = await getLeagueId(supabase);
   const sp = makeStatsPlusClient({ baseUrl: process.env.STATSPLUS_BASE_URL! });
 
   console.log("Finding latest refresh run to tag this snapshot against...");
   const { data: pcRow, error: pcErr } = await supabase
-    .from("player_computed").select("refresh_run_id").order("refresh_run_id", { ascending: false }).limit(1).single();
+    .from("player_computed").select("refresh_run_id").eq("dsa_league_id", leagueId).order("refresh_run_id", { ascending: false }).limit(1).single();
   if (pcErr || !pcRow) throw new Error(`No player_computed rows found: ${pcErr?.message}`);
   const refreshRunId = (pcRow as { refresh_run_id: number }).refresh_run_id;
   console.log(`Tagging against refresh_run_id ${refreshRunId}`);
@@ -42,6 +44,7 @@ async function main() {
   const capturedAt = new Date().toISOString();
   const rows = playerIds.map((playerId) => ({
     refresh_run_id: refreshRunId,
+    dsa_league_id: leagueId,
     player_id: playerId,
     note: pidNotes[String(playerId)] ?? "",
     captured_at: capturedAt,

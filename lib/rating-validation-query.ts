@@ -122,12 +122,12 @@ export interface ValidationPoint {
   grades: Record<string, number | null>;
 }
 
-export async function getRatingValidationPoints(): Promise<ValidationPoint[]> {
+export async function getRatingValidationPoints(leagueId: number): Promise<ValidationPoint[]> {
   const supabase = makeSupabaseClient();
 
   console.log("Finding latest refresh run with player_computed...");
   const { data: computedRunRow } = await supabase
-    .from("player_computed").select("refresh_run_id").order("refresh_run_id", { ascending: false }).limit(1).maybeSingle();
+    .from("player_computed").select("refresh_run_id").eq("dsa_league_id", leagueId).order("refresh_run_id", { ascending: false }).limit(1).maybeSingle();
   if (!computedRunRow) return [];
   const computedRunId = (computedRunRow as { refresh_run_id: number }).refresh_run_id;
 
@@ -145,13 +145,13 @@ export async function getRatingValidationPoints(): Promise<ValidationPoint[]> {
   // snapshot) still get summed correctly, just not across different runs.
   console.log("Finding latest refresh run with 2031 batting stats...");
   const { data: statsRunRow } = await supabase
-    .from("player_batting_stats_snapshots").select("refresh_run_id").eq("year", 2031).eq("level_id", 1).eq("split_id", 1)
+    .from("player_batting_stats_snapshots").select("refresh_run_id").eq("dsa_league_id", leagueId).eq("year", 2031).eq("level_id", 1).eq("split_id", 1)
     .order("refresh_run_id", { ascending: false }).limit(1).maybeSingle();
   if (!statsRunRow) return [];
   const statsRunId = (statsRunRow as { refresh_run_id: number }).refresh_run_id;
 
   console.log("Loading active rating weight set (for fielding's position bonuses)...");
-  const { data: weightRow } = await supabase.from("rating_weights").select("catcher_fielding_bonus, infield_fielding_bonus, outfield_fielding_bonus").eq("is_active", true).maybeSingle();
+  const { data: weightRow } = await supabase.from("rating_weights").select("catcher_fielding_bonus, infield_fielding_bonus, outfield_fielding_bonus").eq("dsa_league_id", leagueId).eq("is_active", true).maybeSingle();
   const weights = weightRow as { catcher_fielding_bonus: number; infield_fielding_bonus: number; outfield_fielding_bonus: number } | null;
 
   const [computed, ratings, battingRows, pitchingRows, players, fieldingRows] = await Promise.all([
@@ -183,7 +183,7 @@ export async function getRatingValidationPoints(): Promise<ValidationPoint[]> {
       supabase.from("player_pitching_stats_snapshots").select("player_id, ip, war").eq("year", 2031).eq("level_id", 1).eq("split_id", 1).eq("refresh_run_id", statsRunId).range(from, to) as never
     ),
     fetchAll<{ id: number; first_name: string | null; last_name: string | null }>((from, to) =>
-      supabase.from("players").select("id, first_name, last_name").range(from, to) as never
+      supabase.from("players").select("id, first_name, last_name").eq("dsa_league_id", leagueId).range(from, to) as never
     ),
     // split_id=0 here, NOT 1 -- player_fielding_stats_snapshots' own "overall"
     // convention differs from batting/pitching (gotcha already confirmed

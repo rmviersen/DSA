@@ -2,6 +2,7 @@ import "dotenv/config";
 import { makeSupabaseClient } from "../lib/supabase-client.js";
 import { fitMultipleLinear } from "../lib/regression.js";
 import { persistWeightTuningRun } from "../lib/weight-tuning-persist.js";
+import { getLeagueId } from "../lib/league.js";
 
 // Step 3 of the decomposed offense/defense redesign, finally buildable now
 // that Batting, Fielding, and Baserunning have each been individually tuned
@@ -46,6 +47,7 @@ const MIN_PA = 100; // same threshold as every other hitter-side regression this
 
 async function main() {
   const supabase = makeSupabaseClient();
+  const leagueId = await getLeagueId(supabase);
 
   console.log("Finding latest refresh run with player_computed...");
   const { data: computedRunRow } = await supabase
@@ -157,6 +159,7 @@ async function main() {
   console.log("\nSaving this run to weight_tuning_runs/weight_tuning_coefficients (for /admin/weight-tuning)...");
   await persistWeightTuningRun(supabase, {
     refreshRunId: computedRunId,
+    leagueId,
     stream: "overall_blend",
     targetMetric: "WAR / 100 PA",
     rSquared: fit.rSquared,

@@ -1,6 +1,7 @@
 import "dotenv/config";
 import * as cheerio from "cheerio";
 import { makeSupabaseClient } from "../lib/supabase-client.js";
+import { getLeagueId } from "../lib/league.js";
 
 // Ballpark factor snapshots (2026-09-01, Rees's ask, part of the decomposed
 // offense/defense redesign's Step 1). Captures StatsPlus's own published
@@ -82,7 +83,8 @@ export async function scrapeBallparkFactors(refreshRunId: number): Promise<{ wri
   const rows = parseBallparksHtml(html);
   if (rows.length === 0) throw new Error("Parsed 0 rows from the ballparks page -- page structure may have changed.");
 
-  const { data: teamRows } = await supabase.from("teams").select("id, name, nickname");
+  const leagueId = await getLeagueId(supabase);
+  const { data: teamRows } = await supabase.from("teams").select("id, name, nickname").eq("dsa_league_id", leagueId);
   const teamById = new Map((teamRows ?? []).map((t: { id: number; name: string | null; nickname: string | null }) => [t.id, `${t.name ?? ""} ${t.nickname ?? ""}`.trim()]));
 
   const warnings: string[] = [];
@@ -99,6 +101,7 @@ export async function scrapeBallparkFactors(refreshRunId: number): Promise<{ wri
   const { error } = await supabase.from("ballpark_factor_snapshots").upsert(
     validRows.map((r) => ({
       refresh_run_id: refreshRunId,
+      dsa_league_id: leagueId,
       team_id: r.teamId,
       avg_rhb: r.avgRhb, avg_lhb: r.avgLhb, average: r.average,
       doubles: r.doubles, triples: r.triples,
@@ -115,7 +118,8 @@ export async function scrapeBallparkFactors(refreshRunId: number): Promise<{ wri
 // Standalone run (also called from refresh.ts with a real refresh_run_id).
 async function main() {
   const supabase = makeSupabaseClient();
-  const { data: runRow, error } = await supabase.from("refresh_runs").select("id").order("id", { ascending: false }).limit(1).single();
+  const leagueId = await getLeagueId(supabase);
+  const { data: runRow, error } = await supabase.from("refresh_runs").select("id").eq("dsa_league_id", leagueId).order("id", { ascending: false }).limit(1).single();
   if (error || !runRow) throw new Error(`No refresh_runs found: ${error?.message}`);
   const refreshRunId = (runRow as { id: number }).id;
   console.log(`Fetching ballpark factors, tagging as refresh_run_id ${refreshRunId}...`);

@@ -2,6 +2,7 @@ import "dotenv/config";
 import { makeSupabaseClient } from "../lib/supabase-client.js";
 import { fitMultipleLinear } from "../lib/regression.js";
 import { persistWeightTuningRun } from "../lib/weight-tuning-persist.js";
+import { getLeagueId } from "../lib/league.js";
 
 // Pitching weight-tuning (rebuilt 2026-09-02, Rees's corrections to the
 // original version). Runs BOTH targets side by side (Rees's follow-up ask,
@@ -84,6 +85,7 @@ function addTotals(a: PitchCategories, b: PitchCategories): PitchCategories {
 
 async function main() {
   const supabase = makeSupabaseClient();
+  const leagueId = await getLeagueId(supabase);
 
   console.log("Finding latest refresh run with player_computed...");
   const { data: computedRunRow } = await supabase
@@ -224,6 +226,7 @@ async function main() {
 
     await persistWeightTuningRun(supabase, {
       refreshRunId: computedRunId,
+      leagueId,
       stream,
       targetMetric: `${targetLabel} (${roleLabel} only)`,
       rSquared: fit.rSquared,

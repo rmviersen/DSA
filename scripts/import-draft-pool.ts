@@ -2,6 +2,7 @@ import "dotenv/config";
 import { parse } from "csv-parse/sync";
 import { readFileSync } from "fs";
 import { makeSupabaseClient } from "../lib/supabase-client.js";
+import { getLeagueId } from "../lib/league.js";
 
 // OOTP always writes this report to the same filename, overwriting the previous
 // export — so "which draft class this represents" has to be told to us, not
@@ -24,12 +25,13 @@ async function main() {
   const csvPath = getArg("file") ?? DEFAULT_CSV_PATH;
 
   const supabase = makeSupabaseClient();
+  const leagueId = await getLeagueId(supabase);
   const raw = parse(readFileSync(csvPath, "utf-8"), { columns: true, skip_empty_lines: true }) as Array<Record<string, string>>;
   console.log(`Read ${raw.length} rows from ${csvPath}, tagging as draft_year=${draftYear}`);
 
   const { data: importRow, error: importErr } = await supabase
     .from("draft_class_imports")
-    .insert({ draft_year: Number(draftYear), source_file: csvPath, row_count: raw.length })
+    .insert({ draft_year: Number(draftYear), source_file: csvPath, row_count: raw.length, dsa_league_id: leagueId })
     .select("id")
     .single();
   if (importErr || !importRow) throw new Error(`Failed to create import record: ${importErr?.message}`);
@@ -37,6 +39,7 @@ async function main() {
 
   const rows = raw.map((r) => ({
     draft_class_import_id: importId,
+    dsa_league_id: leagueId,
     player_id: Number(r["ID"]),
     pos: r["POS"] || null,
     lev: r["Lev"] || null,
@@ -54,7 +57,7 @@ async function main() {
   const ids = rows.map((r) => r.player_id);
   const known = new Set<number>();
   for (let i = 0; i < ids.length; i += 500) {
-    const { data } = await supabase.from("players").select("id").in("id", ids.slice(i, i + 500));
+    const { data } = await supabase.from("players").select("id").eq("dsa_league_id", leagueId).in("id", ids.slice(i, i + 500));
     (data as { id: number }[] | null)?.forEach((p) => known.add(p.id));
   }
   const unknown = ids.filter((id) => !known.has(id));

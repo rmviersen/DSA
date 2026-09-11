@@ -1,5 +1,6 @@
 import "dotenv/config";
 import { makeSupabaseClient } from "../lib/supabase-client.js";
+import { getLeagueId } from "../lib/league.js";
 import { getRatingValidationPoints } from "../lib/rating-validation-query.js";
 import { fitLine, isotonicRegressionNonIncreasing } from "../lib/regression.js";
 
@@ -56,9 +57,10 @@ const MAX_MULTIPLIER = 3;
 
 async function main() {
   const supabase = makeSupabaseClient();
+  const leagueId = await getLeagueId(supabase);
 
   console.log("Loading rating-validation hitter data...");
-  const points = await getRatingValidationPoints();
+  const points = await getRatingValidationPoints(leagueId);
   const hitters = points.filter((p) => p.playerType === "hitter" && p.grades.fielding != null);
   console.log(`  ${hitters.length} hitters with a fielding grade`);
   if (hitters.length < 20) {
@@ -127,7 +129,7 @@ async function main() {
 
   console.log("Finding latest refresh run (for tagging this computation)...");
   const { data: runRow, error: runErr } = await supabase
-    .from("refresh_runs").select("id").order("id", { ascending: false }).limit(1).single();
+    .from("refresh_runs").select("id").eq("dsa_league_id", leagueId).order("id", { ascending: false }).limit(1).single();
   if (runErr || !runRow) throw new Error(`No refresh_runs found: ${runErr?.message}`);
   const refreshRunId = (runRow as { id: number }).id;
 
@@ -135,6 +137,7 @@ async function main() {
   const { error: writeErr } = await supabase.from("fielding_role_weights").upsert(
     results.map((r) => ({
       refresh_run_id: refreshRunId,
+      dsa_league_id: leagueId,
       role: r.role,
       raw_slope: r.rawSlope,
       pooled_slope: pooledFit.slope,

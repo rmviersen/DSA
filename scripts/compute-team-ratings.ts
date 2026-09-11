@@ -1,5 +1,6 @@
 import "dotenv/config";
 import { makeSupabaseClient } from "../lib/supabase-client.js";
+import { getLeagueId } from "../lib/league.js";
 
 const PAGE_SIZE = 1000;
 
@@ -66,16 +67,17 @@ interface PlayerRow {
 
 async function main() {
   const supabase = makeSupabaseClient();
+  const leagueId = await getLeagueId(supabase);
 
   console.log("Finding latest refresh run with computed player ratings...");
   const { data: pcRow, error: pcErr } = await supabase
-    .from("player_computed").select("refresh_run_id").order("refresh_run_id", { ascending: false }).limit(1).single();
+    .from("player_computed").select("refresh_run_id").eq("dsa_league_id", leagueId).order("refresh_run_id", { ascending: false }).limit(1).single();
   if (pcErr || !pcRow) throw new Error(`No player_computed rows found: ${pcErr?.message}`);
   const refreshRunId = (pcRow as { refresh_run_id: number }).refresh_run_id;
   console.log(`Computing team ratings against refresh_run_id ${refreshRunId}`);
 
   console.log("Loading active system-rank weight set...");
-  const { data: srwRow, error: srwErr } = await supabase.from("system_rank_weights").select("*").eq("is_active", true).single();
+  const { data: srwRow, error: srwErr } = await supabase.from("system_rank_weights").select("*").eq("dsa_league_id", leagueId).eq("is_active", true).single();
   if (srwErr || !srwRow) throw new Error(`No active system_rank_weights found: ${srwErr?.message}`);
   const srw = srwRow as { id: number; label: string; blue_chip_cutoff: number; balance_penalty: number };
   console.log(`Using system-rank weight set #${srw.id}: "${srw.label}" (blueChipCutoff=${srw.blue_chip_cutoff}, balancePenalty=${srw.balance_penalty})`);
@@ -105,7 +107,7 @@ async function main() {
   console.log(`  ${rows.length} rows`);
 
   console.log("Loading teams...");
-  const teams = await fetchAll<{ id: number }>((from, to) => supabase.from("teams").select("id").range(from, to) as never);
+  const teams = await fetchAll<{ id: number }>((from, to) => supabase.from("teams").select("id").eq("dsa_league_id", leagueId).range(from, to) as never);
 
   const byOrg = new Map<number, PlayerRow[]>();
   for (const r of rows) {
@@ -238,7 +240,7 @@ async function main() {
   console.log(`Writing ${outRows.length} rows to team_computed...`);
   const MAX_ATTEMPTS = 3;
   for (let i = 0; i < outRows.length; i += 500) {
-    const batch = outRows.slice(i, i + 500);
+    const batch = outRows.slice(i, i + 500).map((r) => ({ ...r, dsa_league_id: leagueId }));
     let ok = false, lastErr: unknown;
     for (let attempt = 1; attempt <= MAX_ATTEMPTS && !ok; attempt++) {
       // upsert, not insert (2026-08-28, same fix as compute-ratings.ts,

@@ -2,6 +2,7 @@ import "dotenv/config";
 import { makeSupabaseClient } from "../lib/supabase-client.js";
 import { computeRatings, type RatingsInput, type WeightSet, type HandednessSplits } from "../lib/rating-engine.js";
 import { effectiveLevel } from "../lib/display-helpers.js";
+import { getLeagueId } from "../lib/league.js";
 
 const PAGE_SIZE = 1000;
 
@@ -60,9 +61,12 @@ function paceYearsPerLevel(marginAboveBar: number): number {
 // because the actual ask driving this (Rees, 2026-09-02) is "make sure the
 // CORE VALUATIONS reflect the new weighting model across history," not
 // "reconstruct exactly what the site would have shown on that old date."
-async function loadSharedContext(supabase: ReturnType<typeof makeSupabaseClient>) {
+async function loadSharedContext(supabase: ReturnType<typeof makeSupabaseClient>, leagueId: number) {
   console.log("Loading active weight set...");
-  const { data: weightRow, error: weightErr } = await supabase.from("rating_weights").select("*").eq("is_active", true).single();
+  // "Active" is now scoped per league (multi-league plan §2) -- each league
+  // tunes its own weights against its own player pool, never inherited from
+  // another league's calibration.
+  const { data: weightRow, error: weightErr } = await supabase.from("rating_weights").select("*").eq("dsa_league_id", leagueId).eq("is_active", true).single();
   if (weightErr || !weightRow) throw new Error(`No active weight set found: ${weightErr?.message}`);
   const weights: WeightSet = weightRow as WeightSet;
   console.log(`Using weight set #${weights.id}: "${(weightRow as { label: string }).label}"`);
@@ -78,7 +82,7 @@ async function loadSharedContext(supabase: ReturnType<typeof makeSupabaseClient>
   // rather than ripped out since it's a harmless no-op.
   console.log("Loading role-calibrated fielding weights (if any exist yet)...");
   const { data: fieldingWeightRows } = await supabase
-    .from("fielding_role_weights").select("refresh_run_id, role, relative_multiplier").order("refresh_run_id", { ascending: false });
+    .from("fielding_role_weights").select("refresh_run_id, role, relative_multiplier").eq("dsa_league_id", leagueId).order("refresh_run_id", { ascending: false });
   const fieldingWeights: Record<string, number> = {};
   if (fieldingWeightRows && fieldingWeightRows.length > 0) {
     const latestFieldingRunId = (fieldingWeightRows[0] as { refresh_run_id: number }).refresh_run_id;
@@ -113,10 +117,10 @@ async function loadSharedContext(supabase: ReturnType<typeof makeSupabaseClient>
     return [...best.values()];
   }
   const careerBatRows = await fetchAll<{ player_id: number; year: number; stint: number | null; refresh_run_id: number; ab: number | null }>((from, to) =>
-    supabase.from("player_batting_stats_snapshots").select("player_id,year,stint,refresh_run_id,ab").eq("level_id", 1).eq("split_id", 1).range(from, to) as never
+    supabase.from("player_batting_stats_snapshots").select("player_id,year,stint,refresh_run_id,ab").eq("dsa_league_id", leagueId).eq("level_id", 1).eq("split_id", 1).range(from, to) as never
   );
   const careerPitRows = await fetchAll<{ player_id: number; year: number; stint: number | null; refresh_run_id: number; ip: number | null }>((from, to) =>
-    supabase.from("player_pitching_stats_snapshots").select("player_id,year,stint,refresh_run_id,ip").eq("level_id", 1).eq("split_id", 1).range(from, to) as never
+    supabase.from("player_pitching_stats_snapshots").select("player_id,year,stint,refresh_run_id,ip").eq("dsa_league_id", leagueId).eq("level_id", 1).eq("split_id", 1).range(from, to) as never
   );
   const careerAbByPlayer = new Map<number, number>();
   for (const row of latestPerStint(careerBatRows)) {
@@ -136,7 +140,7 @@ async function loadSharedContext(supabase: ReturnType<typeof makeSupabaseClient>
   // hand-computed split via direct SQL didn't match player_computed's
   // actual batting values until this was added).
   const players = await fetchAll<{ id: number; organization_id: number | null; mlb_service_days: number | null; last_team_id: number | null; level: number | null; is_active: boolean | null; league_id: number | null; age: number | null }>((from, to) =>
-    supabase.from("players").select("id, organization_id, mlb_service_days, last_team_id, level, is_active, league_id, age").order("id").range(from, to) as never
+    supabase.from("players").select("id, organization_id, mlb_service_days, last_team_id, level, is_active, league_id, age").eq("dsa_league_id", leagueId).order("id").range(from, to) as never
   );
   const playerById = new Map(players.map((p) => [p.id, p]));
   console.log(`  ${players.length} players`);
@@ -147,7 +151,7 @@ async function loadSharedContext(supabase: ReturnType<typeof makeSupabaseClient>
 type SharedContext = Awaited<ReturnType<typeof loadSharedContext>>;
 
 // --- Everything below is scoped to ONE refresh_run_id -----------------
-async function computeRatingsForRun(supabase: ReturnType<typeof makeSupabaseClient>, refreshRunId: number, shared: SharedContext) {
+async function computeRatingsForRun(supabase: ReturnType<typeof makeSupabaseClient>, refreshRunId: number, shared: SharedContext, leagueId: number) {
   const { weights, fieldingWeights, players, playerById, careerAbByPlayer, careerIpByPlayer } = shared;
 
   console.log(`Computing against refresh_run_id ${refreshRunId}`);
@@ -260,7 +264,11 @@ async function computeRatingsForRun(supabase: ReturnType<typeof makeSupabaseClie
   // the career-workload dedup above in loadSharedContext -- flagging here
   // rather than building that now for a case that hasn't happened yet.
   async function latestStatsRunId(table: string): Promise<number> {
-    const { data } = await supabase.from(table).select("refresh_run_id").order("refresh_run_id", { ascending: false }).limit(1).maybeSingle();
+    // Scoped to this league (2026-09-10) -- without this, once a second
+    // league's refresh_run_ids exist in this same table, "most recent stats-
+    // bearing run" could resolve to the WRONG league's run just because its
+    // id happens to be numerically higher.
+    const { data } = await supabase.from(table).select("refresh_run_id").eq("dsa_league_id", leagueId).order("refresh_run_id", { ascending: false }).limit(1).maybeSingle();
     return (data as { refresh_run_id: number } | null)?.refresh_run_id ?? refreshRunId;
   }
 
@@ -730,8 +738,8 @@ async function computeRatingsForRun(supabase: ReturnType<typeof makeSupabaseClie
   // level's real average drifts over time, same reasoning as the
   // hitter/pitcher_overall_mean/sd persistence above.
   const anchorRows = [
-    ...levelAnchors("H").map((a) => ({ refresh_run_id: refreshRunId, player_type: "H", level: a.level, avg_raw_overall: a.avg, n: a.n })),
-    ...levelAnchors("P").map((a) => ({ refresh_run_id: refreshRunId, player_type: "P", level: a.level, avg_raw_overall: a.avg, n: a.n })),
+    ...levelAnchors("H").map((a) => ({ refresh_run_id: refreshRunId, dsa_league_id: leagueId, player_type: "H", level: a.level, avg_raw_overall: a.avg, n: a.n })),
+    ...levelAnchors("P").map((a) => ({ refresh_run_id: refreshRunId, dsa_league_id: leagueId, player_type: "P", level: a.level, avg_raw_overall: a.avg, n: a.n })),
   ];
   if (anchorRows.length > 0) {
     const { error: anchorErr } = await supabase.from("calibration_level_anchors").upsert(anchorRows, { onConflict: "refresh_run_id,player_type,level" });
@@ -968,7 +976,7 @@ async function computeRatingsForRun(supabase: ReturnType<typeof makeSupabaseClie
     console.log(`Writing ${allRows.length} rows to ${table}...`);
     const MAX_ATTEMPTS = 3;
     for (let i = 0; i < allRows.length; i += 500) {
-      const batch = allRows.slice(i, i + 500);
+      const batch = allRows.slice(i, i + 500).map((r) => ({ ...r, dsa_league_id: leagueId }));
       let lastErr: unknown;
       let ok = false;
       for (let attempt = 1; attempt <= MAX_ATTEMPTS && !ok; attempt++) {
@@ -1017,7 +1025,8 @@ async function computeRatingsForRun(supabase: ReturnType<typeof makeSupabaseClie
 
 async function main() {
   const supabase = makeSupabaseClient();
-  const shared = await loadSharedContext(supabase);
+  const leagueId = await getLeagueId(supabase);
+  const shared = await loadSharedContext(supabase, leagueId);
 
   // --all (2026-09-02, Rees's ask: "run a full refresh of all of the data
   // ... including old runs to update the historical valuations ... so we
@@ -1030,14 +1039,14 @@ async function main() {
   if (backfillAll) {
     console.log("--all: finding every succeeded refresh run with ratings...");
     const { data: runRows, error } = await supabase
-      .from("refresh_runs").select("id").eq("status", "succeeded").eq("ratings_included", true).order("id", { ascending: true });
+      .from("refresh_runs").select("id").eq("dsa_league_id", leagueId).eq("status", "succeeded").eq("ratings_included", true).order("id", { ascending: true });
     if (error || !runRows || runRows.length === 0) throw new Error(`No succeeded refresh runs with ratings found: ${error?.message}`);
     refreshRunIds = (runRows as { id: number }[]).map((r) => r.id);
     console.log(`  ${refreshRunIds.length} runs to recompute: ${refreshRunIds.join(", ")}`);
   } else {
     console.log("Finding latest succeeded refresh run with ratings...");
     const { data: runRow, error } = await supabase
-      .from("refresh_runs").select("id").eq("status", "succeeded").eq("ratings_included", true)
+      .from("refresh_runs").select("id").eq("dsa_league_id", leagueId).eq("status", "succeeded").eq("ratings_included", true)
       .order("id", { ascending: false }).limit(1).single();
     if (error || !runRow) throw new Error(`No succeeded refresh run with ratings found: ${error?.message}`);
     refreshRunIds = [(runRow as { id: number }).id];
@@ -1047,7 +1056,7 @@ async function main() {
   for (const refreshRunId of refreshRunIds) {
     console.log(`\n=== refresh_run_id ${refreshRunId} (${refreshRunIds.indexOf(refreshRunId) + 1}/${refreshRunIds.length}) ===`);
     try {
-      await computeRatingsForRun(supabase, refreshRunId, shared);
+      await computeRatingsForRun(supabase, refreshRunId, shared, leagueId);
     } catch (err) {
       // One bad historical run shouldn't kill an entire multi-run backfill --
       // logged and counted, not silently swallowed (see the nonzero exit

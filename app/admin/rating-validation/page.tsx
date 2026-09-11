@@ -1,4 +1,5 @@
 import { getRatingValidationPoints } from "../../../lib/rating-validation-query";
+import { getDefaultLeagueId } from "../../../lib/league";
 import RatingValidationExplorer from "./RatingValidationExplorer";
 
 export const dynamic = "force-dynamic";
@@ -21,7 +22,8 @@ const pageTitleStyle = {
 } as const;
 
 export default async function RatingValidationPage() {
-  const points = await getRatingValidationPoints();
+  const leagueId = await getDefaultLeagueId();
+  const points = await getRatingValidationPoints(leagueId);
 
   if (points.length === 0) {
     return (

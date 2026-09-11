@@ -1,5 +1,6 @@
 import "dotenv/config";
 import { makeSupabaseClient } from "../lib/supabase-client.js";
+import { getLeagueId } from "../lib/league.js";
 import { PITCHER_ROLES, computeLeagueMinimumSalary, type PlayerType } from "../lib/contract-classification.js";
 import { fitLine } from "../lib/regression.js";
 
@@ -63,10 +64,11 @@ interface TrainingContract { playerId: number; overall: number; role: string; aa
 
 async function main() {
   const supabase = makeSupabaseClient();
+  const leagueId = await getLeagueId(supabase);
 
   console.log("Loading accumulated training contracts (market_rate_training_contracts)...");
   const training = await fetchAll<{ player_id: number; overall: number; role: string; aav: number }>((from, to) =>
-    supabase.from("market_rate_training_contracts").select("player_id, overall, role, aav").range(from, to) as never
+    supabase.from("market_rate_training_contracts").select("player_id, overall, role, aav").eq("dsa_league_id", leagueId).range(from, to) as never
   );
   console.log(`  ${training.length} distinct clean contracts on file`);
   if (training.length < 20) {
@@ -81,7 +83,7 @@ async function main() {
   // first observed (those can span many past refreshes).
   console.log("Finding latest refresh run (for tagging this fit and pulling current Overall)...");
   const { data: runRow, error: runErr } = await supabase
-    .from("refresh_runs").select("id").order("id", { ascending: false }).limit(1).single();
+    .from("refresh_runs").select("id").eq("dsa_league_id", leagueId).order("id", { ascending: false }).limit(1).single();
   if (runErr || !runRow) throw new Error(`No refresh_runs found: ${runErr?.message}`);
   const currentRunId = (runRow as { id: number }).id;
   console.log(`  refresh_run_id ${currentRunId}`);
@@ -132,7 +134,7 @@ async function main() {
   // row, so this script works standalone on a first-ever run too.
   console.log("Computing current league minimum salary (for display context)...");
   const { data: latestContractRun } = await supabase
-    .from("contract_snapshots").select("refresh_run_id").order("refresh_run_id", { ascending: false }).limit(1).maybeSingle();
+    .from("contract_snapshots").select("refresh_run_id").eq("dsa_league_id", leagueId).order("refresh_run_id", { ascending: false }).limit(1).maybeSingle();
   let leagueMinimum = 0;
   if (latestContractRun) {
     const runId = (latestContractRun as { refresh_run_id: number }).refresh_run_id;
@@ -140,7 +142,7 @@ async function main() {
       supabase.from("contract_snapshots").select("player_id, is_major, salary0").eq("refresh_run_id", runId).range(from, to) as never
     );
     const players = await fetchAll<{ id: number; mlb_service_years: number | null }>((from, to) =>
-      supabase.from("players").select("id, mlb_service_years").range(from, to) as never
+      supabase.from("players").select("id, mlb_service_years").eq("dsa_league_id", leagueId).range(from, to) as never
     );
     const serviceByPlayer = new Map(players.map((p) => [p.id, p.mlb_service_years]));
     const lowServiceSalaries = lowServiceContracts
@@ -216,6 +218,7 @@ async function main() {
   for (const [type, curve] of curvesByType) {
     const { error: curveErr } = await supabase.from("market_rate_curves").upsert({
       refresh_run_id: currentRunId,
+      dsa_league_id: leagueId,
       player_type: type,
       intercept: curve.intercept, slope: curve.slope,
       r_squared: curve.rSquared, residual_std_dev: curve.residualStdDev,
@@ -231,6 +234,7 @@ async function main() {
   const { error: roleErr } = await supabase.from("market_rate_role_multipliers").upsert(
     roleRows.map((r) => ({
       refresh_run_id: currentRunId,
+      dsa_league_id: leagueId,
       role: r.role,
       raw_multiplier: r.rawMultiplier,
       shrunk_multiplier: r.shrunkMultiplier,

@@ -2,6 +2,7 @@ import "dotenv/config";
 import { makeSupabaseClient } from "../lib/supabase-client.js";
 import { fitLine } from "../lib/regression.js";
 import { persistWeightTuningRun } from "../lib/weight-tuning-persist.js";
+import { getLeagueId } from "../lib/league.js";
 
 // Fielding vs. WAR/100 defensive innings (2026-09-02, Rees's ask) --
 // reference-only, explicitly NOT meant to set any weight (he's comfortable
@@ -39,6 +40,7 @@ const MIN_DEFENSIVE_IP = 50; // rough analog of the 100 PA / 30-75 IP floors use
 
 async function main() {
   const supabase = makeSupabaseClient();
+  const leagueId = await getLeagueId(supabase);
 
   console.log("Finding latest refresh run with player_computed...");
   const { data: computedRunRow } = await supabase
@@ -114,6 +116,7 @@ async function main() {
 
   await persistWeightTuningRun(supabase, {
     refreshRunId: computedRunId,
+    leagueId,
     stream: "fielding_defensive",
     targetMetric: "WAR / 100 Defensive Innings",
     rSquared: fit.rSquared,

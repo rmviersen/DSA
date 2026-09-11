@@ -1,5 +1,6 @@
 import "dotenv/config";
 import { makeSupabaseClient } from "../lib/supabase-client.js";
+import { getLeagueId } from "../lib/league.js";
 
 // Captures a point-in-time snapshot of the `players` fields that actually
 // change over a career and matter for historical accuracy -- organization,
@@ -43,10 +44,11 @@ async function fetchAll<T>(query: (from: number, to: number) => Promise<{ data: 
 
 async function main() {
   const supabase = makeSupabaseClient();
+  const leagueId = await getLeagueId(supabase);
 
   console.log("Finding latest succeeded refresh run...");
   const { data: runRow, error: runErr } = await supabase
-    .from("refresh_runs").select("id").eq("status", "succeeded").order("id", { ascending: false }).limit(1).single();
+    .from("refresh_runs").select("id").eq("dsa_league_id", leagueId).eq("status", "succeeded").order("id", { ascending: false }).limit(1).single();
   if (runErr || !runRow) throw new Error(`No succeeded refresh run found: ${runErr?.message}`);
   const refreshRunId = (runRow as { id: number }).id;
   console.log(`Snapshotting players as of refresh_run_id ${refreshRunId}...`);
@@ -55,12 +57,13 @@ async function main() {
     id: number; organization_id: number | null; age: number | null; level: number | null;
     mlb_service_days: number | null; league_id: number | null; is_active: boolean | null; last_team_id: number | null;
   }>((from, to) =>
-    supabase.from("players").select("id, organization_id, age, level, mlb_service_days, league_id, is_active, last_team_id").order("id").range(from, to) as never
+    supabase.from("players").select("id, organization_id, age, level, mlb_service_days, league_id, is_active, last_team_id").eq("dsa_league_id", leagueId).order("id").range(from, to) as never
   );
   console.log(`  ${players.length} players`);
 
   const rows = players.map((p) => ({
     refresh_run_id: refreshRunId,
+    dsa_league_id: leagueId,
     player_id: p.id,
     organization_id: p.organization_id,
     age: p.age,
