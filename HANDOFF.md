@@ -852,6 +852,27 @@ Rees's intended home page as site owner — platform status, his own team, repor
 
 **Still to build**: §2 My Team (org roster, promotion-candidate flags off the existing Suggested-Level logic, roster-status flags off the corrected `players` fields), §4 Site Performance (Vercel Web Analytics + runtime errors — Vercel MCP access already confirmed working), §3 Reporting log (tracks Cowork-drafted reports that the **platform itself** sends to Slack via its own bot token — Cowork composes content, the platform delivers and logs it, deliberately not the reverse, since Cowork has no way to trigger anything from a dashboard button and no database access. Each report type gets its own trigger mode — `scheduled`, `manual`, or both — reusing the exact `schedule:` + `workflow_dispatch:` GitHub Actions pattern `refresh.yml` already proved out, not a new mechanism).
 
+## 7c. Duud refresh routine — manual, on-demand (2026-09-11)
+
+Unlike TBL, this is **not** automated on any schedule, and deliberately so — confirmed directly with Rees. Two real reasons, not just "not built yet":
+1. **No fixed cadence.** Duud is a personal league he manages solo; he exports a fresh dump whenever he thinks of it (after a draft, a big trade, just checking in), not on any predictable schedule worth automating around.
+2. **The data source itself can't be reached automatically anyway.** TBL's refresh works because GitHub Actions' cloud runners can call StatsPlus's public website directly. Duud's dump is a real file OOTP writes to Rees's own machine (`saved_games/Duud Duud.lg/import_export/mysql/` under his OOTP install) — no cloud runner can see that folder. A cron-based approach isn't just unbuilt here, it's not possible without a fundamentally different setup (e.g. Rees uploading the dump somewhere reachable), which hasn't been asked for.
+
+**The actual routine, confirmed with Rees**: he exports a fresh SQL dump in-game (Game Settings → Database tab → Database Tools → "Configure SQL dump for MySQL"), then tells Claude Code directly in a session — "here's a new Duud dump" is enough, the path essentially never changes (see below). Whichever session that lands in should:
+
+1. Copy real credentials in exactly like every other script needing them: `cp ~/secrets/dsa-platform.env .env` (from the `platform/` directory), confirm with `ls .env`.
+2. Run the import. The dump folder path defaults to Rees's actual save location (`scripts/ingest-duud-dump.ts`'s `DEFAULT_DUMP_DIR` — hardcoded since it's been confirmed stable across repeat exports; pass a path as an argument or set `DUUD_DUMP_DIR` only if the league gets renamed, the save moves, or a different exported copy needs testing). **Needs a larger heap than Node's default** (the dump files are large enough that parsed-into-JS-objects overhead adds up) — invoke as:
+   ```bash
+   NODE_OPTIONS="--max-old-space-size=8192" npx tsx scripts/ingest-duud-dump.ts
+   ```
+   (`npm run ingest-duud` is also wired up in `package.json` for discoverability, but doesn't carry the memory flag — prefer the direct invocation above.)
+3. Remove credentials immediately after: `rm -f .env`, confirm via `ls .env 2>/dev/null && echo "STILL PRESENT" || echo "confirmed removed"` — same non-negotiable ritual as every other script.
+4. Verify before calling it done, the same way Step 5's original build was verified — real row counts per table for `dsa_league_id=2` (teams/players/contracts/ratings/stats), not just a clean exit. The import is safe to re-run on a fresh dump: current-state tables (`players`/`teams`/`contracts`/`contract_extensions`/`draft_picks`) upsert cleanly, and stats/ratings snapshots land under a brand-new `refresh_runs` row each time (never overwriting or duplicating a prior import's history) — same pattern as TBL's own `refresh.ts`.
+
+**Re-run behavior verified for real, same day**: ran the importer a second time against the same dump (proving out the zero-argument default-path convenience) and confirmed via direct row counts — `teams`/`players` stayed at exactly 356/17,438 (no duplication from the upsert), and `player_ratings_snapshots` now correctly holds two distinct `refresh_run_id`s (the original Step 5 import and this one), each with the full 17,438 rows, not one overwriting the other. This was still the same dump content, not a genuinely different one — still worth a quick sanity check (row counts, a couple of spot-checked players) the first time a real *changed* dump comes through, but the re-run mechanics themselves are now confirmed, not just designed.
+
+**Downstream calibration (Step 6, compute-ratings.ts and the rest) is a separate, still-manual step, not run by the importer.** Once that's built, running it for Duud specifically will need `--league=Duud` on whichever scripts get invoked (see gotcha 39) — nothing about that is automated either, same "tell Claude Code directly" trigger as the import itself.
+
 ## 7. Running it locally
 
 ```bash

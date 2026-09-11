@@ -286,17 +286,22 @@ where the whole site is down while the migration runs.
 - Root `/` redirects into `/TBL/players` (§4).
 - Duud is fully private, no guest tier at all (§5).
 - The owner cookie is one global login for both leagues, not per-league (§5).
+- Duud's refresh cadence: no fixed schedule, on-demand, triggered by telling
+  Claude Code directly — no cron/automation, by choice, not just unbuilt (§7).
 
 **Still open — needed before the steps in §8 that depend on them:**
 1. **Does Duud have its own "my team" org**, the way TBL has OKC (org 15)?
    If so, what is it (needed to replace every `DEFAULT_ORG_ID = 15` with a
    per-league value on pages like `/my-roster`, `/lineup`, `/rule5-draft`,
    `/org-minors`). Doesn't block steps 1-4 of §8, only step 6 onward.
-2. **Refresh cadence for Duud** — how often will a new SQL dump actually be
-   produced (weekly? after every sim session?), since that determines
-   whether the ingestion script needs any scheduling/reminder support or is
-   purely "run it by hand whenever there's a new file." Doesn't block early
-   steps either.
+2. **Refresh cadence for Duud — resolved (2026-09-11, Rees):** no fixed
+   cadence, exported whenever he thinks of it. Confirmed no scheduling/
+   reminder support is wanted — trigger is telling Claude Code directly in
+   a session ("here's a new Duud dump"), same as running the import itself.
+   No cron/GitHub-Actions equivalent was built or is planned: unlike TBL,
+   the dump is a local file on Rees's own machine, not a hosted API a cloud
+   runner could reach even if a fixed cadence existed. Full routine
+   documented in `HANDOFF.md` §7c.
 3. **A real sample SQL dump** — the one hard blocker. `OotpSqlDumpAdapter`'s
    actual column-mapping work (§3) can't start without it, since I don't have
    OOTP's internal schema to plan against otherwise. Doesn't block steps 1-4

@@ -19,11 +19,22 @@ import * as map from "../lib/ootp-sql-dump-mappers.js";
 // multi-league-architecture-plan.md, Step 5, for the full research behind
 // every mapping decision below.
 //
-// NOT run as part of refresh.ts's automated pipeline -- this is a manual,
-// one-off-per-dump script, run by hand whenever Rees hands over a fresh
-// export (cadence still an open question, noted in the plan doc).
+// NOT run as part of refresh.ts's automated pipeline, and deliberately no
+// cron/GitHub-Actions equivalent -- confirmed with Rees (2026-09-11): no
+// fixed cadence (he exports whenever he thinks of it, e.g. after a draft or
+// a big trade), triggered by telling Claude Code directly in a session
+// rather than any automated watcher. GitHub Actions couldn't reach this
+// data even if there were a fixed cadence -- the dump is a local file on
+// Rees's own machine, not a hosted API like StatsPlus. See HANDOFF.md's
+// "Duud refresh routine" section for the exact steps to run this.
 // Downstream calibration (compute-ratings.ts and friends) is Step 6, not
 // run by this script -- those still default to TBL until that step exists.
+
+// Rees's save always lands here for the "Duud Duud" league -- confirmed
+// stable across repeat exports, so this covers the common case with zero
+// arguments. Override with a CLI arg or DUUD_DUMP_DIR for a renamed league,
+// a moved save, or testing against a different exported copy.
+const DEFAULT_DUMP_DIR = "C:\\Users\\rmvie\\OneDrive\\Documents\\Out of the Park Developments\\OOTP Baseball 27\\saved_games\\Duud Duud.lg\\import_export\\mysql";
 
 const BATCH_SIZE = 500;
 const MAX_ATTEMPTS = 3;
@@ -102,12 +113,7 @@ function dedupeByRealKey<T extends DumpRow>(rows: T[], keyCols: string[], label:
 }
 
 async function main() {
-  const dumpDir = process.argv[2] || process.env.DUUD_DUMP_DIR;
-  if (!dumpDir) {
-    console.error("Usage: tsx scripts/ingest-duud-dump.ts <path-to-mysql-dump-folder>  (or set DUUD_DUMP_DIR)");
-    process.exitCode = 1;
-    return;
-  }
+  const dumpDir = process.argv[2] || process.env.DUUD_DUMP_DIR || DEFAULT_DUMP_DIR;
   console.log(`Reading dump from: ${dumpDir}`);
 
   const supabase = makeSupabaseClient();
