@@ -451,7 +451,78 @@ than one giant change:
    global owner login covers both leagues, no per-league "owner of Duud"
    concept — so nothing needed there either. Only a comment added to
    `middleware.ts` documenting both confirmations.
-5. Duud ingestion: `OotpSqlDumpAdapter`, once a real sample dump is in hand.
+5. ✅ **Done, 2026-09-11.** Duud ingestion: `OotpSqlDumpAdapter`, built as
+   `scripts/ingest-duud-dump.ts` + `lib/ootp-sql-dump-parser.ts` (a
+   hand-written, quote-aware tokenizer for OOTP's MySQL-dump format — no
+   library existed for this, and it needed to correctly handle backslash-
+   escaped names like O'Brien) + `lib/ootp-sql-dump-mappers.ts` (mirrors
+   `lib/mappers.ts`'s shape field-for-field, so both leagues' rows land in
+   the exact same columns). Deliberately scoped to only what TBL already
+   gets from StatsPlus (Rees's explicit call) — the dump's extra tables
+   (team financials, per-game/at-bat data, awards, injury history, coaches,
+   trade history) are real and usable, just not built yet.
+   - **A real, live bug found and fixed along the way, unrelated to Duud**:
+     while wiring up upserts into the same `players`/`teams`/`contracts`/
+     `contract_extensions`/`draft_picks` tables, found that `refresh.ts`'s
+     own upserts into those tables had never been updated for Step 1's
+     composite-key migration two days earlier — confirmed via `refresh_runs`
+     that **every automated TBL refresh had been silently failing since
+     that migration**, leaving TBL's live data stale for ~2 days with no
+     other visible symptom. Fixed and verified with a real refresh run.
+   - **A real scope decision, confirmed with Rees**: Duud's `players` table
+     holds OOTP's entire real historical MLB player database (143,779 rows),
+     not just this league's own history the way StatsPlus's TBL export
+     does — 126,341 of those are long-retired real players with zero
+     bearing on current gameplay. Scoped to non-retired players only
+     (17,438), comparable in size to TBL's own live pool; easy to widen
+     later if retired-player lookups ever become a real feature.
+   - **A real data-shape discovery, confirmed with Rees**: the dump gives
+     every player *multiple* scouting reports (a generic baseline plus one
+     per org that has scouted them — up to 31 for widely-scouted players),
+     unlike StatsPlus's single canonical row per player. Rees's call: every
+     player is always shown through the White Sox's (his own org's)
+     scouting accuracy/fog, not a patchwork of whichever org happens to
+     employ each player — matching how a real GM actually experiences the
+     game. Falls back to the generic baseline for the rare player the White
+     Sox haven't scouted (didn't come up in practice — 0 of 17,438 needed
+     the fallback).
+   - **Confirmed empty, not a bug**: `players_batting`/`players_pitching`/
+     `players_fielding` (a second, seemingly-redundant set of rating tables)
+     came back all-zero for every real player checked. Rees's explanation:
+     these are the "show real player ratings"/"show OSA ratings" dump
+     options he deliberately left unchecked, to preserve scouting fog —
+     `players_scouted_ratings` (populated, verified against real data) is
+     the correct, only source used.
+   - **Two smaller real-data wrinkles fixed during ingestion, both
+     confirmed via direct inspection before fixing** (not guessed at): (1)
+     the stats-snapshot tables' real unique constraints are narrower than
+     "one row per player per year" (they don't include level_id) — ~0.7% of
+     rows (mostly old amateur/college-league stat lines) collided on the
+     real key; deduped by keeping the first row per real key, with the
+     dropped count logged rather than silently discarded. (2) Reading all
+     the large dump files into memory at once needs a larger Node heap
+     (`--max-old-space-size=8192`) than the default — the raw data itself
+     isn't huge, but JS object overhead across ~700k+ parsed stat rows adds
+     up.
+   - **Deliberately left null rather than guessed**: the dump's own
+     `overall`/`talent` fields on `players_scouted_ratings` are real,
+     populated numbers but on a scale that doesn't match a 20-80-ish grade
+     (146/164 for a real rookie catcher) — likely some other internal
+     composite. Confirmed this costs nothing functionally:
+     `lib/rating-engine.ts`'s own top comment already says the site's real
+     Overall/Potential are derived from the individual tool grades, never
+     this raw field.
+   - **Verified against the live database, not just a clean run**: full row
+     counts confirmed for every table (17,438 players/contracts/ratings,
+     89,245/67,531/61,032 batting/pitching/fielding stat lines, 356 teams ×
+     2 for batting+pitching stats), plus a real query-layer check —
+     `getOrgTeams(2)` returns real Duud team data end-to-end; every
+     player-facing function (`getTopPlayers`, `getFreeAgents`,
+     `getPlayerDetail`, `getOrgMinorsPlayers`, `getTeamRankings`) correctly
+     fails on a missing `player_computed` row, exactly as expected — that
+     table is Step 6's job (Duud's own calibration), not yet run. Nothing
+     will render on any Duud page until Step 6 exists; that's the correct,
+     expected state at this point, not a bug.
 6. Duud's own `rating_weights`/calibration, computed fresh against its own
    player pool (never inherited from TBL's tuned numbers).
 7. Duud goes live at `/Duud/*`.

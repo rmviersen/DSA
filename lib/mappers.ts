@@ -4,11 +4,15 @@ import type { RawRow } from "./statsplus-client.js";
 // StatsPlus CSVs use blank string for null, "0"/"1" for booleans. These
 // helpers make that explicit instead of letting bad data silently become 0/false.
 
-const int = (v: string | undefined): number | null => (v === undefined || v === "" ? null : parseInt(v, 10));
-const num = (v: string | undefined): number | null => (v === undefined || v === "" ? null : parseFloat(v));
-const bool = (v: string | undefined): boolean | null => (v === undefined || v === "" ? null : v === "1" || v.toLowerCase() === "true");
-const str = (v: string | undefined): string | null => (v === undefined || v === "" ? null : v);
-const date = (v: string | undefined): string | null => (v === undefined || v === "" || v === "0" ? null : v);
+// Exported (2026-09-11) so the Duud SQL-dump mappers can reuse the exact
+// same coercion rules instead of a second copy -- both sources represent
+// null/blank the same way (undefined or an empty string), so one
+// implementation covers both.
+export const int = (v: string | undefined): number | null => (v === undefined || v === "" ? null : parseInt(v, 10));
+export const num = (v: string | undefined): number | null => (v === undefined || v === "" ? null : parseFloat(v));
+export const bool = (v: string | undefined): boolean | null => (v === undefined || v === "" ? null : v === "1" || v.toLowerCase() === "true");
+export const str = (v: string | undefined): string | null => (v === undefined || v === "" ? null : v);
+export const date = (v: string | undefined): string | null => (v === undefined || v === "" || v === "0" ? null : v);
 
 // --- reference / current-state tables --------------------------------------
 
