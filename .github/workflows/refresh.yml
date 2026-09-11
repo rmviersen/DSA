@@ -58,6 +58,20 @@ jobs:
       # A scheduled tick only proceeds if new data was actually found -- most
       # ticks stop here. A manual workflow_dispatch always proceeds (forcing
       # a run doesn't make sense if it's gated on the same check).
+      #
+      # This one step is the whole pipeline, not just the raw pull --
+      # refresh.ts's own downstream chain already runs compute-ratings.ts,
+      # compute-team-ratings.ts, compute-fielding-weights.ts, every weight-
+      # tuning regression, scan-market-contracts.ts, and the trade-block/
+      # -history scrapes internally (see its own file for the full list).
+      # Two more explicit "Compute player ratings"/"Compute team ratings"
+      # steps used to run those same two scripts again right after this one
+      # -- removed 2026-09-11, confirmed pure redundancy (refresh.ts had
+      # already grown its own internal chain by the time those were added
+      # and never got cleaned up) that silently doubled real compute cost
+      # every successful cycle, and would have been skipped entirely (no
+      # continue-on-error/if: failure()) had this step ever failed partway
+      # through its own internal chain.
       - name: Refresh from StatsPlus
         if: steps.check.outputs.new_data == 'true' || github.event_name == 'workflow_dispatch'
         env:
@@ -66,17 +80,3 @@ jobs:
           STATSPLUS_BASE_URL: https://atl-02.statsplus.net/thebigleague/api
           STATSPLUS_API_TOKEN: ${{ secrets.STATSPLUS_API_TOKEN }}
         run: npm run refresh
-
-      - name: Compute player ratings
-        if: steps.check.outputs.new_data == 'true' || github.event_name == 'workflow_dispatch'
-        env:
-          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
-          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
-        run: npm run compute-ratings
-
-      - name: Compute team ratings
-        if: steps.check.outputs.new_data == 'true' || github.event_name == 'workflow_dispatch'
-        env:
-          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
-          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
-        run: npm run compute-team-ratings
