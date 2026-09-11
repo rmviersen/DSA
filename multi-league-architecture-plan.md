@@ -254,10 +254,9 @@ one cookie either unlocks *everything* or you're a guest restricted to
 `GUEST_ALLOWED_PATHS` (currently just `/TBL/prospects` and `/login`). Two
 real questions this doesn't answer on its own:
 
-1. **Does the same owner cookie unlock both leagues?** Almost certainly yes
-   (Rees is the one owner of the whole platform) — flagging only because the
-   code currently has no concept of "owner of league X specifically," and I
-   want to confirm that's not actually wanted before building it that way.
+1. **Does the same owner cookie unlock both leagues? — confirmed
+   (2026-09-10, Rees): yes.** One global login, same as today — no
+   per-league "owner of Duud specifically" concept. Nothing to build here.
 2. **Does Duud get a public guest tier at all? — decided (2026-09-10, Rees):**
    no. Duud is fully private/owner-only, no guest allowlist entries at all.
    `GUEST_ALLOWED_PATHS` stays effectively `["/TBL/prospects", "/login"]` —
@@ -286,6 +285,7 @@ where the whole site is down while the migration runs.
   CSV route (§1).
 - Root `/` redirects into `/TBL/players` (§4).
 - Duud is fully private, no guest tier at all (§5).
+- The owner cookie is one global login for both leagues, not per-league (§5).
 
 **Still open — needed before the steps in §8 that depend on them:**
 1. **Does Duud have its own "my team" org**, the way TBL has OKC (org 15)?
@@ -439,8 +439,18 @@ than one giant change:
      — `resolveLeagueId("TBL")` → `getPlayerDetail(leagueId, playerId)` —
      against the live DB in a one-off script (deleted after use), which
      returned real bio/ratings/computed/history data for a real player.
-4. Auth: per-league `GUEST_ALLOWED_PATHS`, confirmed against the answers in
-   §7.
+4. ✅ **Done, 2026-09-10.** Auth: confirmed against the answers in §7 that
+   **no code change was actually needed.** `middleware.ts`'s guest gate
+   already redirects anything not on `GUEST_ALLOWED_PATHS` to
+   `/TBL/prospects` — since Duud gets zero entries added to that list
+   (confirmed §5), any guest request under `/Duud/*` already falls into
+   that same "not allowed" branch and bounces correctly, verified live
+   against a dev server for both `/Duud` and `/Duud/players` (neither
+   route exists yet — middleware still intercepts and redirects correctly
+   before Next tries to resolve a page). Also confirmed with Rees: one
+   global owner login covers both leagues, no per-league "owner of Duud"
+   concept — so nothing needed there either. Only a comment added to
+   `middleware.ts` documenting both confirmations.
 5. Duud ingestion: `OotpSqlDumpAdapter`, once a real sample dump is in hand.
 6. Duud's own `rating_weights`/calibration, computed fresh against its own
    player pool (never inherited from TBL's tuned numbers).

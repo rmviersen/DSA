@@ -18,6 +18,18 @@ import { OWNER_COOKIE_NAME, PREVIEW_GUEST_COOKIE_NAME, expectedOwnerCookieValue 
 // served from app/TBL/prospects/page.tsx (the old location) or
 // app/[league]/prospects/page.tsx matched with league="TBL" (the new one).
 // Duud gets no entries here at all per Rees's spec -- it has no guest tier.
+//
+// Step 4 of the multi-league plan (2026-09-10): confirmed this needs no
+// code change at all. A guest request to anything under /Duud/* already
+// fails the isAllowed check below (no /Duud entry exists) and falls
+// through to the same /TBL/prospects redirect every other disallowed path
+// gets -- verified directly against a live dev server for both /Duud and
+// /Duud/players (neither route exists yet; middleware still intercepts
+// and redirects correctly before Next ever tries to resolve a page). Also
+// confirmed with Rees: the owner cookie is a single global login, not
+// per-league -- he's the sole owner of the whole platform, so once it
+// unlocks, it unlocks both TBL and Duud identically. No separate
+// "owner of Duud" concept is planned.
 const GUEST_ALLOWED_PATHS = ["/TBL/prospects", "/login"];
 
 export async function middleware(req: NextRequest) {
