@@ -3,6 +3,7 @@ import {
   type RoleRepresentationRow, type RoleLevelBenchmarkRow,
 } from "../../lib/queries";
 import { levelLabel, CANONICAL_LEVELS } from "../../lib/display-helpers";
+import { getDefaultLeagueId } from "../../lib/league";
 
 export const dynamic = "force-dynamic";
 
@@ -171,14 +172,15 @@ function WeightRow({ label, value }: { label: string; value: number | string | n
 }
 
 export default async function GlossaryPage() {
+  const leagueId = await getDefaultLeagueId();
   const [benchmarks, battingBenchmarks, fieldingBenchmarks, weights, roleRep, handSplits, calibration] = await Promise.all([
-    getRoleLevelBenchmarks("overall"),
-    getRoleLevelBenchmarks("batting"),
-    getRoleLevelBenchmarks("fielding"),
-    getActiveWeightSet(),
-    getRoleRepresentation(ROLE_REP_LIMIT),
-    getHandednessSplits(),
-    getCalibrationAnchor(),
+    getRoleLevelBenchmarks(leagueId, "overall"),
+    getRoleLevelBenchmarks(leagueId, "batting"),
+    getRoleLevelBenchmarks(leagueId, "fielding"),
+    getActiveWeightSet(leagueId),
+    getRoleRepresentation(leagueId, ROLE_REP_LIMIT),
+    getHandednessSplits(leagueId),
+    getCalibrationAnchor(leagueId),
   ]);
   const { byOverall: roleRepByOverall, byProspectPotential: roleRepByProspectPotential } = roleRep;
 

@@ -1,4 +1,5 @@
 import { getDraftPickValueCurve, getDraftPickValuePlayers } from "../../../lib/draft-pick-value-query";
+import { getDefaultLeagueId } from "../../../lib/league";
 import DraftPickValueExplorer from "./DraftPickValueExplorer";
 
 export const dynamic = "force-dynamic";
@@ -18,7 +19,8 @@ const pageTitleStyle = {
 } as const;
 
 export default async function DraftPickValuePage() {
-  const [rounds, players] = await Promise.all([getDraftPickValueCurve(), getDraftPickValuePlayers()]);
+  const leagueId = await getDefaultLeagueId();
+  const [rounds, players] = await Promise.all([getDraftPickValueCurve(leagueId), getDraftPickValuePlayers(leagueId)]);
 
   if (rounds.length === 0) {
     return (

@@ -1,10 +1,12 @@
 import { getTopDraftees } from "../../lib/queries";
+import { getDefaultLeagueId } from "../../lib/league";
 import { PlayerTable } from "../_components/PlayerTable";
 
 export const dynamic = "force-dynamic";
 
 export default async function DraftPage() {
-  const { draftYear, rows } = await getTopDraftees();
+  const leagueId = await getDefaultLeagueId();
+  const { draftYear, rows } = await getTopDraftees(leagueId);
 
   return (
     <>

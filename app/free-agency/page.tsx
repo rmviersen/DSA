@@ -1,4 +1,5 @@
 import { getFreeAgents } from "../../lib/free-agency-query";
+import { getDefaultLeagueId } from "../../lib/league";
 import { PlayerTable } from "../_components/PlayerTable";
 
 export const dynamic = "force-dynamic";
@@ -9,7 +10,8 @@ export const dynamic = "force-dynamic";
 // built yet -- see HANDOFF.md's transaction-analysis section.
 
 export default async function FreeAgencyPage() {
-  const { rows, totalRealFreeAgents, totalWithRatings } = await getFreeAgents();
+  const leagueId = await getDefaultLeagueId();
+  const { rows, totalRealFreeAgents, totalWithRatings } = await getFreeAgents(leagueId);
   const missingRatings = totalRealFreeAgents - totalWithRatings;
 
   return (

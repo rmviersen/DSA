@@ -1,5 +1,6 @@
 import { makeSupabaseClient } from "./supabase-client";
 import { roundGrade, levelLabel, teamLogoUrl, effectiveLevel, CANONICAL_LEVELS, injuryStatus } from "./display-helpers";
+import { getDefaultLeagueId } from "./league";
 
 const supabase = makeSupabaseClient();
 
@@ -48,8 +49,8 @@ export async function fetchByIdsChunked<T>(ids: number[], build: (chunk: number[
 // matching player IN PARALLEL (Promise.all) rather than scanning the
 // whole players table -- wall-clock cost is now roughly one round trip,
 // not 46 sequential ones.
-export async function getOrgTeams() {
-  const { data, error } = await supabase.from("teams").select("id,name,nickname").is("parent_team_id", null).order("name");
+export async function getOrgTeams(leagueId: number) {
+  const { data, error } = await supabase.from("teams").select("id,name,nickname").eq("dsa_league_id", leagueId).is("parent_team_id", null).order("name");
   if (error) throw error;
   const candidateTeams = data as { id: number; name: string; nickname: string }[];
 
@@ -59,7 +60,7 @@ export async function getOrgTeams() {
   // real roster.
   const hasPlayersResults = await Promise.all(
     candidateTeams.map(async (t) => {
-      const { data: pd, error: pErr } = await supabase.from("players").select("id").eq("organization_id", t.id).limit(1);
+      const { data: pd, error: pErr } = await supabase.from("players").select("id").eq("dsa_league_id", leagueId).eq("organization_id", t.id).limit(1);
       if (pErr) throw pErr;
       return { id: t.id, hasPlayers: (pd?.length ?? 0) > 0 };
     })
@@ -68,9 +69,9 @@ export async function getOrgTeams() {
   return candidateTeams.filter((t) => validIds.has(t.id));
 }
 
-export async function latestRefreshRunId(): Promise<number> {
+export async function latestRefreshRunId(leagueId: number): Promise<number> {
   const { data, error } = await supabase
-    .from("player_computed").select("refresh_run_id").order("refresh_run_id", { ascending: false }).limit(1).single();
+    .from("player_computed").select("refresh_run_id").eq("dsa_league_id", leagueId).order("refresh_run_id", { ascending: false }).limit(1).single();
   if (error || !data) throw new Error(`No player_computed data found: ${error?.message}`);
   return (data as { refresh_run_id: number }).refresh_run_id;
 }
@@ -79,10 +80,11 @@ export async function latestRefreshRunId(): Promise<number> {
 // distinct from latestRefreshRunId(): this reads refresh_runs directly and
 // tolerates a null game_date (a run whose game-date pull failed shouldn't
 // crash the whole nav), rather than joining through player_computed.
-export async function getLatestGameDate(): Promise<string | null> {
+export async function getLatestGameDate(leagueId: number): Promise<string | null> {
   const { data, error } = await supabase
     .from("refresh_runs")
     .select("game_date")
+    .eq("dsa_league_id", leagueId)
     .eq("status", "succeeded")
     .not("game_date", "is", null)
     .order("id", { ascending: false })
@@ -118,9 +120,9 @@ export interface TeamRankingRow {
 // 10-pitchers by prospect_org_rank; readiness is avg CURRENT Overall of that
 // same top-20 pool (how close the system already is, not its ceiling). Not
 // something invented for this table -- reused as-is.
-export async function getTeamRankings(): Promise<TeamRankingRow[]> {
-  const refreshRunId = await latestRefreshRunId();
-  const orgTeams = await getOrgTeams();
+export async function getTeamRankings(leagueId: number): Promise<TeamRankingRow[]> {
+  const refreshRunId = await latestRefreshRunId(leagueId);
+  const orgTeams = await getOrgTeams(leagueId);
   const teamIds = orgTeams.map((t) => t.id);
   if (teamIds.length === 0) return [];
 
@@ -194,9 +196,9 @@ export async function getTeamRankings(): Promise<TeamRankingRow[]> {
     .sort((a, b) => (a.minorsRank ?? 999) - (b.minorsRank ?? 999));
 }
 
-async function latestDraftClassImportId(): Promise<{ id: number; draft_year: number } | null> {
+async function latestDraftClassImportId(leagueId: number): Promise<{ id: number; draft_year: number } | null> {
   const { data, error } = await supabase
-    .from("draft_class_imports").select("id,draft_year").order("id", { ascending: false }).limit(1).maybeSingle();
+    .from("draft_class_imports").select("id,draft_year").eq("dsa_league_id", leagueId).order("id", { ascending: false }).limit(1).maybeSingle();
   if (error) throw error;
   return data as { id: number; draft_year: number } | null;
 }
@@ -314,8 +316,8 @@ export interface PlayerRow extends RatingsSlice {
 // Exported 2026-09-04 for /free-agency (lib/free-agency-query.ts) to reuse
 // directly via its `playerIds` scope, rather than duplicating this whole
 // player_computed + players + ratings + WAR/AB/IP join.
-export async function fetchComputedPlayers(opts: { orgId?: number; prospectsOnly?: boolean; playerIds?: number[]; limit: number }) {
-  const refreshRunId = await latestRefreshRunId();
+export async function fetchComputedPlayers(opts: { leagueId: number; orgId?: number; prospectsOnly?: boolean; playerIds?: number[]; limit: number }) {
+  const refreshRunId = await latestRefreshRunId(opts.leagueId);
 
   // Org-scoped case: get that org's player IDs first. Cheap -- one org's
   // full roster + minors + international complex is at most a few hundred
@@ -323,7 +325,7 @@ export async function fetchComputedPlayers(opts: { orgId?: number; prospectsOnly
   let orgPlayerIds: number[] | undefined;
   if (opts.orgId) {
     const orgPlayers = await fetchAll<{ id: number }>((from, to) =>
-      supabase.from("players").select("id").eq("organization_id", opts.orgId).order("id").range(from, to) as never
+      supabase.from("players").select("id").eq("dsa_league_id", opts.leagueId).eq("organization_id", opts.orgId).order("id").range(from, to) as never
     );
     orgPlayerIds = orgPlayers.map((p) => p.id);
     if (orgPlayerIds.length === 0) return [];
@@ -403,23 +405,33 @@ export async function fetchComputedPlayers(opts: { orgId?: number; prospectsOnly
   const compNameById = new Map<number, string>();
   if (compPlayerIds.length > 0) {
     const { data: compPlayers, error: compErr } = await supabase
-      .from("players").select("id,first_name,last_name").in("id", compPlayerIds);
+      .from("players").select("id,first_name,last_name").eq("dsa_league_id", opts.leagueId).in("id", compPlayerIds);
     if (compErr) throw compErr;
     (compPlayers as { id: number; first_name: string; last_name: string }[]).forEach((p) =>
       compNameById.set(p.id, `${p.first_name} ${p.last_name}`)
     );
   }
 
-  // Now scoped to just the (at most opts.limit + 50) winning IDs -- fits in
-  // one page/chunk in every realistic case, no more per-500 looping needed.
-  const players = await fetchAll<{ id: number; first_name: string; last_name: string; age: number | null; organization_id: number | null; team_id: number | null; level: number | null; league_id: number | null; draft_year: number | null; draft_round: number | null; draft_overall_pick: number | null; injury_is_injured: boolean | null; is_on_dl: boolean | null; is_on_dl60: boolean | null; injury_left: number | null }>(
-    (from, to) =>
-      supabase.from("players").select("id,first_name,last_name,age,organization_id,team_id,level,league_id,draft_year,draft_round,draft_overall_pick,injury_is_injured,is_on_dl,is_on_dl60,injury_left").in("id", relevantIds).order("id").range(from, to) as never
+  // Real bug found 2026-09-10 while verifying the dsa_league_id threading
+  // work: this comment used to claim "fits in one page/chunk in every
+  // realistic case" -- wrong. getRule5DraftBoard's toDraftIds (every OTHER
+  // org's eligible Rule 5 candidates, confirmed 1,800+ real players
+  // leaguewide) passes through fetchComputedPlayers with a matching
+  // opts.limit, so relevantIds itself can run well past 1,000 -- a plain
+  // `.in("id", relevantIds)` unchunked then blows past PostgREST's ~16KB
+  // URL/header limit (real error: HeadersOverflowError, "Your request URL
+  // is 17145 characters"), same bug class already fixed for the
+  // player_computed fetch above (2026-09-06) but never ported to this one.
+  // fetchByIdsChunked, not fetchAll+.in() -- same fix, same reason.
+  const players = await fetchByIdsChunked<{ id: number; first_name: string; last_name: string; age: number | null; organization_id: number | null; team_id: number | null; level: number | null; league_id: number | null; draft_year: number | null; draft_round: number | null; draft_overall_pick: number | null; injury_is_injured: boolean | null; is_on_dl: boolean | null; is_on_dl60: boolean | null; injury_left: number | null }>(
+    relevantIds,
+    (chunk) =>
+      supabase.from("players").select("id,first_name,last_name,age,organization_id,team_id,level,league_id,draft_year,draft_round,draft_overall_pick,injury_is_injured,is_on_dl,is_on_dl60,injury_left").eq("dsa_league_id", opts.leagueId).in("id", chunk) as never
   );
   const playerById = new Map(players.map((p) => [p.id, p]));
 
   const teams = await fetchAll<{ id: number; name: string; nickname: string }>((from, to) =>
-    supabase.from("teams").select("id,name,nickname").range(from, to) as never
+    supabase.from("teams").select("id,name,nickname").eq("dsa_league_id", opts.leagueId).range(from, to) as never
   );
   const teamById = new Map(teams.map((t) => [t.id, t]));
 
@@ -558,12 +570,12 @@ export async function fetchComputedPlayers(opts: { orgId?: number; prospectsOnly
   return rows;
 }
 
-export function getTopPlayers(orgId?: number) {
-  return fetchComputedPlayers({ orgId, limit: 100 });
+export function getTopPlayers(leagueId: number, orgId?: number) {
+  return fetchComputedPlayers({ leagueId, orgId, limit: 100 });
 }
 
-export function getTopProspects(orgId?: number) {
-  return fetchComputedPlayers({ orgId, prospectsOnly: true, limit: 100 });
+export function getTopProspects(leagueId: number, orgId?: number) {
+  return fetchComputedPlayers({ leagueId, orgId, prospectsOnly: true, limit: 100 });
 }
 
 export interface RoleLevelBenchmarkCell {
@@ -596,11 +608,11 @@ export type RoleLevelBenchmarkMetric = "overall" | "batting" | "fielding";
 // international/complex signees mistagged at level 1) alongside the ~890
 // real active-roster ones, which was dragging several roles' "MLB average"
 // below their own AAA average.
-export async function getRoleLevelBenchmarks(metric: RoleLevelBenchmarkMetric = "overall"): Promise<RoleLevelBenchmarkRow[]> {
-  const refreshRunId = await latestRefreshRunId();
+export async function getRoleLevelBenchmarks(leagueId: number, metric: RoleLevelBenchmarkMetric = "overall"): Promise<RoleLevelBenchmarkRow[]> {
+  const refreshRunId = await latestRefreshRunId(leagueId);
 
   const players = await fetchAll<{ id: number; level: number | null; is_active: boolean | null; league_id: number | null }>((from, to) =>
-    supabase.from("players").select("id,level,is_active,league_id").not("level", "is", null).range(from, to) as never
+    supabase.from("players").select("id,level,is_active,league_id").eq("dsa_league_id", leagueId).not("level", "is", null).range(from, to) as never
   );
   const playerById = new Map(players.map((p) => [p.id, p]));
 
@@ -659,11 +671,11 @@ export interface LevelAgeBenchmarkCell {
   avgAgePitcher: number | null;
   n: number;
 }
-export async function getLevelAgeBenchmarks(): Promise<LevelAgeBenchmarkCell[]> {
-  const refreshRunId = await latestRefreshRunId();
+export async function getLevelAgeBenchmarks(leagueId: number): Promise<LevelAgeBenchmarkCell[]> {
+  const refreshRunId = await latestRefreshRunId(leagueId);
 
   const players = await fetchAll<{ id: number; level: number | null; is_active: boolean | null; league_id: number | null; age: number | null }>((from, to) =>
-    supabase.from("players").select("id,level,is_active,league_id,age").not("level", "is", null).range(from, to) as never
+    supabase.from("players").select("id,level,is_active,league_id,age").eq("dsa_league_id", leagueId).not("level", "is", null).range(from, to) as never
   );
   const playerById = new Map(players.map((p) => [p.id, p]));
 
@@ -744,8 +756,8 @@ export interface ActiveWeightSet {
 // Powers the Glossary page's Weights table -- always reads whatever weight
 // set is currently active, so the page never drifts out of sync with what
 // the rating engine is actually using.
-export async function getActiveWeightSet(): Promise<ActiveWeightSet | null> {
-  const { data, error } = await supabase.from("rating_weights").select("*").eq("is_active", true).maybeSingle();
+export async function getActiveWeightSet(leagueId: number): Promise<ActiveWeightSet | null> {
+  const { data, error } = await supabase.from("rating_weights").select("*").eq("dsa_league_id", leagueId).eq("is_active", true).maybeSingle();
   if (error) throw error;
   return data as ActiveWeightSet | null;
 }
@@ -778,8 +790,8 @@ const LEVEL_ANCHOR_META: Record<number, { label: string; target: number }> = {
 // every refresh (never hand-tuned), so this always reflects what the live
 // Overall/Potential/Prospect Potential numbers were actually calibrated
 // against, not a stale snapshot.
-export async function getCalibrationAnchor(): Promise<CalibrationAnchor> {
-  const refreshRunId = await latestRefreshRunId();
+export async function getCalibrationAnchor(leagueId: number): Promise<CalibrationAnchor> {
+  const refreshRunId = await latestRefreshRunId(leagueId);
   const { data, error } = await supabase
     .from("refresh_runs")
     .select("hitter_overall_mean, hitter_overall_sd, pitcher_overall_mean, pitcher_overall_sd")
@@ -824,8 +836,8 @@ export interface HandednessSplitsDisplay {
 // into the current player_computed rows rather than a hardcoded snapshot.
 // split_id 2 = vs-LHP/vs-LHB, split_id 3 = vs-RHP/vs-RHB (reverse-engineered,
 // not documented by StatsPlus -- see compute-ratings.ts for the same note).
-export async function getHandednessSplits(): Promise<HandednessSplitsDisplay> {
-  const refreshRunId = await latestRefreshRunId();
+export async function getHandednessSplits(leagueId: number): Promise<HandednessSplitsDisplay> {
+  const refreshRunId = await latestRefreshRunId(leagueId);
 
   const { data: yearRow } = await supabase
     .from("player_batting_stats_snapshots").select("year")
@@ -834,7 +846,7 @@ export async function getHandednessSplits(): Promise<HandednessSplitsDisplay> {
   const last3Years = [currentYear - 2, currentYear - 1, currentYear];
 
   const mlbPlayers = await fetchAll<{ id: number }>((from, to) =>
-    supabase.from("players").select("id").eq("level", 1).order("id").range(from, to) as never
+    supabase.from("players").select("id").eq("dsa_league_id", leagueId).eq("level", 1).order("id").range(from, to) as never
   );
   const mlbPlayerIds = mlbPlayers.map((p) => p.id);
 
@@ -901,11 +913,11 @@ const ROLE_ORDER = ["SP", "RP", "C", "1B", "INF", "SS", "COF", "CF", "DH"];
 // pool) -- the index column is the real signal: 100 means proportional
 // representation, meaningfully above/below 100 means the weights are
 // pulling that role up or down relative to how common it actually is.
-export async function getRoleRepresentation(limit = 100): Promise<{
+export async function getRoleRepresentation(leagueId: number, limit = 100): Promise<{
   byOverall: RoleRepresentationRow[];
   byProspectPotential: RoleRepresentationRow[];
 }> {
-  const refreshRunId = await latestRefreshRunId();
+  const refreshRunId = await latestRefreshRunId(leagueId);
 
   const rows = await fetchAll<{ role: string | null; rank: number | null; prospect_rank: number | null }>((from, to) =>
     supabase.from("player_computed").select("role,rank,prospect_rank").eq("refresh_run_id", refreshRunId).range(from, to) as never
@@ -1028,7 +1040,7 @@ export interface ProspectSnapshotOption {
 // actual refresh EVENT, not per player) with a reasonable recency cap,
 // then confirming each candidate actually has a player_computed snapshot
 // via small parallel existence checks -- same pattern as getOrgTeams.
-export async function getProspectSnapshotOptions(): Promise<ProspectSnapshotOption[]> {
+export async function getProspectSnapshotOptions(leagueId: number): Promise<ProspectSnapshotOption[]> {
   // Runs from before game-date tracking existed (runs 4/8) have no in-game
   // date -- excluded from the picker entirely (2026-08-20 decision) rather
   // than shown with a "no game date recorded" fallback label, since a
@@ -1056,6 +1068,7 @@ export async function getProspectSnapshotOptions(): Promise<ProspectSnapshotOpti
   const { data: runsData, error: runsErr } = await supabase
     .from("refresh_runs")
     .select("id,game_date,started_at")
+    .eq("dsa_league_id", leagueId)
     .eq("status", "succeeded")
     .not("game_date", "is", null)
     .order("id", { ascending: false })
@@ -1122,8 +1135,8 @@ export interface ProspectRow extends PlayerRow {
 // production after this had already been 200 for a while).
 export const TOP_PROSPECTS_LIMIT = 200;
 
-export async function getTopProspectsDetailed(orgId?: number, baselineRefreshRunId?: number): Promise<ProspectRow[]> {
-  const base = await fetchComputedPlayers({ orgId, prospectsOnly: true, limit: TOP_PROSPECTS_LIMIT });
+export async function getTopProspectsDetailed(leagueId: number, orgId?: number, baselineRefreshRunId?: number): Promise<ProspectRow[]> {
+  const base = await fetchComputedPlayers({ leagueId, orgId, prospectsOnly: true, limit: TOP_PROSPECTS_LIMIT });
   if (base.length === 0) return [];
   const ids = base.map((r) => r.player_id);
   // "Most recent draft class" for the highlight, fixed 2026-08-28: this used
@@ -1137,7 +1150,7 @@ export async function getTopProspectsDetailed(orgId?: number, baselineRefreshRun
   // StatsPlus reflects the real in-game draft). Now derived from the actual
   // prospect pool being shown instead of the draft-pool-import table.
   const latestDraftYear = base.reduce<number | null>((max, r) => (r.draft_year !== null && (max === null || r.draft_year > max) ? r.draft_year : max), null);
-  const refreshRunId = await latestRefreshRunId();
+  const refreshRunId = await latestRefreshRunId(leagueId);
 
   // Hand/AI-written blurbs, per prospect-bio-style-guide.md -- occasional
   // batch writing pass, not recomputed live. Only covers the original top
@@ -1150,7 +1163,7 @@ export async function getTopProspectsDetailed(orgId?: number, baselineRefreshRun
   for (let i = 0; i < ids.length; i += 500) {
     const chunk = ids.slice(i, i + 500);
     const { data, error } = await supabase.from("prospect_bios")
-      .select("player_id,bio_text,refresh_run_id").in("player_id", chunk);
+      .select("player_id,bio_text,refresh_run_id").eq("dsa_league_id", leagueId).in("player_id", chunk);
     if (error) throw error;
     (data as never as { player_id: number; bio_text: string; refresh_run_id: number }[])
       .forEach((b) => bioById.set(b.player_id, b));
@@ -1184,7 +1197,7 @@ export async function getTopProspectsDetailed(orgId?: number, baselineRefreshRun
   }
 
   const playersExtra = await fetchAll<{ id: number; level: number | null; league_id: number | null; team_id: number | null; organization_id: number | null }>((from, to) =>
-    supabase.from("players").select("id,level,league_id,team_id,organization_id").in("id", ids).range(from, to) as never
+    supabase.from("players").select("id,level,league_id,team_id,organization_id").eq("dsa_league_id", leagueId).in("id", ids).range(from, to) as never
   );
   // effectiveLevel, not raw p.level -- players.level=4 alone can't tell a
   // real A+ affiliate from a real A affiliate (see display-helpers.ts's
@@ -1196,7 +1209,7 @@ export async function getTopProspectsDetailed(orgId?: number, baselineRefreshRun
   const orgTeamIds = [...new Set(playersExtra.map((p) => p.organization_id).filter((x): x is number => x !== null))];
   const orgTeams = orgTeamIds.length
     ? await fetchAll<{ id: number; name: string; nickname: string }>((from, to) =>
-        supabase.from("teams").select("id,name,nickname").in("id", orgTeamIds).range(from, to) as never
+        supabase.from("teams").select("id,name,nickname").eq("dsa_league_id", leagueId).in("id", orgTeamIds).range(from, to) as never
       )
     : [];
   const orgTeamById = new Map(orgTeams.map((t) => [t.id, t]));
@@ -1389,16 +1402,16 @@ export async function getTopProspectsDetailed(orgId?: number, baselineRefreshRun
   });
 }
 
-export async function getTopDraftees(): Promise<{ draftYear: number | null; rows: PlayerRow[] }> {
-  const latest = await latestDraftClassImportId();
+export async function getTopDraftees(leagueId: number): Promise<{ draftYear: number | null; rows: PlayerRow[] }> {
+  const latest = await latestDraftClassImportId(leagueId);
   if (!latest) return { draftYear: null, rows: [] };
 
   const members = await fetchAll<{ player_id: number }>((from, to) =>
-    supabase.from("draft_class_pool_members").select("player_id").eq("draft_class_import_id", latest.id).range(from, to) as never
+    supabase.from("draft_class_pool_members").select("player_id").eq("dsa_league_id", leagueId).eq("draft_class_import_id", latest.id).range(from, to) as never
   );
   const ids = members.map((m) => m.player_id);
   if (ids.length === 0) return { draftYear: latest.draft_year, rows: [] };
 
-  const rows = await fetchComputedPlayers({ playerIds: ids, limit: 100 });
+  const rows = await fetchComputedPlayers({ leagueId, playerIds: ids, limit: 100 });
   return { draftYear: latest.draft_year, rows };
 }

@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { getOptimalLineups, type LineupSlot, type LineupSlotPlayer } from "@/lib/lineup-optimizer-query";
 import { gradeStyle } from "@/lib/display-helpers";
+import { getDefaultLeagueId } from "@/lib/league";
 
 export const dynamic = "force-dynamic";
 
@@ -80,7 +81,8 @@ function LineupTable({ slots, sideLabel }: { slots: LineupSlot[]; sideLabel: str
 export default async function LineupPage({ searchParams }: { searchParams: Promise<{ org?: string }> }) {
   const params = await searchParams;
   const orgId = params.org ? Number(params.org) : DEFAULT_ORG_ID;
-  const { vsLHP, vsRHP } = await getOptimalLineups(orgId);
+  const leagueId = await getDefaultLeagueId();
+  const { vsLHP, vsRHP } = await getOptimalLineups(leagueId, orgId);
 
   return (
     <>

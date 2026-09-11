@@ -60,10 +60,10 @@ export interface TrainingContractPoint {
   firstObservedAt: string;
 }
 
-export async function getLatestMarketRateCurves(): Promise<MarketRateCurve[]> {
+export async function getLatestMarketRateCurves(leagueId: number): Promise<MarketRateCurve[]> {
   const supabase = makeSupabaseClient();
   const { data: latestRow } = await supabase
-    .from("market_rate_curves").select("refresh_run_id").order("refresh_run_id", { ascending: false }).limit(1).maybeSingle();
+    .from("market_rate_curves").select("refresh_run_id").eq("dsa_league_id", leagueId).order("refresh_run_id", { ascending: false }).limit(1).maybeSingle();
   if (!latestRow) return [];
   const refreshRunId = (latestRow as { refresh_run_id: number }).refresh_run_id;
   const { data, error } = await supabase.from("market_rate_curves").select("*").eq("refresh_run_id", refreshRunId);
@@ -83,10 +83,10 @@ export async function getLatestMarketRateCurves(): Promise<MarketRateCurve[]> {
   });
 }
 
-export async function getLatestRoleMultipliers(): Promise<RoleMultiplier[]> {
+export async function getLatestRoleMultipliers(leagueId: number): Promise<RoleMultiplier[]> {
   const supabase = makeSupabaseClient();
   const { data: latestRow } = await supabase
-    .from("market_rate_role_multipliers").select("refresh_run_id").order("refresh_run_id", { ascending: false }).limit(1).maybeSingle();
+    .from("market_rate_role_multipliers").select("refresh_run_id").eq("dsa_league_id", leagueId).order("refresh_run_id", { ascending: false }).limit(1).maybeSingle();
   if (!latestRow) return [];
   const refreshRunId = (latestRow as { refresh_run_id: number }).refresh_run_id;
   const { data, error } = await supabase.from("market_rate_role_multipliers").select("*").eq("refresh_run_id", refreshRunId);
@@ -120,23 +120,24 @@ export async function getLatestRoleMultipliers(): Promise<RoleMultiplier[]> {
 // through them was fit on the NEW one -- a real, visible mismatch, even
 // though the curve itself (fit inside compute-market-rates.ts, not here)
 // was already correct.
-export async function getTrainingContracts(): Promise<TrainingContractPoint[]> {
+export async function getTrainingContracts(leagueId: number): Promise<TrainingContractPoint[]> {
   const supabase = makeSupabaseClient();
   const { data, error } = await supabase
     .from("market_rate_training_contracts")
-    .select("player_id, overall, role, player_type, aav, season_year, years, first_observed_at");
+    .select("player_id, overall, role, player_type, aav, season_year, years, first_observed_at")
+    .eq("dsa_league_id", leagueId);
   if (error) throw error;
   const rows = data as { player_id: number; overall: number; role: string; player_type: string; aav: number; season_year: number; years: number; first_observed_at: string }[];
   const playerIds = [...new Set(rows.map((r) => r.player_id))];
   const nameById = new Map<number, string>();
   const currentOverallById = new Map<number, number>();
   const { data: latestRun } = await supabase
-    .from("player_computed").select("refresh_run_id").order("refresh_run_id", { ascending: false }).limit(1).maybeSingle();
+    .from("player_computed").select("refresh_run_id").eq("dsa_league_id", leagueId).order("refresh_run_id", { ascending: false }).limit(1).maybeSingle();
   const refreshRunId = (latestRun as { refresh_run_id: number } | null)?.refresh_run_id ?? null;
   const CHUNK = 500;
   for (let i = 0; i < playerIds.length; i += CHUNK) {
     const chunk = playerIds.slice(i, i + CHUNK);
-    const { data: playerRows, error: playerErr } = await supabase.from("players").select("id, first_name, last_name").in("id", chunk);
+    const { data: playerRows, error: playerErr } = await supabase.from("players").select("id, first_name, last_name").eq("dsa_league_id", leagueId).in("id", chunk);
     if (playerErr) throw playerErr;
     for (const p of playerRows as { id: number; first_name: string | null; last_name: string | null }[]) {
       nameById.set(p.id, [p.first_name, p.last_name].filter(Boolean).join(" ") || `Player ${p.id}`);
@@ -196,11 +197,12 @@ export interface OffseasonImpactResult {
 // file) are included in the training pool or not. "currentSeasonYear" is
 // derived from the data itself (the max season_year present), not assumed --
 // so this keeps meaning "this offseason" correctly as seasons roll forward.
-export async function getOffseasonMarketImpact(): Promise<OffseasonImpactResult> {
+export async function getOffseasonMarketImpact(leagueId: number): Promise<OffseasonImpactResult> {
   const supabase = makeSupabaseClient();
   const { data, error } = await supabase
     .from("market_rate_training_contracts")
-    .select("player_id, role, player_type, aav, season_year");
+    .select("player_id, role, player_type, aav, season_year")
+    .eq("dsa_league_id", leagueId);
   if (error) throw error;
   const rows = data as { player_id: number; role: string; player_type: "hitter" | "pitcher"; aav: number; season_year: number }[];
   if (rows.length === 0) return { currentSeasonYear: 0, curves: [] };
@@ -210,7 +212,7 @@ export async function getOffseasonMarketImpact(): Promise<OffseasonImpactResult>
   const playerIds = [...new Set(rows.map((r) => r.player_id))];
   const currentOverallById = new Map<number, number>();
   const { data: latestRun } = await supabase
-    .from("player_computed").select("refresh_run_id").order("refresh_run_id", { ascending: false }).limit(1).maybeSingle();
+    .from("player_computed").select("refresh_run_id").eq("dsa_league_id", leagueId).order("refresh_run_id", { ascending: false }).limit(1).maybeSingle();
   const refreshRunId = (latestRun as { refresh_run_id: number } | null)?.refresh_run_id ?? null;
   if (refreshRunId !== null) {
     const CHUNK = 500;

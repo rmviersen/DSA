@@ -1,4 +1,5 @@
 import { getOrgTeams, getTopProspectsDetailed, getProspectSnapshotOptions, getTeamRankings, TOP_PROSPECTS_LIMIT } from "../../lib/queries";
+import { getDefaultLeagueId } from "../../lib/league";
 import { ProspectFilters } from "./ProspectFilters";
 import { ProspectTable } from "./ProspectTable";
 import { TeamRankingsTable } from "./TeamRankingsTable";
@@ -42,11 +43,12 @@ export async function FarmSystemReportBody({
   // currently previewing as one, who only get the external StatsPlus link.
   showInternalLinks: boolean;
 }) {
+  const leagueId = await getDefaultLeagueId();
   const [teams, allSnapshots, rows, teamRankings] = await Promise.all([
-    getOrgTeams(),
-    getProspectSnapshotOptions(),
-    getTopProspectsDetailed(orgId, baselineRefreshRunId),
-    showRankings ? getTeamRankings() : Promise.resolve([]),
+    getOrgTeams(leagueId),
+    getProspectSnapshotOptions(leagueId),
+    getTopProspectsDetailed(leagueId, orgId, baselineRefreshRunId),
+    showRankings ? getTeamRankings(leagueId) : Promise.resolve([]),
   ]);
   // Comparing the current snapshot to itself is meaningless (always zero) --
   // drop it from the picker. The current snapshot is whichever one is newest.

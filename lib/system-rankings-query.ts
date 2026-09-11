@@ -19,9 +19,9 @@ async function fetchAll<T>(build: (from: number, to: number) => PromiseLike<{ da
   return all;
 }
 
-async function latestRefreshRunId(): Promise<number> {
+async function latestRefreshRunId(leagueId: number): Promise<number> {
   const { data, error } = await supabase
-    .from("player_computed").select("refresh_run_id").order("refresh_run_id", { ascending: false }).limit(1).single();
+    .from("player_computed").select("refresh_run_id").eq("dsa_league_id", leagueId).order("refresh_run_id", { ascending: false }).limit(1).single();
   if (error || !data) throw new Error(`No player_computed data found: ${error?.message}`);
   return (data as { refresh_run_id: number }).refresh_run_id;
 }
@@ -111,11 +111,11 @@ export interface SystemRankingCardRow {
   bioDate: string | null;
 }
 
-export async function getSystemRankingsDetailed(): Promise<SystemRankingCardRow[]> {
-  const orgTeams = await getOrgTeams();
+export async function getSystemRankingsDetailed(leagueId: number): Promise<SystemRankingCardRow[]> {
+  const orgTeams = await getOrgTeams(leagueId);
   const teamIds = orgTeams.map((t) => t.id);
   if (teamIds.length === 0) return [];
-  const refreshRunId = await latestRefreshRunId();
+  const refreshRunId = await latestRefreshRunId(leagueId);
 
   interface TeamComputedRow {
     team_id: number; minors_rank: number | null; batting_prospect_rank: number | null; pitching_prospect_rank: number | null;
@@ -164,7 +164,7 @@ export async function getSystemRankingsDetailed(): Promise<SystemRankingCardRow[
   const playersById = new Map<number, { first_name: string; last_name: string; organization_id: number | null }>();
   for (let i = 0; i < prospectIds.length; i += 500) {
     const chunk = prospectIds.slice(i, i + 500);
-    const { data, error } = await supabase.from("players").select("id,first_name,last_name,organization_id").in("id", chunk);
+    const { data, error } = await supabase.from("players").select("id,first_name,last_name,organization_id").eq("dsa_league_id", leagueId).in("id", chunk);
     if (error) throw error;
     (data as { id: number; first_name: string; last_name: string; organization_id: number | null }[])
       .forEach((p) => playersById.set(p.id, p));
@@ -193,7 +193,7 @@ export async function getSystemRankingsDetailed(): Promise<SystemRankingCardRow[
   // in getTopProspectsDetailed -- see org_system_bios's own comment for why
   // this ships empty and gets filled in by a separate writing pass.
   const { data: bioData, error: bioErr } = await supabase.from("org_system_bios")
-    .select("organization_id,bio_text,refresh_run_id").in("organization_id", teamIds);
+    .select("organization_id,bio_text,refresh_run_id").eq("dsa_league_id", leagueId).in("organization_id", teamIds);
   if (bioErr) throw bioErr;
   const bioByOrg = new Map((bioData as { organization_id: number; bio_text: string; refresh_run_id: number }[])
     .map((b) => [b.organization_id, b]));

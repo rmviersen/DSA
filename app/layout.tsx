@@ -2,6 +2,7 @@ import { Fraunces, Inter } from "next/font/google";
 import { ConditionalNav } from "./_components/ConditionalNav";
 import { getLatestGameDate } from "../lib/queries";
 import { checkOwnerState } from "../lib/owner-cookie";
+import { getDefaultLeagueId } from "../lib/league";
 import "./globals.css";
 import { cn } from "@/lib/utils";
 
@@ -65,7 +66,8 @@ export default async function RootLayout({ children }: { children: React.ReactNo
   // module creates a Supabase client using server-only secrets at import
   // time). A string prop passed down from a Server Component parent has no
   // such restriction.
-  const [latestGameDate, ownerState] = await Promise.all([getLatestGameDate(), checkOwnerState()]);
+  const leagueId = await getDefaultLeagueId();
+  const [latestGameDate, ownerState] = await Promise.all([getLatestGameDate(leagueId), checkOwnerState()]);
 
   return (
     <html lang="en" className={cn(displayFont.variable, bodyFont.variable)} suppressHydrationWarning>

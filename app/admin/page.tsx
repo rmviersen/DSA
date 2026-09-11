@@ -1,4 +1,5 @@
 import { getRecentRefreshRuns, getFreshnessCheck, getRecentPlatformEvents } from "../../lib/admin-queries";
+import { getDefaultLeagueId } from "../../lib/league";
 
 export const dynamic = "force-dynamic";
 
@@ -51,10 +52,11 @@ function StatusPill({ ok, label }: { ok: boolean; label: string }) {
 }
 
 export default async function AdminPage() {
+  const leagueId = await getDefaultLeagueId();
   const [runs, freshness, events] = await Promise.all([
-    getRecentRefreshRuns(5),
-    getFreshnessCheck(),
-    getRecentPlatformEvents(20),
+    getRecentRefreshRuns(leagueId, 5),
+    getFreshnessCheck(leagueId),
+    getRecentPlatformEvents(leagueId, 20),
   ]);
   const latestRun = runs[0] as (typeof runs)[number] | undefined;
 

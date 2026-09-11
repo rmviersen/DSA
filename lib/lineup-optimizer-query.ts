@@ -181,8 +181,8 @@ function buildLineup(candidates: Candidate[], hand: "l" | "r"): LineupSlot[] {
   });
 }
 
-export async function getOptimalLineups(orgId: number): Promise<OptimalLineups> {
-  const refreshRunId = await latestRefreshRunId();
+export async function getOptimalLineups(leagueId: number, orgId: number): Promise<OptimalLineups> {
+  const refreshRunId = await latestRefreshRunId(leagueId);
 
   // Real active MLB roster only -- same organization_id+team_id+level=1
   // filter org-minors-query.ts already established for this exact "MLB and
@@ -197,6 +197,7 @@ export async function getOptimalLineups(orgId: number): Promise<OptimalLineups> 
     supabase
       .from("players")
       .select("id,first_name,last_name,injury_is_injured,is_on_dl,is_on_dl60,injury_left")
+      .eq("dsa_league_id", leagueId)
       .eq("organization_id", orgId).eq("team_id", orgId).eq("level", 1).eq("is_active", true)
       .gt("league_id", 0)
       .range(from, to) as never
@@ -215,7 +216,7 @@ export async function getOptimalLineups(orgId: number): Promise<OptimalLineups> 
       .from("player_ratings_snapshots")
       .select("player_id,cntct_l,cntct_r,gap_l,gap_r,pow_l,pow_r,eye_l,eye_r,speed,pos_c,pos_1b,pos_2b,pos_3b,pos_ss,pos_lf,pos_cf,pos_rf,pot_c,pot_1b,pot_2b,pot_3b,pot_ss,pot_lf,pot_cf,pot_rf")
       .eq("refresh_run_id", refreshRunId).in("player_id", ids),
-    supabase.from("rating_weights").select("contact,gap,power,eye,speed").eq("is_active", true).single(),
+    supabase.from("rating_weights").select("contact,gap,power,eye,speed").eq("dsa_league_id", leagueId).eq("is_active", true).single(),
   ]);
   if (compErr) throw compErr;
   if (ratErr) throw ratErr;

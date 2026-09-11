@@ -1,6 +1,7 @@
 import { getSystemRankingsDetailed } from "@/lib/system-rankings-query";
 import { SystemRankingsCards } from "@/app/_components/SystemRankingsCards";
 import { checkOwnerState } from "@/lib/owner-cookie";
+import { getDefaultLeagueId } from "@/lib/league";
 
 export const dynamic = "force-dynamic";
 
@@ -18,8 +19,9 @@ export const dynamic = "force-dynamic";
 // still power /prospects' compact side-by-side rankings column, which
 // doesn't have room for these much taller cards.
 export default async function SystemRankingsPage() {
+  const leagueId = await getDefaultLeagueId();
   const [rankings, { isRealOwner, isPreviewingGuest }] = await Promise.all([
-    getSystemRankingsDetailed(),
+    getSystemRankingsDetailed(leagueId),
     checkOwnerState(),
   ]);
   // Same owner/guest link semantics as /TBL/prospects's own page.tsx --

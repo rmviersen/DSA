@@ -9,9 +9,9 @@ import { levelLabel, effectiveLevel, injuryStatus } from "./display-helpers";
 
 const supabase = makeSupabaseClient();
 
-async function latestRefreshRunId(): Promise<number> {
+async function latestRefreshRunId(leagueId: number): Promise<number> {
   const { data, error } = await supabase
-    .from("player_computed").select("refresh_run_id").order("refresh_run_id", { ascending: false }).limit(1).single();
+    .from("player_computed").select("refresh_run_id").eq("dsa_league_id", leagueId).order("refresh_run_id", { ascending: false }).limit(1).single();
   if (error || !data) throw new Error(`No player_computed data found: ${error?.message}`);
   return (data as { refresh_run_id: number }).refresh_run_id;
 }
@@ -172,13 +172,13 @@ export interface PlayerDetail {
   statsPlusUrl: string;
 }
 
-export async function getPlayerDetail(playerId: number): Promise<PlayerDetail | null> {
-  const refreshRunId = await latestRefreshRunId();
+export async function getPlayerDetail(leagueId: number, playerId: number): Promise<PlayerDetail | null> {
+  const refreshRunId = await latestRefreshRunId(leagueId);
 
   const { data: pRow, error: pErr } = await supabase
     .from("players")
     .select("id,first_name,last_name,age,date_of_birth,bats,throws,height,weight,team_id,organization_id,league_id,level,draft_year,draft_round,draft_overall_pick,draft_team_id,retired,free_agent,hall_of_fame,injury_is_injured,is_on_dl,is_on_dl60,injury_left")
-    .eq("id", playerId).maybeSingle();
+    .eq("dsa_league_id", leagueId).eq("id", playerId).maybeSingle();
   if (pErr) throw pErr;
   if (!pRow) return null;
   const p = pRow as {
@@ -222,7 +222,7 @@ export async function getPlayerDetail(playerId: number): Promise<PlayerDetail | 
   const { data: batDataAll, error: batErr } = await supabase
     .from("player_batting_stats_snapshots")
     .select("year,level_id,league_id,team_id,g,ab,h,d,t,hr,r,rbi,bb,k,sb,cs,war,stint,refresh_run_id")
-    .eq("player_id", playerId).eq("split_id", 1);
+    .eq("dsa_league_id", leagueId).eq("player_id", playerId).eq("split_id", 1);
   if (batErr) throw batErr;
   const batData = latestPerStint((batDataAll ?? []) as { year: number; level_id: number | null; league_id: number | null; team_id: number | null; stint: number | null; refresh_run_id: number; g: number | null; ab: number | null; h: number | null; d: number | null; t: number | null; hr: number | null; r: number | null; rbi: number | null; bb: number | null; k: number | null; sb: number | null; cs: number | null; war: number | null }[]);
   // Column names here are the pitching table's OWN convention, not the
@@ -235,7 +235,7 @@ export async function getPlayerDetail(playerId: number): Promise<PlayerDetail | 
   const { data: pitDataAll, error: pitErr } = await supabase
     .from("player_pitching_stats_snapshots")
     .select("year,level_id,league_id,team_id,g,gs,ip,er,w,l,s,k,bb,ha,hra,war,stint,refresh_run_id")
-    .eq("player_id", playerId).eq("split_id", 1);
+    .eq("dsa_league_id", leagueId).eq("player_id", playerId).eq("split_id", 1);
   if (pitErr) throw pitErr;
   const pitData = latestPerStint((pitDataAll ?? []) as { year: number; level_id: number | null; league_id: number | null; team_id: number | null; stint: number | null; refresh_run_id: number; g: number | null; gs: number | null; ip: number | null; er: number | null; w: number | null; l: number | null; s: number | null; k: number | null; bb: number | null; ha: number | null; hra: number | null; war: number | null }[]);
 
@@ -243,7 +243,7 @@ export async function getPlayerDetail(playerId: number): Promise<PlayerDetail | 
   const teamIds = [...new Set([p.team_id, p.draft_team_id, ...historyTeamIds])].filter((x): x is number => x !== null);
   const teamById = new Map<number, { name: string; nickname: string }>();
   if (teamIds.length > 0) {
-    const { data: teams, error: teamsErr } = await supabase.from("teams").select("id,name,nickname").in("id", teamIds);
+    const { data: teams, error: teamsErr } = await supabase.from("teams").select("id,name,nickname").eq("dsa_league_id", leagueId).in("id", teamIds);
     if (teamsErr) throw teamsErr;
     (teams as { id: number; name: string; nickname: string }[]).forEach((t) => teamById.set(t.id, t));
   }
@@ -262,7 +262,7 @@ export async function getPlayerDetail(playerId: number): Promise<PlayerDetail | 
   // prospect_bios is one row per player (isOneToOne on player_id), not
   // scoped to a refresh run the way the snapshot tables are -- its own
   // refresh_run_id column just records provenance for the bioStale check.
-  const { data: bioRow } = await supabase.from("prospect_bios").select("bio_text,refresh_run_id").eq("player_id", playerId).maybeSingle();
+  const { data: bioRow } = await supabase.from("prospect_bios").select("bio_text,refresh_run_id").eq("dsa_league_id", leagueId).eq("player_id", playerId).maybeSingle();
 
   const r = ratRow as Record<string, unknown> | null;
   const c = compRow as PlayerDetailComputed | null;

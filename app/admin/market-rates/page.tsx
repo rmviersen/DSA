@@ -1,4 +1,5 @@
 import { getLatestMarketRateCurves, getLatestRoleMultipliers, getTrainingContracts, getOffseasonMarketImpact } from "../../../lib/market-rate-query";
+import { getDefaultLeagueId } from "../../../lib/league";
 import MarketRateExplorer from "./MarketRateExplorer";
 
 export const dynamic = "force-dynamic";
@@ -18,11 +19,12 @@ const pageTitleStyle = {
 } as const;
 
 export default async function MarketRatesPage() {
+  const leagueId = await getDefaultLeagueId();
   const [curves, roleMultipliers, contracts, offseasonImpact] = await Promise.all([
-    getLatestMarketRateCurves(),
-    getLatestRoleMultipliers(),
-    getTrainingContracts(),
-    getOffseasonMarketImpact(),
+    getLatestMarketRateCurves(leagueId),
+    getLatestRoleMultipliers(leagueId),
+    getTrainingContracts(leagueId),
+    getOffseasonMarketImpact(leagueId),
   ]);
 
   if (contracts.length === 0) {

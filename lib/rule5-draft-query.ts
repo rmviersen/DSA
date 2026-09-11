@@ -103,7 +103,7 @@ export interface Rule5DraftResult {
   toDraft: PlayerRow[];
 }
 
-export async function getRule5DraftBoard(orgId: number): Promise<Rule5DraftResult> {
+export async function getRule5DraftBoard(leagueId: number, orgId: number): Promise<Rule5DraftResult> {
   const supabase = makeSupabaseClient();
 
   const candidates = await fetchAll<{
@@ -113,6 +113,7 @@ export async function getRule5DraftBoard(orgId: number): Promise<Rule5DraftResul
   }>((from, to) =>
     supabase.from("players")
       .select("id,organization_id,level,league_id,is_on_secondary,is_active,pro_service_years,years_protected_from_rule_5")
+      .eq("dsa_league_id", leagueId)
       .not("organization_id", "is", null)
       .eq("retired", false)
       .gte("age", MIN_RULE5_AGE)
@@ -125,7 +126,7 @@ export async function getRule5DraftBoard(orgId: number): Promise<Rule5DraftResul
   // season_year check needed.
   const majorContractPlayerIds = new Set(
     (await fetchAll<{ player_id: number }>((from, to) =>
-      supabase.from("contracts").select("player_id").eq("is_major", true).range(from, to) as never
+      supabase.from("contracts").select("player_id").eq("dsa_league_id", leagueId).eq("is_major", true).range(from, to) as never
     )).map((c) => c.player_id)
   );
 
@@ -150,8 +151,8 @@ export async function getRule5DraftBoard(orgId: number): Promise<Rule5DraftResul
   const toDraftIds = eligible.filter((p) => p.organization_id !== orgId).map((p) => p.id);
 
   const [toProtect, toDraft] = await Promise.all([
-    fetchComputedPlayers({ playerIds: toProtectIds, limit: toProtectIds.length }),
-    fetchComputedPlayers({ playerIds: toDraftIds, limit: toDraftIds.length }),
+    fetchComputedPlayers({ leagueId, playerIds: toProtectIds, limit: toProtectIds.length }),
+    fetchComputedPlayers({ leagueId, playerIds: toDraftIds, limit: toDraftIds.length }),
   ]);
 
   return { toProtect, toDraft };

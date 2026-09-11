@@ -1,4 +1,5 @@
 import { getMyRosterAnalysis } from "@/lib/my-roster-query";
+import { getDefaultLeagueId } from "@/lib/league";
 import RoleCards from "./RoleCards";
 
 // Oklahoma City Outlaws, org id 15 -- same convention/source as /org-minors.
@@ -15,7 +16,8 @@ export const dynamic = "force-dynamic";
 export default async function MyRosterPage({ searchParams }: { searchParams: Promise<{ org?: string }> }) {
   const params = await searchParams;
   const orgId = params.org ? Number(params.org) : DEFAULT_ORG_ID;
-  const cards = await getMyRosterAnalysis(orgId);
+  const leagueId = await getDefaultLeagueId();
+  const cards = await getMyRosterAnalysis(leagueId, orgId);
 
   return (
     <>

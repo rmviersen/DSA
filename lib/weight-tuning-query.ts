@@ -92,12 +92,13 @@ function liveWeightFor(stream: Stream, key: string, live: Record<string, number 
   }
 }
 
-export async function getLatestWeightTuningSnapshots(): Promise<Record<Stream, WeightTuningSnapshot | null>> {
+export async function getLatestWeightTuningSnapshots(leagueId: number): Promise<Record<Stream, WeightTuningSnapshot | null>> {
   const supabase = makeSupabaseClient();
 
   const { data: liveWeightRow } = await supabase
     .from("rating_weights")
     .select("contact, gap, power, eye, avoid_ks, speed, batting, fielding, baserunning, sp_stuff, sp_movement, sp_control, sp_stamina, rp_stuff, rp_movement, rp_control, rp_stamina, baserunning_speed_weight, baserunning_run_weight, baserunning_steal_weight, baserunning_stlrt_weight")
+    .eq("dsa_league_id", leagueId)
     .eq("is_active", true)
     .maybeSingle();
   const liveWeights = (liveWeightRow ?? {}) as Record<string, number | null>;
@@ -105,6 +106,7 @@ export async function getLatestWeightTuningSnapshots(): Promise<Record<Stream, W
   const { data: runs, error } = await supabase
     .from("weight_tuning_runs")
     .select("id, refresh_run_id, stream, target_metric, r_squared, sample_size, computed_at")
+    .eq("dsa_league_id", leagueId)
     .order("refresh_run_id", { ascending: false });
   if (error) throw error;
 
@@ -158,11 +160,11 @@ export interface RatingDistributionPoint {
 // reference population every hitter/pitcher-scale comparison this session
 // has used -- a prospect/minor-league population would need its own
 // level-aware analysis, not folded in here.
-export async function getRatingDistributionPoints(): Promise<RatingDistributionPoint[]> {
+export async function getRatingDistributionPoints(leagueId: number): Promise<RatingDistributionPoint[]> {
   const supabase = makeSupabaseClient();
 
   const { data: computedRunRow } = await supabase
-    .from("player_computed").select("refresh_run_id").order("refresh_run_id", { ascending: false }).limit(1).maybeSingle();
+    .from("player_computed").select("refresh_run_id").eq("dsa_league_id", leagueId).order("refresh_run_id", { ascending: false }).limit(1).maybeSingle();
   if (!computedRunRow) return [];
   const refreshRunId = (computedRunRow as { refresh_run_id: number }).refresh_run_id;
 
@@ -186,7 +188,7 @@ export async function getRatingDistributionPoints(): Promise<RatingDistributionP
       supabase.from("player_computed").select("player_id, overall, potential, role").eq("refresh_run_id", refreshRunId).range(from, to) as never
     ),
     fetchAll<{ id: number; league_id: number | null; mlb_service_days: number | null }>((from, to) =>
-      supabase.from("players").select("id, league_id, mlb_service_days").range(from, to) as never
+      supabase.from("players").select("id, league_id, mlb_service_days").eq("dsa_league_id", leagueId).range(from, to) as never
     ),
   ]);
   const playerMeta = new Map(players.map((p) => [p.id, p]));
@@ -203,11 +205,12 @@ export async function getRatingDistributionPoints(): Promise<RatingDistributionP
 
 // Full R²-over-time history per stream, for the "track" half of the ask --
 // one point per refresh_run_id these scripts have ever run against.
-export async function getWeightTuningHistory(): Promise<WeightTuningHistoryPoint[]> {
+export async function getWeightTuningHistory(leagueId: number): Promise<WeightTuningHistoryPoint[]> {
   const supabase = makeSupabaseClient();
   const { data, error } = await supabase
     .from("weight_tuning_runs")
     .select("stream, refresh_run_id, computed_at, r_squared, sample_size")
+    .eq("dsa_league_id", leagueId)
     .order("refresh_run_id", { ascending: true });
   if (error) throw error;
   return (data ?? []).map((r) => ({

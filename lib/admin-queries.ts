@@ -43,10 +43,11 @@ async function countFor(table: "player_computed" | "team_computed", refreshRunId
   return count ?? 0;
 }
 
-export async function getRecentRefreshRuns(limit = 5): Promise<RefreshRunSummary[]> {
+export async function getRecentRefreshRuns(leagueId: number, limit = 5): Promise<RefreshRunSummary[]> {
   const { data, error } = await supabase
     .from("refresh_runs")
     .select("id, started_at, completed_at, status, game_date, ratings_included, mlb_count, minor_league_count, international_count, draft_pool_count, free_agent_count, retired_count")
+    .eq("dsa_league_id", leagueId)
     .order("id", { ascending: false })
     .limit(limit);
   if (error) throw error;
@@ -74,10 +75,11 @@ export interface FreshnessCheck {
 // deployed site to call directly. Requires STATSPLUS_BASE_URL as a plain
 // (non-secret) Vercel env var; if unset, this degrades to "unknown" rather
 // than crashing the whole page.
-export async function getFreshnessCheck(): Promise<FreshnessCheck> {
+export async function getFreshnessCheck(leagueId: number): Promise<FreshnessCheck> {
   const { data, error } = await supabase
     .from("refresh_runs")
     .select("game_date")
+    .eq("dsa_league_id", leagueId)
     .eq("status", "succeeded")
     .not("game_date", "is", null)
     .order("id", { ascending: false })
@@ -113,10 +115,11 @@ export interface PlatformEvent {
   refresh_run_id: number | null;
 }
 
-export async function getRecentPlatformEvents(limit = 20): Promise<PlatformEvent[]> {
+export async function getRecentPlatformEvents(leagueId: number, limit = 20): Promise<PlatformEvent[]> {
   const { data, error } = await supabase
     .from("platform_events")
     .select("id, created_at, severity, source, message, details, refresh_run_id")
+    .eq("dsa_league_id", leagueId)
     .order("created_at", { ascending: false })
     .limit(limit);
   if (error) throw error;

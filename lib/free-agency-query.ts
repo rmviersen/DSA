@@ -59,7 +59,7 @@ export interface FreeAgentsResult {
 // Verified: this adds exactly 374 real candidates (320 with usable ratings
 // this refresh, 54 between-refresh like the existing "missing ratings" slice
 // below), Im among them.
-export async function getFreeAgents(): Promise<FreeAgentsResult> {
+export async function getFreeAgents(leagueId: number): Promise<FreeAgentsResult> {
   const supabase = makeSupabaseClient();
   const PAGE_SIZE = 1000;
   const players: { id: number; last_team_id: number }[] = [];
@@ -67,6 +67,7 @@ export async function getFreeAgents(): Promise<FreeAgentsResult> {
   while (true) {
     const { data, error } = await supabase
       .from("players").select("id,last_team_id")
+      .eq("dsa_league_id", leagueId)
       .eq("free_agent", true).eq("retired", false)
       .or("and(last_team_id.not.is.null,last_team_id.neq.0),draft_eligible.eq.false")
       .order("id").range(from, from + PAGE_SIZE - 1);
@@ -79,7 +80,7 @@ export async function getFreeAgents(): Promise<FreeAgentsResult> {
   if (players.length === 0) return { rows: [], totalRealFreeAgents: 0, totalWithRatings: 0 };
 
   const lastTeamIdByPlayer = new Map(players.map((p) => [p.id, p.last_team_id]));
-  const refreshRunId = await latestRefreshRunId();
+  const refreshRunId = await latestRefreshRunId(leagueId);
 
   // fetchComputedPlayers silently drops any id with no player_computed row
   // (a small, real slice right now -- players between team assignments this
@@ -113,7 +114,7 @@ export async function getFreeAgents(): Promise<FreeAgentsResult> {
   // controlled the final JS-side trim, never the fetch itself, so this isn't
   // a new query-cost class, just skipping a trim that used to happen after
   // the real work was already done).
-  const rawRows = await fetchComputedPlayers({ playerIds: ids, limit: ids.length });
+  const rawRows = await fetchComputedPlayers({ leagueId, playerIds: ids, limit: ids.length });
   // Every downstream per-player lookup (WAR/AB/IP, demand, Sign) only needs
   // to cover players actually being shown -- chunking the full candidate
   // pool (thousands of ids) for those would undo the point of the cap above.
@@ -130,12 +131,12 @@ export async function getFreeAgents(): Promise<FreeAgentsResult> {
   // last_team_id=0 (never rostered in this league), same "no real team"
   // meaning as null, and 0 was never a real team id to look up anyway.
   const lastTeamIds = [...new Set(rawRows.map((r) => lastTeamIdByPlayer.get(r.player_id)).filter((id): id is number => id != null && id !== 0))];
-  const { data: teamRows, error: teamErr } = await supabase.from("teams").select("id,name,nickname").in("id", lastTeamIds);
+  const { data: teamRows, error: teamErr } = await supabase.from("teams").select("id,name,nickname").eq("dsa_league_id", leagueId).in("id", lastTeamIds);
   if (teamErr) throw teamErr;
   const teamById = new Map((teamRows as { id: number; name: string; nickname: string }[]).map((t) => [t.id, t]));
   const { data: abbrRows, error: abbrErr } = await supabase
     .from("team_batting_stats_snapshots").select("team_id,abbr,year")
-    .in("team_id", lastTeamIds).order("year", { ascending: false });
+    .eq("dsa_league_id", leagueId).in("team_id", lastTeamIds).order("year", { ascending: false });
   if (abbrErr) throw abbrErr;
   const abbrByTeamId = new Map<number, string>();
   (abbrRows as { team_id: number; abbr: string }[]).forEach((r) => { if (!abbrByTeamId.has(r.team_id)) abbrByTeamId.set(r.team_id, r.abbr); });
@@ -262,7 +263,7 @@ export async function getFreeAgents(): Promise<FreeAgentsResult> {
   // prediction, /admin/market-rates) with no conversion needed -- no new
   // valuation model required for this piece.
   const { data: latestDemandImport } = await supabase
-    .from("free_agent_demand_imports").select("id").order("id", { ascending: false }).limit(1).maybeSingle();
+    .from("free_agent_demand_imports").select("id").eq("dsa_league_id", leagueId).order("id", { ascending: false }).limit(1).maybeSingle();
   const demandImportId = (latestDemandImport as { id: number } | null)?.id ?? null;
   const demandByPlayer = new Map<number, number>();
   if (demandImportId !== null) {
@@ -273,7 +274,7 @@ export async function getFreeAgents(): Promise<FreeAgentsResult> {
     demandRows.forEach((d) => { if (d.demand_salary !== null) demandByPlayer.set(d.player_id, d.demand_salary); });
   }
 
-  const [curves, roleMultipliers] = await Promise.all([getLatestMarketRateCurves(), getLatestRoleMultipliers()]);
+  const [curves, roleMultipliers] = await Promise.all([getLatestMarketRateCurves(leagueId), getLatestRoleMultipliers(leagueId)]);
   const curveByType = new Map(curves.map((c) => [c.playerType, c]));
   const multiplierByRole = new Map(roleMultipliers.map((m) => [m.role, m.finalMultiplier]));
   function fairValueAav(overall: number, role: string | null): number | null {
@@ -305,10 +306,10 @@ export async function getFreeAgents(): Promise<FreeAgentsResult> {
   const SIGN_ROLE_ROWS = ROLE_HEALTH_ROWS.filter((row) => row.label !== "P Tot" && row.label !== "H Tot");
 
   const [levelAgeBenchmarks, roleLevelOverallBenchmarks, okcPlayerRows] = await Promise.all([
-    getLevelAgeBenchmarks(),
-    getRoleLevelBenchmarks("overall"),
+    getLevelAgeBenchmarks(leagueId),
+    getRoleLevelBenchmarks(leagueId, "overall"),
     fetchAll<{ id: number; level: number | null; league_id: number | null }>((from, to) =>
-      supabase.from("players").select("id,level,league_id").eq("organization_id", OKC_ORG_ID).range(from, to) as never
+      supabase.from("players").select("id,level,league_id").eq("dsa_league_id", leagueId).eq("organization_id", OKC_ORG_ID).range(from, to) as never
     ),
   ]);
   const okcPlayerById = new Map(okcPlayerRows.map((p) => [p.id, p]));

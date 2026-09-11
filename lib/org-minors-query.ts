@@ -19,9 +19,9 @@ export async function fetchAll<T>(build: (from: number, to: number) => PromiseLi
   return all;
 }
 
-async function latestRefreshRunId(): Promise<number> {
+async function latestRefreshRunId(leagueId: number): Promise<number> {
   const { data, error } = await supabase
-    .from("player_computed").select("refresh_run_id").order("refresh_run_id", { ascending: false }).limit(1).single();
+    .from("player_computed").select("refresh_run_id").eq("dsa_league_id", leagueId).order("refresh_run_id", { ascending: false }).limit(1).single();
   if (error || !data) throw new Error(`No player_computed data found: ${error?.message}`);
   return (data as { refresh_run_id: number }).refresh_run_id;
 }
@@ -274,14 +274,14 @@ function rpQualityPool(spValues: number[], rpValues: number[]): number[] {
   return [...spSurplus, ...rpValues];
 }
 
-export async function getOrgMinorsPlayers(orgId: number): Promise<{ rows: MinorsPlayerRow[]; teamCounts: TeamPositionCounts[]; roleHealth: RoleHealthRow[] }> {
-  const refreshRunId = await latestRefreshRunId();
+export async function getOrgMinorsPlayers(leagueId: number, orgId: number): Promise<{ rows: MinorsPlayerRow[]; teamCounts: TeamPositionCounts[]; roleHealth: RoleHealthRow[] }> {
+  const refreshRunId = await latestRefreshRunId(leagueId);
   const internationalTeamId = INTERNATIONAL_TEAM_ID_OFFSET - orgId;
 
   const minorsPlayers = await fetchAll<{ id: number; first_name: string; last_name: string; age: number | null; level: number | null; team_id: number | null; league_id: number | null; injury_is_injured: boolean | null; is_on_dl: boolean | null; is_on_dl60: boolean | null; injury_left: number | null }>(
     (from, to) =>
       supabase.from("players").select("id,first_name,last_name,age,level,team_id,league_id,injury_is_injured,is_on_dl,is_on_dl60,injury_left")
-        .eq("organization_id", orgId).in("level", MINOR_LEVELS).range(from, to) as never
+        .eq("dsa_league_id", leagueId).eq("organization_id", orgId).in("level", MINOR_LEVELS).range(from, to) as never
   );
   // level=1 (MLB) rows for this org's own MLB team_id -- includes both the
   // real active roster (league_id=200) and the hidden international group
@@ -290,7 +290,7 @@ export async function getOrgMinorsPlayers(orgId: number): Promise<{ rows: Minors
   const mlbAndIntlPlayers = await fetchAll<{ id: number; first_name: string; last_name: string; age: number | null; level: number | null; team_id: number | null; league_id: number | null; injury_is_injured: boolean | null; is_on_dl: boolean | null; is_on_dl60: boolean | null; injury_left: number | null }>(
     (from, to) =>
       supabase.from("players").select("id,first_name,last_name,age,level,team_id,league_id,injury_is_injured,is_on_dl,is_on_dl60,injury_left")
-        .eq("organization_id", orgId).eq("team_id", orgId).eq("level", 1).range(from, to) as never
+        .eq("dsa_league_id", leagueId).eq("organization_id", orgId).eq("team_id", orgId).eq("level", 1).range(from, to) as never
   );
 
   const players = [...minorsPlayers, ...mlbAndIntlPlayers];
@@ -300,7 +300,7 @@ export async function getOrgMinorsPlayers(orgId: number): Promise<{ rows: Minors
   const teamIds = [...new Set(players.map((p) => p.team_id).filter((x): x is number => x !== null))];
   const teams = teamIds.length
     ? await fetchAll<{ id: number; name: string; nickname: string }>((from, to) =>
-        supabase.from("teams").select("id,name,nickname").in("id", teamIds).range(from, to) as never
+        supabase.from("teams").select("id,name,nickname").eq("dsa_league_id", leagueId).in("id", teamIds).range(from, to) as never
       )
     : [];
   const teamById = new Map(teams.map((t) => [t.id, t]));
@@ -378,8 +378,8 @@ export async function getOrgMinorsPlayers(orgId: number): Promise<{ rows: Minors
   // Batting benchmark added 2026-09-02 (same aggregation, different metric)
   // -- see isPitcherRole above for which roles use which.
   const [benchmarks, battingBenchmarks] = await Promise.all([
-    getRoleLevelBenchmarks("overall"),
-    getRoleLevelBenchmarks("batting"),
+    getRoleLevelBenchmarks(leagueId, "overall"),
+    getRoleLevelBenchmarks(leagueId, "batting"),
   ]);
   const benchByRole = new Map(benchmarks.map((b) => [b.role, new Map(b.byLevel.map((c) => [c.level, c.avgValue]))]));
   const battingBenchByRole = new Map(battingBenchmarks.map((b) => [b.role, new Map(b.byLevel.map((c) => [c.level, c.avgValue]))]));
@@ -392,7 +392,7 @@ export async function getOrgMinorsPlayers(orgId: number): Promise<{ rows: Minors
   // (real active MLB roster only; international signees, negative league_id,
   // excluded at every level) so the two stay conceptually comparable.
   const leagueAllPlayers = await fetchAll<{ id: number; level: number | null; team_id: number | null; league_id: number | null; is_active: boolean | null }>((from, to) =>
-    supabase.from("players").select("id,level,team_id,league_id,is_active").not("level", "is", null).range(from, to) as never
+    supabase.from("players").select("id,level,team_id,league_id,is_active").eq("dsa_league_id", leagueId).not("level", "is", null).range(from, to) as never
   );
   const leaguePlayerById = new Map(leagueAllPlayers.map((p) => [p.id, p]));
   const leagueComputed = await fetchAll<{ player_id: number; role: string | null; overall: number | null; batting: number | null }>((from, to) =>
@@ -614,12 +614,12 @@ export async function getOrgMinorsPlayers(orgId: number): Promise<{ rows: Minors
   return { rows, teamCounts, roleHealth };
 }
 
-export async function getOrgsForPicker(): Promise<{ id: number; name: string; nickname: string }[]> {
+export async function getOrgsForPicker(leagueId: number): Promise<{ id: number; name: string; nickname: string }[]> {
   const orgIdsWithPlayers = await fetchAll<{ organization_id: number }>((from, to) =>
-    supabase.from("players").select("organization_id").not("organization_id", "is", null).range(from, to) as never
+    supabase.from("players").select("organization_id").eq("dsa_league_id", leagueId).not("organization_id", "is", null).range(from, to) as never
   );
   const validIds = new Set(orgIdsWithPlayers.map((p) => p.organization_id));
-  const { data, error } = await supabase.from("teams").select("id,name,nickname").is("parent_team_id", null).order("name");
+  const { data, error } = await supabase.from("teams").select("id,name,nickname").eq("dsa_league_id", leagueId).is("parent_team_id", null).order("name");
   if (error) throw error;
   return (data as { id: number; name: string; nickname: string }[]).filter((t) => validIds.has(t.id));
 }

@@ -1,4 +1,5 @@
 import { getOrgMinorsPlayers } from "@/lib/org-minors-query";
+import { getDefaultLeagueId } from "@/lib/league";
 import MinorsTable from "./MinorsTable";
 
 // Oklahoma City Outlaws, org id 15 -- confirmed via StatsPlus header ("OKC")
@@ -10,6 +11,7 @@ export const dynamic = "force-dynamic";
 export default async function OrgMinorsPage({ searchParams }: { searchParams: Promise<{ org?: string }> }) {
   const params = await searchParams;
   const orgId = params.org ? Number(params.org) : DEFAULT_ORG_ID;
-  const { rows, teamCounts, roleHealth } = await getOrgMinorsPlayers(orgId);
+  const leagueId = await getDefaultLeagueId();
+  const { rows, teamCounts, roleHealth } = await getOrgMinorsPlayers(leagueId, orgId);
   return <MinorsTable rows={rows} teamCounts={teamCounts} roleHealth={roleHealth} />;
 }

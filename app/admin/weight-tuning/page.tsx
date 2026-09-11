@@ -1,4 +1,5 @@
 import { getLatestWeightTuningSnapshots, getWeightTuningHistory, getRatingDistributionPoints } from "../../../lib/weight-tuning-query";
+import { getDefaultLeagueId } from "../../../lib/league";
 import WeightTuningExplorer from "./WeightTuningExplorer";
 
 export const dynamic = "force-dynamic";
@@ -19,8 +20,9 @@ const pageTitleStyle = {
 } as const;
 
 export default async function WeightTuningPage() {
+  const leagueId = await getDefaultLeagueId();
   const [snapshots, history, distributionPoints] = await Promise.all([
-    getLatestWeightTuningSnapshots(), getWeightTuningHistory(), getRatingDistributionPoints(),
+    getLatestWeightTuningSnapshots(leagueId), getWeightTuningHistory(leagueId), getRatingDistributionPoints(leagueId),
   ]);
 
   const hasAny = snapshots.hitting || snapshots.baserunning || snapshots.pitching_sp || snapshots.pitching_rp

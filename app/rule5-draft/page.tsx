@@ -1,4 +1,5 @@
 import { getRule5DraftBoard } from "../../lib/rule5-draft-query";
+import { getDefaultLeagueId } from "../../lib/league";
 import { PlayerTable } from "../_components/PlayerTable";
 
 export const dynamic = "force-dynamic";
@@ -14,7 +15,8 @@ const DEFAULT_ORG_ID = 15;
 // HANDOFF.md's transaction-analysis section.
 
 export default async function Rule5DraftPage() {
-  const { toProtect, toDraft } = await getRule5DraftBoard(DEFAULT_ORG_ID);
+  const leagueId = await getDefaultLeagueId();
+  const { toProtect, toDraft } = await getRule5DraftBoard(leagueId, DEFAULT_ORG_ID);
 
   return (
     <>

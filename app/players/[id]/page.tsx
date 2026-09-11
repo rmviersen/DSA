@@ -1,6 +1,7 @@
 import { notFound } from "next/navigation";
 import { getPlayerDetail, type PlayerDetailRatings, type SeasonStatLine } from "@/lib/player-detail-query";
 import { gradeStyle } from "@/lib/display-helpers";
+import { getDefaultLeagueId } from "@/lib/league";
 
 // Pure server component -- no "use client" anywhere on this page, so gotcha
 // 16 (a client component importing a value from a Supabase-backed module)
@@ -105,7 +106,8 @@ function StatTable({ title, rows, columns }: { title: string; rows: SeasonStatLi
 export default async function PlayerDetailPage({ params }: { params: { id: string } }) {
   const playerId = Number(params.id);
   if (!Number.isFinite(playerId)) notFound();
-  const detail = await getPlayerDetail(playerId);
+  const leagueId = await getDefaultLeagueId();
+  const detail = await getPlayerDetail(leagueId, playerId);
   if (!detail) notFound();
 
   const { bio, computed, ratings, projectedSplits, battingHistory, pitchingHistory } = detail;

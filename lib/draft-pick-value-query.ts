@@ -42,13 +42,14 @@ export interface DraftedPlayerPoint {
 async function namesFor(
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   supabase: any,
+  leagueId: number,
   playerIds: number[]
 ): Promise<Map<number, string>> {
   const nameById = new Map<number, string>();
   const CHUNK = 500;
   for (let i = 0; i < playerIds.length; i += CHUNK) {
     const chunk = playerIds.slice(i, i + CHUNK);
-    const { data, error } = await supabase.from("players").select("id, first_name, last_name").in("id", chunk);
+    const { data, error } = await supabase.from("players").select("id, first_name, last_name").eq("dsa_league_id", leagueId).in("id", chunk);
     if (error) throw error;
     for (const p of data as { id: number; first_name: string | null; last_name: string | null }[]) {
       nameById.set(p.id, [p.first_name, p.last_name].filter(Boolean).join(" ") || `Player ${p.id}`);
@@ -57,10 +58,10 @@ async function namesFor(
   return nameById;
 }
 
-export async function getDraftPickValueCurve(): Promise<DraftRoundValue[]> {
+export async function getDraftPickValueCurve(leagueId: number): Promise<DraftRoundValue[]> {
   const supabase = makeSupabaseClient();
   const { data: latestRow } = await supabase
-    .from("draft_pick_value_curve").select("refresh_run_id").order("refresh_run_id", { ascending: false }).limit(1).maybeSingle();
+    .from("draft_pick_value_curve").select("refresh_run_id").eq("dsa_league_id", leagueId).order("refresh_run_id", { ascending: false }).limit(1).maybeSingle();
   if (!latestRow) return [];
   const refreshRunId = (latestRow as { refresh_run_id: number }).refresh_run_id;
   const { data, error } = await supabase
@@ -73,7 +74,7 @@ export async function getDraftPickValueCurve(): Promise<DraftRoundValue[]> {
     best_player_career_war: number | null;
   }[];
   const bestIds = rows.map((r) => r.best_player_id).filter((id): id is number => id != null);
-  const nameById = await namesFor(supabase, bestIds);
+  const nameById = await namesFor(supabase, leagueId, bestIds);
   return rows.map((r) => ({
     round: r.draft_round,
     sampleSize: r.sample_size,
@@ -89,10 +90,10 @@ export async function getDraftPickValueCurve(): Promise<DraftRoundValue[]> {
   }));
 }
 
-export async function getDraftPickValuePlayers(): Promise<DraftedPlayerPoint[]> {
+export async function getDraftPickValuePlayers(leagueId: number): Promise<DraftedPlayerPoint[]> {
   const supabase = makeSupabaseClient();
   const { data: latestRow } = await supabase
-    .from("draft_pick_value_players").select("refresh_run_id").order("refresh_run_id", { ascending: false }).limit(1).maybeSingle();
+    .from("draft_pick_value_players").select("refresh_run_id").eq("dsa_league_id", leagueId).order("refresh_run_id", { ascending: false }).limit(1).maybeSingle();
   if (!latestRow) return [];
   const refreshRunId = (latestRow as { refresh_run_id: number }).refresh_run_id;
 
@@ -110,7 +111,7 @@ export async function getDraftPickValuePlayers(): Promise<DraftedPlayerPoint[]> 
     from += PAGE_SIZE;
   }
 
-  const nameById = await namesFor(supabase, rows.map((r) => r.player_id));
+  const nameById = await namesFor(supabase, leagueId, rows.map((r) => r.player_id));
   return rows.map((r) => ({
     playerId: r.player_id,
     playerName: nameById.get(r.player_id) ?? `Player ${r.player_id}`,

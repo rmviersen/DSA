@@ -323,11 +323,10 @@ than one giant change:
    back to its real, healthy distribution across all 7 sub-leagues, not the
    flat `1` the incident left it at — an actual page load wasn't done (still
    behind the owner login this session won't type a password into).
-2. 🟡 **In progress, 2026-09-10.** Query layer: thread `dsa_league_id` through
-   `lib/*.ts` (mechanical, but the biggest-surface-area step). Split into two
-   halves:
-   - **Write side: done.** Every one of the 13 scripts that writes to the
-     database (`refresh.ts`, `compute-ratings.ts`, `compute-team-ratings.ts`,
+2. ✅ **Done, 2026-09-10.** Query layer: `dsa_league_id` threaded through
+   every table access in `lib/*.ts` and `scripts/*.ts`.
+   - **Write side.** Every one of the 13 scripts that writes to the database
+     (`refresh.ts`, `compute-ratings.ts`, `compute-team-ratings.ts`,
      `compute-fielding-weights.ts`, `compute-market-rates.ts`,
      `compute-draft-pick-value.ts`, the 5 `compute-*-weights.ts` regression
      scripts, `import-draft-pool.ts`, `import-free-agent-demands.ts`,
@@ -338,30 +337,50 @@ than one giant change:
      `lib/league.ts` and stamps `dsa_league_id` onto every row it writes —
      this was genuinely urgent, not just planned work, since Step 1's
      migration had left every write broken (NOT NULL with nothing supplying
-     it). Also scoped the unfiltered "find the latest/active X" reads inside
-     these scripts (e.g. `rating_weights`' `is_active` row, "most recent
-     refresh_run_id" lookups) that would have silently picked up the wrong
-     league's row once Duud exists. **Verified for real, not just
-     type-checked**: ran `npm run compute-ratings` against the live database
-     end to end — 13,341 real rows written to both `player_computed` and
-     `player_projected_splits`, confirmed via SQL that every one carries
+     it). Verified for real: ran `npm run compute-ratings` against the live
+     database — 13,341 real rows written to `player_computed` and
+     `player_projected_splits`, confirmed via SQL every one carries
      `dsa_league_id=1` (TBL) correctly.
-   - **Read side: not started yet.** The ~200 remaining read call sites
-     across `lib/*.ts` that power the actual site pages (`queries.ts`,
-     `free-agency-query.ts`, `org-minors-query.ts`, `my-roster-query.ts`,
-     `rule5-draft-query.ts`, `player-detail-query.ts`,
-     `lineup-optimizer-query.ts`, `trade-value.ts`, and more) aren't broken
-     *today* — only one league's data exists, so an unfiltered read still
-     returns the right (only) answer — but each one will need the same
-     `dsa_league_id` threading before Duud's data can safely land in the
-     same tables. `lib/rating-validation-query.ts` was already fixed as
-     part of the write-side pass (a direct dependency of
-     `compute-fielding-weights.ts`), including its one page caller
-     (`/admin/rating-validation`) — that page now uses a new
-     `getDefaultLeagueId()` convenience in `lib/league.ts` for pages that
-     don't hold their own Supabase client. The same pattern (`leagueId`
-     required parameter on each query function, `getDefaultLeagueId()` at
-     each page call site) is the template for the rest.
+   - **Read side.** Every exported query function across all 12 `lib/*.ts`
+     query modules (`queries.ts`, `org-minors-query.ts`,
+     `free-agency-query.ts`, `market-rate-query.ts`,
+     `lineup-optimizer-query.ts`, `my-roster-query.ts`,
+     `rule5-draft-query.ts`, `system-rankings-query.ts`,
+     `player-detail-query.ts`, `admin-queries.ts`,
+     `draft-pick-value-query.ts`, `weight-tuning-query.ts`) now takes
+     `leagueId` as a required parameter and filters every table read that
+     wasn't already safely scoped through an already-league-correct
+     `refresh_run_id`. Along the way, found and fixed **three duplicate
+     private `latestRefreshRunId()` implementations** (org-minors-query.ts,
+     system-rankings-query.ts, player-detail-query.ts each had their own
+     copy, none importing the one in queries.ts) — all fixed in place rather
+     than consolidated, to keep this pass's diff scoped to the multi-league
+     work rather than opening a separate refactor.
+   - **Every page.tsx/component caller updated too** (~20 files) — each now
+     resolves `leagueId` via a new `getDefaultLeagueId()` convenience in
+     `lib/league.ts` (hardcoded to TBL until Step 3's routing exists to
+     supply a real per-request value) and passes it into whatever query
+     functions it calls.
+   - **A real, pre-existing bug found and fixed while verifying, unrelated
+     to multi-league work but exposed by it**: `fetchComputedPlayers`'
+     `players` lookup used a plain unchunked `.in("id", relevantIds)`,
+     commented "fits in one page/chunk in every realistic case." Wrong —
+     `/rule5-draft`'s "every other org's eligible candidates" pool is a real
+     2,104 players leaguewide, and an unchunked `.in()` that large blows
+     past PostgREST's ~16KB URL/header limit (confirmed: real
+     `HeadersOverflowError`, "Your request URL is 17145 characters"). Fixed
+     by switching to `fetchByIdsChunked` (already used elsewhere in the same
+     function for exactly this reason). This bug already existed before
+     today — the `dsa_league_id` filter just added enough URL length to
+     tip a query that was already right at the edge over it, which is how
+     it got caught.
+   - **Verified end-to-end against the live database, not just
+     type-checked**: a one-off script (deleted after use) called 8 of the
+     most central functions for real — `getTopPlayers`, `getOrgTeams`,
+     `getTeamRankings`, `getOrgMinorsPlayers`, `getFreeAgents`,
+     `getRule5DraftBoard` (the exact 2,104-candidate case that surfaced the
+     chunking bug above), `getMyRosterAnalysis`, `getOptimalLineups` — all
+     returned correct, sane real data with zero errors after the fix.
 3. Routing: move the page tree under `app/[league]/...`, fix up internal
    links, confirm TBL renders identically at its new `/TBL/*` URLs.
 3. Routing: move the page tree under `app/[league]/...`, fix up internal

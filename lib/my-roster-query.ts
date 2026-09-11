@@ -143,10 +143,10 @@ const SP_TOP_N = ROLE_HEALTH_ROWS.find((r) => r.label === "SP")!.topN;
 // the real topN regardless of how many extra candidates are handed to it.
 const DEPTH_DISPLAY_MULTIPLIER = 2;
 
-export async function getMyRosterAnalysis(orgId: number): Promise<RoleCard[]> {
+export async function getMyRosterAnalysis(leagueId: number, orgId: number): Promise<RoleCard[]> {
   const [{ rows, roleHealth }, refreshRunId] = await Promise.all([
-    getOrgMinorsPlayers(orgId),
-    latestRefreshRunId(),
+    getOrgMinorsPlayers(leagueId, orgId),
+    latestRefreshRunId(leagueId),
   ]);
 
   // ---- CURRENT side: reuse /org-minors' already-verified Role Health MLB
@@ -166,8 +166,8 @@ export async function getMyRosterAnalysis(orgId: number): Promise<RoleCard[]> {
   // of used as a filter.
   const salaryCols = "player_id,years,current_year,salary0,salary1,salary2,salary3,salary4,salary5,salary6,salary7,salary8,salary9,salary10,salary11,salary12,salary13,salary14";
   const [{ data: currentContractsRaw, error: ccErr }, { data: currentServiceRaw, error: csErr }] = await Promise.all([
-    supabase.from("contracts").select(salaryCols).in("player_id", currentIds),
-    supabase.from("players").select("id,mlb_service_years").in("id", currentIds),
+    supabase.from("contracts").select(salaryCols).eq("dsa_league_id", leagueId).in("player_id", currentIds),
+    supabase.from("players").select("id,mlb_service_years").eq("dsa_league_id", leagueId).in("id", currentIds),
   ]);
   if (ccErr) throw ccErr;
   if (csErr) throw csErr;
@@ -217,7 +217,7 @@ export async function getMyRosterAnalysis(orgId: number): Promise<RoleCard[]> {
     organization_id: number | null; level: number | null; league_id: number | null; mlb_service_years: number | null;
   }>((from, to) =>
     supabase.from("players").select("id,first_name,last_name,age,organization_id,level,league_id,mlb_service_years")
-      .not("organization_id", "is", null).range(from, to) as never
+      .eq("dsa_league_id", leagueId).not("organization_id", "is", null).range(from, to) as never
   );
   const futureCandidatePlayers = allPlayers.filter(
     (p): p is typeof p & { organization_id: number } => p.organization_id !== null
@@ -231,7 +231,7 @@ export async function getMyRosterAnalysis(orgId: number): Promise<RoleCard[]> {
     const chunk = ids.slice(i, i + CHUNK);
     const [{ data: comp, error: compErr }, { data: contracts, error: contractErr }] = await Promise.all([
       supabase.from("player_computed").select("player_id,role,overall,potential,prospect_potential,eta").eq("refresh_run_id", refreshRunId).in("player_id", chunk),
-      supabase.from("contracts").select("player_id,years,current_year").in("player_id", chunk),
+      supabase.from("contracts").select("player_id,years,current_year").eq("dsa_league_id", leagueId).in("player_id", chunk),
     ]);
     if (compErr) throw compErr;
     if (contractErr) throw contractErr;
