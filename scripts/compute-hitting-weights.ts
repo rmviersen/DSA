@@ -138,7 +138,19 @@ async function main() {
   const { data: statsRunRow } = await supabase
     .from("player_batting_stats_snapshots").select("refresh_run_id").eq("dsa_league_id", leagueId).eq("year", currentYear).eq("level_id", 1).eq("split_id", 1)
     .order("refresh_run_id", { ascending: false }).limit(1).maybeSingle();
-  if (!statsRunRow) throw new Error(`No ${currentYear} MLB batting stats found.`);
+  if (!statsRunRow) {
+    // Not an error -- a brand-new season with zero games played yet looks
+    // exactly like this (confirmed 2026-09-11: TBL's own game date had just
+    // rolled to 2032 with no 2032 batting rows anywhere). Throwing here
+    // would make the automated GitHub Actions workflow show a hard failure
+    // every ~30 min for as long as the new season has no games -- same
+    // "log and return cleanly" pattern already used in
+    // scan-market-contracts.ts for its own "nothing to work with yet" case.
+    // This will resume producing real numbers on its own once the new
+    // season has enough games; nothing to fix when that happens.
+    console.log(`No ${currentYear} MLB batting stats yet -- likely just the start of a new season. Skipping this regression until real games have been played.`);
+    return;
+  }
   const statsRunId = (statsRunRow as { refresh_run_id: number }).refresh_run_id;
 
   console.log(`Loading every real ${currentYear} MLB batting stint (for the league OPS+ baseline)...`);

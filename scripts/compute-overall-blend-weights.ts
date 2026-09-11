@@ -61,7 +61,15 @@ async function main() {
   const { data: statsRunRow } = await supabase
     .from("player_batting_stats_snapshots").select("refresh_run_id").eq("dsa_league_id", leagueId).eq("year", currentYear).eq("level_id", 1).eq("split_id", 1)
     .order("refresh_run_id", { ascending: false }).limit(1).maybeSingle();
-  if (!statsRunRow) throw new Error(`No ${currentYear} MLB batting stats found.`);
+  if (!statsRunRow) {
+    // Not an error -- a brand-new season with zero games yet looks exactly
+    // like this. See compute-hitting-weights.ts's identical check for the
+    // full reasoning on why this logs and returns cleanly instead of
+    // throwing (avoids a hard automated-workflow failure every ~30 min for
+    // as long as the new season has no games).
+    console.log(`No ${currentYear} MLB batting stats yet -- likely just the start of a new season. Skipping this regression until real games have been played.`);
+    return;
+  }
   const statsRunId = (statsRunRow as { refresh_run_id: number }).refresh_run_id;
 
   console.log(`Loading players (for the real-MLB-roster filter: league_id=${mlbLeagueId}, mlb_service_days>0)...`);
