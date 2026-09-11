@@ -560,6 +560,50 @@ than one giant change:
        to 2032, and the old hardcoded code would have silently kept using
        stale 2031 data forever without ever noticing).
      - Full detail: `HANDOFF.md` gotcha 39.
+   - ✅ **Step 6 itself done, 2026-09-11.** First, a real decision confirmed
+     with Rees: Duud can't produce any computed ratings at all until it has
+     a starting weight set to run the rating formula with — there's no way
+     to regress real weights from Duud's own data before any ratings exist
+     yet (chicken-and-egg). Seeded Duud's `rating_weights`/`system_rank_weights`
+     by copying TBL's active rows, explicitly labeled "bootstrap" with a
+     note pointing back here — a Day-1 starting point, not a claim that
+     Duud's calibration is done; revisit via Duud's own regressions once a
+     real chunk of a season exists.
+     - Ran the full chain for Duud (`compute-ratings.ts` →
+       `compute-team-ratings.ts` → `compute-fielding-weights.ts` →
+       `scan-market-contracts.ts` → `compute-market-rates.ts` →
+       `compute-draft-pick-value.ts` → all 5 weight-tuning scripts), which
+       surfaced **three real, previously-undetected bugs**, all fixed and
+       reconfirmed by re-running the full chain and checking the actual
+       query layer, not just a clean script exit: every Duud player was
+       silently classified as a hitter (zero pitchers, ever) because the
+       ratings mapper stored OOTP's raw numeric position instead of the
+       string label `rating-engine.ts` compares against; every player's
+       `level` was 0 or null because the mapper read a dump field that's
+       genuinely always 0 in this export, when the real MLB/AAA/AA/etc.
+       level lives on the player's own team instead; and
+       `compute-market-rates.ts` was silently losing its ENTIRE output
+       (including a perfectly good hitter curve) whenever just the pitcher
+       side had too little data to fit. Full detail: `HANDOFF.md` gotcha 40.
+     - **Verified against the real query layer, not just successful script
+       runs**: before the two bigger fixes, `getOrgMinorsPlayers` for the
+       White Sox (Rees's own org) returned 0 rows and `getPlayerDetail`
+       showed `levelLabel: '—'` for a real MLB player — after, 250 real
+       rows and `levelLabel: 'MLB'`. `player_computed`'s role distribution
+       went from 0 SP/RP/CL out of 17,440 to a real ~9,300-player pitcher
+       population matching a plausible roster mix.
+     - **Known, disclosed limitation, not fixed**: ~5,460 players (free
+       agents, draft-eligible amateurs with no team) still show
+       `level = null`, since level is now team-derived and a team-less
+       player genuinely has none — a real structural difference from
+       StatsPlus's own per-player Level field for TBL, not a bug to chase
+       further without a different data source for exactly those players.
+     - **Genuinely low-confidence for now, expected to self-resolve**: the
+       5 weight-tuning scripts and `compute-draft-pick-value.ts` all ran
+       cleanly, but Duud's still-small real sample sizes (e.g. only 3
+       qualifying SP, 7 mature draft classes) mean their output is a
+       reasonable first look, not something to act on yet — same as any
+       young save's real data would be.
 7. Duud goes live at `/Duud/*`.
 
 This is a multi-session undertaking, not a single sitting — each numbered

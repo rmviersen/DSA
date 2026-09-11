@@ -165,7 +165,8 @@ async function main() {
     const mappedPlayers = bioRows.map((bio) => {
       const team = teamById.get(bio.team_id);
       const teamParentId = team ? (int(team.parent_team_id) || null) : null;
-      return map.mapPlayer(bio, rosterById.get(bio.player_id), teamParentId);
+      const teamLevel = team ? int(team.level) : null;
+      return map.mapPlayer(bio, rosterById.get(bio.player_id), teamParentId, teamLevel);
     });
     await upsertBatched(supabase, "players", mappedPlayers, "dsa_league_id,id", leagueId);
 

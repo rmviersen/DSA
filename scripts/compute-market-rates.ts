@@ -152,16 +152,31 @@ async function main() {
   }
   console.log(`  $${leagueMinimum.toLocaleString()}`);
 
-  // Fit one curve per player type -- see header comment for why.
+  // Fit one curve per player type -- see header comment for why. A type
+  // with too few clean contracts is SKIPPED, not a hard failure (fixed
+  // 2026-09-11, found running this for Duud early in its save, where real
+  // pitchers exist but haven't signed enough real market contracts yet to
+  // fit anything meaningful) -- this used to throw here, which aborted the
+  // whole function before it ever reached the write step below, silently
+  // losing the OTHER type's perfectly good curve too (the real cost: Duud's
+  // hitter curve, which fit fine, was never getting saved because the
+  // pitcher side happened to fail). Only a genuine "neither type has enough
+  // data" is still a hard abort -- nothing at all to write in that case.
   const curvesByType = new Map<PlayerType, { intercept: number; slope: number; rSquared: number; residualStdDev: number; sampleSize: number; minOverall: number; maxOverall: number }>();
   for (const type of ["hitter", "pitcher"] as const) {
     const group = clean.filter((c) => PITCHER_ROLES.has(c.role) === (type === "pitcher"));
-    if (group.length < 10) throw new Error(`Only ${group.length} clean ${type} contracts -- too small to fit a curve. Aborting.`);
+    if (group.length < 10) {
+      console.log(`Only ${group.length} clean ${type} contracts -- too small to fit a curve. Skipping ${type}, not aborting.`);
+      continue;
+    }
     const points = group.map((c) => ({ x: c.overall, y: Math.log(c.aav) }));
     const { intercept, slope, rSquared, residualStdDev } = fitLine(points);
     const overalls = group.map((c) => c.overall);
     curvesByType.set(type, { intercept, slope, rSquared, residualStdDev, sampleSize: group.length, minOverall: Math.min(...overalls), maxOverall: Math.max(...overalls) });
     console.log(`${type} curve: ln(AAV) = ${intercept.toFixed(4)} + ${slope.toFixed(4)} * Overall (n=${group.length}, R²=${rSquared.toFixed(3)}, residual SD=${residualStdDev.toFixed(3)}, Overall range ${Math.min(...overalls)}-${Math.max(...overalls)})`);
+  }
+  if (curvesByType.size === 0) {
+    throw new Error("Neither hitter nor pitcher had enough clean contracts to fit a curve -- nothing to write. Aborting.");
   }
 
   // Per-role multiplier: each role's actual average AAV vs. what its own
@@ -182,7 +197,15 @@ async function main() {
   const roleRows: RoleRow[] = [];
   for (const [role, group] of byRole) {
     const playerType: PlayerType = PITCHER_ROLES.has(role) ? "pitcher" : "hitter";
-    const curve = curvesByType.get(playerType)!;
+    const curve = curvesByType.get(playerType);
+    // No curve for this role's player type (skipped above, too few clean
+    // contracts) -- can't compute "actual vs. what the curve predicted"
+    // without a curve to compare against, so this role's multiplier is
+    // skipped too, not defaulted to something misleading.
+    if (!curve) {
+      console.log(`  Skipping role ${role}: no ${playerType} curve this run.`);
+      continue;
+    }
     const avgOverall = group.reduce((s, c) => s + c.overall, 0) / group.length;
     const avgActualAav = group.reduce((s, c) => s + c.aav, 0) / group.length;
     const avgPredictedAav = group.reduce((s, c) => s + Math.exp(curve.intercept + curve.slope * c.overall), 0) / group.length;

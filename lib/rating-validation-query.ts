@@ -1,4 +1,5 @@
 import { makeSupabaseClient } from "./supabase-client";
+import { getCurrentSeasonYear } from "./league";
 
 // Data layer for /admin/rating-validation (2026-08-31, Rees's ask) --
 // "does our rating engine's Overall actually predict real production, and
@@ -125,6 +126,23 @@ export interface ValidationPoint {
 export async function getRatingValidationPoints(leagueId: number): Promise<ValidationPoint[]> {
   const supabase = makeSupabaseClient();
 
+  // Was hardcoded to year 2031 in 4 places below -- found 2026-09-11 while
+  // running Step 6 for Duud (whose current season is 2027, so every one of
+  // those queries came back empty). Same class of bug already fixed in
+  // compute-hitting-weights.ts and its 4 siblings (see lib/league.ts's
+  // getCurrentSeasonYear and HANDOFF.md gotcha 39) -- missed here originally
+  // because this file wasn't in that audit's scripts/*.ts sweep. Also a
+  // real, if lower-impact, bug for TBL: its game date has since advanced to
+  // 2032, so /admin/rating-validation would have kept silently comparing
+  // Overall against stale 2031 WAR forever without this fix.
+  let currentYear: number;
+  try {
+    currentYear = await getCurrentSeasonYear(supabase, leagueId);
+  } catch (err) {
+    console.log(`No current season year resolvable for league ${leagueId} (${err}) -- returning no validation points.`);
+    return [];
+  }
+
   console.log("Finding latest refresh run with player_computed...");
   const { data: computedRunRow } = await supabase
     .from("player_computed").select("refresh_run_id").eq("dsa_league_id", leagueId).order("refresh_run_id", { ascending: false }).limit(1).maybeSingle();
@@ -143,11 +161,14 @@ export async function getRatingValidationPoints(leagueId: number): Promise<Valid
   // stats refresh_run_id -- multiple rows WITHIN that one run (a real
   // same-season trade producing 2 team-stint rows in the same final
   // snapshot) still get summed correctly, just not across different runs.
-  console.log("Finding latest refresh run with 2031 batting stats...");
+  console.log(`Finding latest refresh run with ${currentYear} batting stats...`);
   const { data: statsRunRow } = await supabase
-    .from("player_batting_stats_snapshots").select("refresh_run_id").eq("dsa_league_id", leagueId).eq("year", 2031).eq("level_id", 1).eq("split_id", 1)
+    .from("player_batting_stats_snapshots").select("refresh_run_id").eq("dsa_league_id", leagueId).eq("year", currentYear).eq("level_id", 1).eq("split_id", 1)
     .order("refresh_run_id", { ascending: false }).limit(1).maybeSingle();
-  if (!statsRunRow) return [];
+  if (!statsRunRow) {
+    console.log(`No ${currentYear} MLB batting stats yet -- likely just the start of a new season. Returning no validation points.`);
+    return [];
+  }
   const statsRunId = (statsRunRow as { refresh_run_id: number }).refresh_run_id;
 
   console.log("Loading active rating weight set (for fielding's position bonuses)...");
@@ -177,10 +198,10 @@ export async function getRatingValidationPoints(leagueId: number): Promise<Valid
         .eq("refresh_run_id", computedRunId).range(from, to) as never
     ),
     fetchAll<{ player_id: number; pa: number | null; war: number | null }>((from, to) =>
-      supabase.from("player_batting_stats_snapshots").select("player_id, pa, war").eq("year", 2031).eq("level_id", 1).eq("split_id", 1).eq("refresh_run_id", statsRunId).range(from, to) as never
+      supabase.from("player_batting_stats_snapshots").select("player_id, pa, war").eq("year", currentYear).eq("level_id", 1).eq("split_id", 1).eq("refresh_run_id", statsRunId).range(from, to) as never
     ),
     fetchAll<{ player_id: number; ip: number | null; war: number | null }>((from, to) =>
-      supabase.from("player_pitching_stats_snapshots").select("player_id, ip, war").eq("year", 2031).eq("level_id", 1).eq("split_id", 1).eq("refresh_run_id", statsRunId).range(from, to) as never
+      supabase.from("player_pitching_stats_snapshots").select("player_id, ip, war").eq("year", currentYear).eq("level_id", 1).eq("split_id", 1).eq("refresh_run_id", statsRunId).range(from, to) as never
     ),
     fetchAll<{ id: number; first_name: string | null; last_name: string | null }>((from, to) =>
       supabase.from("players").select("id, first_name, last_name").eq("dsa_league_id", leagueId).range(from, to) as never
@@ -190,7 +211,7 @@ export async function getRatingValidationPoints(leagueId: number): Promise<Valid
     // when /org-minors wired in ZR). A player fields multiple positions
     // across separate rows; summed below into one season total.
     fetchAll<{ player_id: number; ip: number | null }>((from, to) =>
-      supabase.from("player_fielding_stats_snapshots").select("player_id, ip").eq("year", 2031).eq("level_id", 1).eq("split_id", 0).eq("refresh_run_id", statsRunId).range(from, to) as never
+      supabase.from("player_fielding_stats_snapshots").select("player_id, ip").eq("year", currentYear).eq("level_id", 1).eq("split_id", 0).eq("refresh_run_id", statsRunId).range(from, to) as never
     ),
   ]);
 

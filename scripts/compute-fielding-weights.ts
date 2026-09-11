@@ -63,6 +63,16 @@ async function main() {
   const points = await getRatingValidationPoints(leagueId);
   const hitters = points.filter((p) => p.playerType === "hitter" && p.grades.fielding != null);
   console.log(`  ${hitters.length} hitters with a fielding grade`);
+  if (points.length === 0) {
+    // Not an error -- getRatingValidationPoints() already logged why (almost
+    // always a brand-new season with zero games played yet, the same
+    // condition compute-hitting-weights.ts and its 4 siblings handle this
+    // same way -- see HANDOFF.md gotcha 39). A real, if small, sample
+    // (1-19 hitters) still throws below, since that's a genuinely different
+    // situation worth investigating, not just "too early in the season."
+    console.log("No rating-validation points at all this run -- skipping, nothing to compute.");
+    return;
+  }
   if (hitters.length < 20) {
     throw new Error(`Only ${hitters.length} hitters with a fielding grade -- too small to compute anything meaningful. Aborting.`);
   }

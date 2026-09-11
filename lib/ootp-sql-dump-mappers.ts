@@ -21,6 +21,40 @@ import { int, num, bool, str, date } from "./mappers.js";
 // against StatsPlus data, which Duud's rating pipeline will need too once
 // Step 6 (Duud's own calibration) is built. Not re-solved here.
 
+// Position/role LABEL for player_ratings_snapshots.pos -- NOT the same thing
+// as players.pos (a plain numeric fielding-position code, matching
+// StatsPlus's own /players/ convention, already correct as-is below). This
+// one specifically needs the friendly string label ("SP"/"C"/"1B"/etc.)
+// StatsPlus's /ratings/ endpoint provides directly -- lib/rating-engine.ts's
+// entire role-classification logic (isCatcherRole/isSSRole/isCFRole, the
+// pitcher SP/RP/CL branch) compares `r.pos` against these exact strings.
+// Duud's dump only has the raw numeric position (1-10) + a numeric role
+// code, with no equivalent pre-built label anywhere -- found 2026-09-11
+// running Step 6, when EVERY Duud player came out of compute-ratings.ts as
+// a hitter role, zero pitchers, because the raw numeric position ("1") was
+// being compared against the literal string "SP" and never matching.
+//
+// Position codes (standard OOTP convention, already confirmed elsewhere
+// this session): 1=P, 2=C, 3=1B, 4=2B, 5=3B, 6=SS, 7=LF, 8=CF, 9=RF, 10=DH.
+// For position=1 (pitcher), the SP/RP/CL split comes from `role`, confirmed
+// against real data (not guessed): of 9,400 non-retired position=1 players,
+// role 11/12/13 are the only three non-zero values seen, in proportions
+// matching a real roster's SP/RP/CL mix (12 most common ~5,400 = RP, 11
+// next ~3,600 = SP, 13 rare ~390 = CL) -- consistent across every position=1
+// player checked, never seen on a non-pitcher's own primary position.
+const HITTER_POSITION_LABELS: Record<string, string> = {
+  "2": "C", "3": "1B", "4": "2B", "5": "3B", "6": "SS", "7": "LF", "8": "CF", "9": "RF", "10": "DH",
+};
+
+function derivePositionLabel(position: string, role: string): string {
+  if (position === "1") {
+    if (role === "11") return "SP";
+    if (role === "13") return "CL";
+    return "RP"; // covers the confirmed "12" case and any unrecognized pitcher role code
+  }
+  return HITTER_POSITION_LABELS[position] ?? position;
+}
+
 // --- reference / current-state tables --------------------------------------
 
 export function mapTeam(r: DumpRow) {
@@ -40,7 +74,7 @@ export function mapTeam(r: DumpRow) {
 // resolves what StatsPlus calls "Parent Team ID" for a player: the dump
 // only carries that per-TEAM (`teams.parent_team_id`), not per-player, so
 // the caller looks it up via the team map built from mapTeam() above.
-export function mapPlayer(bio: DumpRow, roster: DumpRow | undefined, teamParentId: number | null) {
+export function mapPlayer(bio: DumpRow, roster: DumpRow | undefined, teamParentId: number | null, teamLevel: number | null) {
   const r = roster ?? {};
   return {
     id: int(bio["player_id"]),
@@ -48,7 +82,15 @@ export function mapPlayer(bio: DumpRow, roster: DumpRow | undefined, teamParentI
     last_name: str(bio["last_name"]),
     team_id: int(bio["team_id"]) || null,
     parent_team_id: teamParentId,
-    level: int(r["playing_level"]),
+    // NOT roster.playing_level -- confirmed via real data (2026-09-11,
+    // found running Step 6) that field is genuinely 0 for every single
+    // player in the dump, not a mapping bug. MLB/AAA/AA/A+/A/A-/Rookie
+    // lives on the player's own TEAM instead (teams.level: confirmed 1 for
+    // the White Sox, 2 for their AAA affiliate, down to 6 for complex-level
+    // affiliates, correctly linked via teams.parent_team_id) -- the same
+    // place StatsPlus's own /players/ "Level" field ultimately reflects for
+    // TBL, just derived differently at the source.
+    level: teamLevel,
     pos: int(bio["position"]),
     role: int(bio["role"]),
     age: int(bio["age"]),
@@ -343,7 +385,7 @@ export function mapTeamPitching(r: DumpRow, refreshRunId: number, year: number, 
 // string labels -- stringified as-is, not translated.
 export function mapPlayerRatings(r: DumpRow, refreshRunId: number, capturedAt: string) {
   return {
-    refresh_run_id: refreshRunId, player_id: int(r["player_id"]), pos: str(r["position"]),
+    refresh_run_id: refreshRunId, player_id: int(r["player_id"]), pos: derivePositionLabel(r["position"], r["role"]),
     league: int(r["league_id"]), team: int(r["team_id"]), org: null as number | null, lg_lvl: null as number | null,
     cntct: int(r["batting_ratings_overall_contact"]), gap: int(r["batting_ratings_overall_gap"]),
     pow: int(r["batting_ratings_overall_power"]), eye: int(r["batting_ratings_overall_eye"]),
