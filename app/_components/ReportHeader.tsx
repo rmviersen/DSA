@@ -11,9 +11,16 @@ import { cn } from "@/lib/utils";
 // elsewhere that describe past events using the old name are left as-is --
 // that's accurately what it was called at the time, not something to
 // retroactively rewrite.
+// League-relative, same convention as SiteNav's own NAV_ITEMS -- prefixed
+// with `/${league}` at render time (2026-09-10). In practice this header
+// only ever renders for TBL (ConditionalNav's own route check is still the
+// literal "/TBL/prospects" -- Duud has no guest tier at all per Rees's
+// spec), but taking `league` as a real prop rather than hardcoding "TBL" a
+// second time here avoids a second hardcoded literal to find if that ever
+// changes.
 const PUBLIC_NAV_ITEMS = [
-  { href: "/TBL/prospects", label: "Top Prospects" },
-  { href: "/TBL/prospects/farms", label: "Farm Rankings" },
+  { href: "/prospects", label: "Top Prospects" },
+  { href: "/prospects/farms", label: "Farm Rankings" },
 ] as const;
 
 // Colors come from .report-header-action in globals.css, not Tailwind's
@@ -46,11 +53,11 @@ const loginButtonClass = cn(buttonVariants({ variant: "ghost", size: "sm" }), "r
 // gets "Exit Guest Preview" instead of either -- they don't need to log in
 // again, just to clear the preview cookie, and they shouldn't see "Full
 // Site" while the whole point is that they're seeing the restricted view.
-export function ReportHeader({ isRealOwner, isPreviewingGuest }: { isRealOwner: boolean; isPreviewingGuest: boolean }) {
+export function ReportHeader({ league, isRealOwner, isPreviewingGuest }: { league: string; isRealOwner: boolean; isPreviewingGuest: boolean }) {
   return (
     <header className="site-header">
       <nav className="site-nav" aria-label="Site">
-        <Link href="/TBL/prospects" className="site-brand">
+        <Link href={`/${league}/prospects`} className="site-brand">
           <Image src="/logo.png" alt="DSA logo" width={96} height={96} className="site-logo" priority />
           <span className="site-brand-text">
             <span className="site-brand-acronym">DSA</span>
@@ -59,7 +66,7 @@ export function ReportHeader({ isRealOwner, isPreviewingGuest }: { isRealOwner: 
         </Link>
         <div className="site-nav-links">
           {PUBLIC_NAV_ITEMS.map(({ href, label }) => (
-            <Link key={href} href={href}>
+            <Link key={href} href={`/${league}${href}`}>
               {label}
             </Link>
           ))}
@@ -79,7 +86,7 @@ export function ReportHeader({ isRealOwner, isPreviewingGuest }: { isRealOwner: 
               Exit Guest Preview
             </a>
           ) : isRealOwner ? (
-            <Link href="/players" className={loginButtonClass}>
+            <Link href={`/${league}/players`} className={loginButtonClass}>
               Full Site →
             </Link>
           ) : (

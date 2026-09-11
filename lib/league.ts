@@ -1,4 +1,5 @@
 import { makeSupabaseClient } from "./supabase-client";
+import { DEFAULT_LEAGUE_SLUG } from "./league-slug";
 
 type SupabaseClient = ReturnType<typeof makeSupabaseClient>;
 
@@ -16,7 +17,12 @@ type SupabaseClient = ReturnType<typeof makeSupabaseClient>;
 // hardcode a generated id in code that has to keep working if the table is
 // ever rebuilt. Cached per-process (a script run or a single Next.js
 // server lifetime) since `leagues` changes essentially never.
-export const DEFAULT_LEAGUE_SLUG = "TBL";
+//
+// DEFAULT_LEAGUE_SLUG itself lives in lib/league-slug.ts, not here -- see
+// that file's comment for why (a "use client" component needs the bare
+// constant without pulling in this file's Supabase import). Re-exported here
+// so every existing server-side caller can keep importing it from this file.
+export { DEFAULT_LEAGUE_SLUG };
 
 const cache = new Map<string, number>();
 
@@ -30,13 +36,35 @@ export async function getLeagueId(supabase: SupabaseClient, slug: string = DEFAU
   return id;
 }
 
-// Convenience for page.tsx files (2026-09-10) -- pages don't hold a Supabase
-// client of their own (that stays inside lib/, by design), so this spares
-// every page from also having to import makeSupabaseClient just to resolve
-// which league it's rendering. TEMPORARY: once routing (multi-league plan
-// §4, app/[league]/...) exists, every one of these call sites becomes
-// `resolveLeagueId(params.league)` instead of this hardcoded-to-TBL default
-// -- that's the one-line swap Step 3 makes at each site, not a redesign.
+// Convenience for page.tsx files not under app/[league]/... (pages don't
+// hold a Supabase client of their own, that stays inside lib/ by design).
+// Only ever used by the handful of routes deliberately OUTSIDE the league
+// segment (/, /login, /report -- redirect stubs and auth, which have no
+// real "which league" concept of their own).
 export async function getDefaultLeagueId(): Promise<number> {
   return getLeagueId(makeSupabaseClient());
+}
+
+// The real per-request resolver for every page under app/[league]/... --
+// Step 3 of the multi-league plan (2026-09-10). Turns the URL's league slug
+// into a real id, or 404s if it's not a real league (a typo'd URL, or a
+// league slug that doesn't exist) rather than silently falling back to TBL,
+// which would leak one league's data onto another league's URL.
+export async function resolveLeagueId(slug: string): Promise<number> {
+  try {
+    return await getLeagueId(makeSupabaseClient(), slug);
+  } catch {
+    // Deferred import -- next/navigation's notFound() throws a special
+    // NEXT_HTTP_ERROR_FALLBACK control-flow error that Next's own router
+    // catches; importing it at module scope would pull a next/navigation
+    // dependency into every script that imports lib/league.ts (scripts/
+    // *.ts, which never run inside Next at all). notFound() is typed
+    // `never` when imported normally, but TS can't see that through a
+    // dynamically-destructured import -- the trailing throw is genuinely
+    // unreachable at runtime, it's here only so this function's own
+    // Promise<number> return type still type-checks.
+    const { notFound } = await import("next/navigation");
+    notFound();
+    throw new Error("unreachable");
+  }
 }

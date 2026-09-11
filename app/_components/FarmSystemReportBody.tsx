@@ -1,5 +1,4 @@
 import { getOrgTeams, getTopProspectsDetailed, getProspectSnapshotOptions, getTeamRankings, TOP_PROSPECTS_LIMIT } from "../../lib/queries";
-import { getDefaultLeagueId } from "../../lib/league";
 import { ProspectFilters } from "./ProspectFilters";
 import { ProspectTable } from "./ProspectTable";
 import { TeamRankingsTable } from "./TeamRankingsTable";
@@ -20,6 +19,7 @@ const sectionTitleStyle = {
 // /TBL/prospects caller skips it here rather than duplicating this
 // component's prospects-fetching logic in a second place.
 export async function FarmSystemReportBody({
+  leagueId,
   title,
   basePath,
   orgId,
@@ -27,23 +27,28 @@ export async function FarmSystemReportBody({
   showRankings = true,
   showInternalLinks,
 }: {
+  // Resolved by the caller (app/[league]/prospects/page.tsx) via
+  // resolveLeagueId(params.league) -- 2026-09-10, Step 3 of the multi-league
+  // migration. Deliberately NOT re-resolved in here with a default: this
+  // component has no route params of its own to read, so it has to trust
+  // whatever the page above it already resolved for the real URL being
+  // rendered, or every league except TBL would silently show TBL's data.
+  leagueId: number;
   title: string;
-  // "/prospects" or "/TBL/prospects" -- both ProspectFilters' form action
-  // and TeamRankingsTable's team-name links need the CURRENT route, not a
-  // hardcoded one, or they'd silently bounce a visitor over to the wrong
-  // page (2026-08-20 bug, caught before the public page first shipped).
+  // "/TBL/prospects" (or /Duud/prospects, etc.) -- ProspectFilters' form
+  // action and TeamRankingsTable's team-name links need the CURRENT route,
+  // not a hardcoded one, or they'd silently bounce a visitor over to the
+  // wrong page (2026-08-20 bug, caught before the public page first shipped).
   basePath: string;
   orgId?: number;
   baselineRefreshRunId?: number;
   showRankings?: boolean;
   // Whether ProspectTable's player names link to our internal /players/[id]
-  // pages (2026-08-30) -- true for /prospects (always a real owner, hardcoded
-  // there) and for a real, non-previewing owner on /TBL/prospects (computed
-  // there via checkOwnerState()); false for a real guest or an owner
+  // pages (2026-08-30) -- true for a real, non-previewing owner (computed by
+  // the caller via checkOwnerState()); false for a real guest or an owner
   // currently previewing as one, who only get the external StatsPlus link.
   showInternalLinks: boolean;
 }) {
-  const leagueId = await getDefaultLeagueId();
   const [teams, allSnapshots, rows, teamRankings] = await Promise.all([
     getOrgTeams(leagueId),
     getProspectSnapshotOptions(leagueId),

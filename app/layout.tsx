@@ -66,6 +66,19 @@ export default async function RootLayout({ children }: { children: React.ReactNo
   // module creates a Supabase client using server-only secrets at import
   // time). A string prop passed down from a Server Component parent has no
   // such restriction.
+  //
+  // KNOWN GAP, accepted deliberately (2026-09-10, Step 3 of the multi-league
+  // migration): this is the ROOT layout, which also wraps routes outside
+  // the app/[league]/... segment (/, /login, /report) -- it has no real
+  // params.league to read, so this always resolves to TBL's own game date
+  // regardless of which league is actually being viewed. Zero user-visible
+  // impact today (Duud doesn't exist yet), but once it does, this "Data as
+  // of" badge will show TBL's date even on a /Duud/* page. Fixing it
+  // properly means moving ConditionalNav's rendering into a new
+  // app/[league]/layout.tsx (which does get real params), at the cost of
+  // /login and the two redirect-only pages losing the nav entirely --
+  // deferred rather than done speculatively for a league that isn't real
+  // yet; revisit when Duud actually ships.
   const leagueId = await getDefaultLeagueId();
   const [latestGameDate, ownerState] = await Promise.all([getLatestGameDate(leagueId), checkOwnerState()]);
 

@@ -2,6 +2,7 @@
 
 import { useMemo, useState } from "react";
 import Link from "next/link";
+import { useParams } from "next/navigation";
 import type { ProspectRow } from "../../lib/queries";
 // Import from display-helpers directly, NOT queries.ts -- queries.ts also
 // creates a Supabase client at module scope using server-only secrets, which
@@ -110,6 +111,9 @@ const roleClass = (role: string | null) => (role && ROLE_CLASS[role]) || "";
 // not read from a cookie here -- this component has no access-control
 // role, it just draws whichever mode it's told to.
 export function ProspectTable({ rows, showInternalLinks }: { rows: ProspectRow[]; showInternalLinks: boolean }) {
+  // Multi-league routing (2026-09-10) -- always rendered under
+  // app/[league]/prospects/page.tsx, so the league slug is always in the URL.
+  const { league } = useParams<{ league: string }>();
   const [phFilter, setPhFilter] = useState<"all" | "H" | "P">("all");
   const [roleFilter, setRoleFilter] = useState<Set<string>>(new Set());
   const [search, setSearch] = useState("");
@@ -363,7 +367,7 @@ export function ProspectTable({ rows, showInternalLinks }: { rows: ProspectRow[]
                           closest("a") above either way. */}
                       {showInternalLinks ? (
                         <>
-                          <Link href={`/players/${r.player_id}`} className="prospect-name">
+                          <Link href={`/${league}/players/${r.player_id}`} className="prospect-name">
                             {r.first_name} {r.last_name}
                           </Link>
                           <a

@@ -1,13 +1,15 @@
-import { FarmSystemReportBody } from "../_components/FarmSystemReportBody";
+import { redirect } from "next/navigation";
 
-export const dynamic = "force-dynamic";
-
-export default async function ProspectsPage({ searchParams }: { searchParams: { team?: string; since?: string } }) {
-  const orgId = searchParams.team ? Number(searchParams.team) : undefined;
-  const baselineRefreshRunId = searchParams.since ? Number(searchParams.since) : undefined;
-  // showInternalLinks hardcoded true (2026-08-30) -- unlike /TBL/prospects,
-  // this page is never guest-reachable at all (not in middleware.ts's
-  // GUEST_ALLOWED_PATHS), so anyone who actually loads it is already a
-  // confirmed real owner; no need to re-check the owner cookie here too.
-  return <FarmSystemReportBody title="Top Prospects" basePath="/prospects" orgId={orgId} baselineRefreshRunId={baselineRefreshRunId} showInternalLinks />;
+// /prospects retired (2026-09-10, Step 3 of the multi-league migration) --
+// this was already an orphaned page: SiteNav's own "Top Prospects" nav item
+// pointed at the guest-facing /TBL/prospects, not here, since 2026-08-27
+// ("match the guest view for now"), so nothing actually linked to this URL
+// anymore. Once /TBL/prospects became /[league]/prospects (one shared
+// route for both leagues), keeping this separate, subtly-different variant
+// alive (showRankings=true, no owner-preview check) would have meant either
+// a second near-duplicate page or a real naming collision with the new
+// /TBL/prospects. Redirecting old links/bookmarks here, same pattern
+// already used for /report -> /TBL/prospects.
+export default function ProspectsRedirect() {
+  redirect("/TBL/prospects");
 }

@@ -13,6 +13,10 @@ type NavItem =
   | { href: string; label: string; children?: undefined }
   | { label: string; href?: undefined; children: { href: string; label: string }[] };
 
+// Every href here is league-RELATIVE (no leading league segment) -- SiteNav
+// itself prefixes each one with `/${league}` at render time (2026-09-10,
+// Step 3 of the multi-league migration), so this list never needs to know
+// which league it's currently rendering for.
 const NAV_ITEMS: NavItem[] = [
   // Rees's intended home/landing page as site owner (2026-08-28) -- listed
   // first deliberately. Automatically owner-only via middleware.ts (not in
@@ -40,15 +44,16 @@ const NAV_ITEMS: NavItem[] = [
     { href: "/admin/draft-pick-value", label: "Draft Pick Value" },
   ] },
   { href: "/players", label: "Top Players" },
-  // Points at the guest-facing /TBL/prospects (cards, no side-by-side
-  // System Rankings table) instead of the internal /prospects combined
-  // page, 2026-08-27, Rees's spec: "match the guest view for now" -- the
-  // internal /prospects page still exists at its own URL, just not
-  // linked from here. Landing here also swaps the header itself: paths
-  // under /TBL/prospects render ReportHeader, not this SiteNav (see
-  // ConditionalNav.tsx) -- a real owner still gets "Full Site ->" back
-  // to the internal pages, same as the guest-view toggle already does.
-  { href: "/TBL/prospects", label: "Top Prospects" },
+  // Points at the guest-facing /prospects (cards, no side-by-side System
+  // Rankings table) instead of a separate internal-only variant, 2026-08-27,
+  // Rees's spec: "match the guest view for now" -- the old separate internal
+  // /prospects page was retired entirely 2026-09-10 once both became the
+  // same shared app/[league]/prospects/page.tsx route (see that page's own
+  // comment). Landing here also swaps the header itself: paths under
+  // /TBL/prospects render ReportHeader, not this SiteNav (see
+  // ConditionalNav.tsx) -- a real owner still gets "Full Site ->" back to
+  // the internal pages, same as the guest-view toggle already does.
+  { href: "/prospects", label: "Top Prospects" },
   // Relabeled from "Top Draftees" to "Draft Pool" 2026-08-28, matching
   // Rees's own naming once draft-pool imports (2031, 2032) became a real,
   // ongoing part of this project rather than a one-off.
@@ -56,11 +61,11 @@ const NAV_ITEMS: NavItem[] = [
   { href: "/glossary", label: "Glossary" },
 ];
 
-export function SiteNav({ latestGameDate, isRealOwner }: { latestGameDate: string | null; isRealOwner: boolean }) {
+export function SiteNav({ league, latestGameDate, isRealOwner }: { league: string; latestGameDate: string | null; isRealOwner: boolean }) {
   return (
     <header className="site-header">
       <nav className="site-nav" aria-label="Main">
-        <Link href="/players" className="site-brand">
+        <Link href={`/${league}/players`} className="site-brand">
           <Image src="/logo.png" alt="DSA logo" width={96} height={96} className="site-logo" priority />
           <span className="site-brand-text">
             <span className="site-brand-acronym">DSA</span>
@@ -74,14 +79,14 @@ export function SiteNav({ latestGameDate, isRealOwner }: { latestGameDate: strin
                 <span className="site-nav-dropdown-trigger">{item.label}</span>
                 <div className="site-nav-dropdown-menu">
                   {item.children.map((c) => (
-                    <Link key={c.href} href={c.href}>
+                    <Link key={c.href} href={`/${league}${c.href}`}>
                       {c.label}
                     </Link>
                   ))}
                 </div>
               </div>
             ) : (
-              <Link key={item.href} href={item.href}>
+              <Link key={item.href} href={`/${league}${item.href}`}>
                 {item.label}
               </Link>
             )

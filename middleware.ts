@@ -3,13 +3,21 @@ import { OWNER_COOKIE_NAME, PREVIEW_GUEST_COOKIE_NAME, expectedOwnerCookieValue 
 
 // Pages a GUEST (no valid owner cookie) can reach without being redirected.
 // Everything else -- including "/", which app/page.tsx immediately redirects
-// to /players -- bounces to /TBL/prospects instead. Expand this array as
+// to /TBL/players -- bounces to /TBL/prospects instead. Expand this array as
 // more pages get approved for public release; no other code changes needed
 // (2026-08-24, Rees's spec). "/login" itself must stay reachable or nobody
 // could ever log in. As of 2026-08-25, /TBL/prospects (not /report, which
 // now just redirects here -- see app/report/page.tsx) is the base guest
 // page; the prefix match below (`startsWith(p + "/")`) already covers
 // /TBL/prospects/farms (System Rankings) with no separate entry needed.
+//
+// Still just plain literal path strings after Step 3's routing move
+// (2026-09-10, every internal page moved under app/[league]/...) --
+// middleware operates on the real request URL, not the underlying file
+// tree, so "/TBL/prospects" means exactly the same thing whether it's
+// served from app/TBL/prospects/page.tsx (the old location) or
+// app/[league]/prospects/page.tsx matched with league="TBL" (the new one).
+// Duud gets no entries here at all per Rees's spec -- it has no guest tier.
 const GUEST_ALLOWED_PATHS = ["/TBL/prospects", "/login"];
 
 export async function middleware(req: NextRequest) {

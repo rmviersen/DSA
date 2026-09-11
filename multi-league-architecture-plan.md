@@ -381,10 +381,64 @@ than one giant change:
      `getRule5DraftBoard` (the exact 2,104-candidate case that surfaced the
      chunking bug above), `getMyRosterAnalysis`, `getOptimalLineups` — all
      returned correct, sane real data with zero errors after the fix.
-3. Routing: move the page tree under `app/[league]/...`, fix up internal
-   links, confirm TBL renders identically at its new `/TBL/*` URLs.
-3. Routing: move the page tree under `app/[league]/...`, fix up internal
-   links, confirm TBL renders identically at its new `/TBL/*` URLs.
+3. ✅ **Done, 2026-09-10.** Routing: moved the entire internal page tree
+   (`players`, `draft`, `free-agency`, `glossary`, `lineup`, `my-roster`,
+   `org-minors`, `rule5-draft`, `admin` + its 4 sub-pages, plus the old
+   `app/TBL/prospects` and its `farms` sub-page) under `app/[league]/...`
+   via `git mv` (preserves history). Every moved `page.tsx` now takes
+   `params: Promise<{ league: string }>`, calls `resolveLeagueId(league)`
+   from the new `lib/league.ts` instead of Step 2's temporary
+   `getDefaultLeagueId()` stand-in, and has its relative imports and internal
+   `<Link>`s fixed for both the new file depth and the `/${league}` prefix.
+   - **`/prospects` retired.** It was already orphaned (SiteNav's own "Top
+     Prospects" link pointed at `/TBL/prospects` since 2026-08-27) and would
+     have collided with the merged route once both moved under
+     `app/[league]/prospects`. Now a one-line redirect stub to
+     `/TBL/prospects`, same pattern as the existing `/report` stub. The old
+     `/TBL/prospects` implementation became the real, shared
+     `app/[league]/prospects/page.tsx` going forward, serving both leagues.
+   - **New `lib/league-slug.ts`** holds just the `DEFAULT_LEAGUE_SLUG`
+     constant so `ConditionalNav.tsx` (a client component) can read it
+     without pulling `lib/league.ts`'s Supabase import into the browser
+     bundle (same bug class as `display-helpers.ts`'s gotcha 16).
+     `lib/league.ts` re-exports it, so there's still one place it's written.
+   - **Client components with internal player links**
+     (`PlayerTable.tsx`, `ProspectTable.tsx`, `MinorsTable.tsx`,
+     `SystemRankingsCards.tsx`) now read the current league via
+     `useParams<{ league: string }>()`, since they always render inside a
+     real `[league]` route. `ConditionalNav.tsx` uses `usePathname()`
+     instead (splits the first path segment, falls back to
+     `DEFAULT_LEAGUE_SLUG`), since it also renders on the 3 routes with no
+     `[league]` segment at all (`/`, `/login`, `/report`).
+   - **`SiteNav.tsx`/`ReportHeader.tsx`** now take a required `league: string`
+     prop and build every link as `/${league}/...` off league-relative nav
+     item lists.
+   - **`middleware.ts` needed no functional change** — it matches on the
+     literal request URL string, not the underlying file tree, so
+     `GUEST_ALLOWED_PATHS = ["/TBL/prospects", "/login"]` and the guest
+     redirect target work identically whether `/TBL/prospects` is served
+     from its old file location or the new `app/[league]/prospects` one.
+     Only a stale comment was corrected.
+   - **Known, deliberately-accepted gap**: `app/layout.tsx` still calls
+     `getDefaultLeagueId()` (always TBL), since it's the *root* layout and
+     also wraps the 3 routes outside `[league]`. Zero impact today (Duud
+     doesn't exist), but the "Data as of" game-date badge will show TBL's
+     date even on a future `/Duud/*` page until this moves into a real
+     `app/[league]/layout.tsx` — deferred rather than built speculatively.
+   - **Verified against the live dev server, not just `tsc --noEmit`**
+     (which was also run clean, after fixing a stale `.next` cache and 5
+     admin "Explorer" components' relative-import depths): loaded
+     `http://localhost:3000/`, confirmed the full guest redirect chain
+     (`/` → `/TBL/players` → middleware bounces a guest to `/TBL/prospects`)
+     lands correctly and the page renders real prospect data (all 31 orgs,
+     real player rows) with zero console/network errors. Confirmed a
+     guest hitting the owner-only `/TBL/players` also correctly bounces to
+     `/TBL/prospects`. Since this session won't type the owner password into
+     a login form, the `[id]` player-detail route (the trickiest nested-
+     params case) was verified by calling its exact call chain directly
+     — `resolveLeagueId("TBL")` → `getPlayerDetail(leagueId, playerId)` —
+     against the live DB in a one-off script (deleted after use), which
+     returned real bio/ratings/computed/history data for a real player.
 4. Auth: per-league `GUEST_ALLOWED_PATHS`, confirmed against the answers in
    §7.
 5. Duud ingestion: `OotpSqlDumpAdapter`, once a real sample dump is in hand.

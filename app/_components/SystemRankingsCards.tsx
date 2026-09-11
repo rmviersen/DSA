@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import Link from "next/link";
+import { useParams } from "next/navigation";
 import type { SystemRankingCardRow, SystemRankingProspect } from "../../lib/system-rankings-query";
 import { percentileStyle, statsPlusPlayerUrl } from "../../lib/display-helpers";
 
@@ -12,10 +13,14 @@ const rankLabel = (n: number | null) => (n === null ? "—" : `#${n}`);
 // StatsPlus link, never the internal /players/[id] page, which is already
 // owner-only at the middleware level regardless of what any page links to.
 function ProspectLink({ p, showInternalLinks }: { p: SystemRankingProspect; showInternalLinks: boolean }) {
+  // Multi-league routing (2026-09-10) -- always rendered under
+  // app/[league]/prospects/farms/page.tsx, so the league slug is always in
+  // the URL.
+  const { league } = useParams<{ league: string }>();
   if (showInternalLinks) {
     return (
       <>
-        <Link href={`/players/${p.player_id}`} className="system-prospect-name">
+        <Link href={`/${league}/players/${p.player_id}`} className="system-prospect-name">
           {p.name}
         </Link>
         <a href={statsPlusPlayerUrl(p.player_id)} target="_blank" rel="noopener noreferrer" title="View on StatsPlus" style={{ marginLeft: 4, fontSize: 10, opacity: 0.7 }}>

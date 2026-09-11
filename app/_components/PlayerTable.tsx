@@ -2,6 +2,7 @@
 
 import { useMemo, useState } from "react";
 import Link from "next/link";
+import { useParams } from "next/navigation";
 import type { PlayerRow } from "../../lib/queries";
 // Import from display-helpers directly, NOT queries.ts -- queries.ts also
 // creates a Supabase client at module scope using server-only secrets, which
@@ -65,6 +66,10 @@ type SortKey =
 const combined = (r: PlayerRow, hitterVal: number | null, pitcherVal: number | null) => (r.ph === "P" ? pitcherVal : hitterVal);
 
 export function PlayerTable({ rows, showTeam, showProspectCols, showStatLevel, showValueVsDemand, showSign, renderLimit }: { rows: PlayerRow[]; showTeam: boolean; showProspectCols: boolean; showStatLevel?: boolean; showValueVsDemand?: boolean; showSign?: boolean; renderLimit?: number }) {
+  // Multi-league routing (2026-09-10) -- this table is only ever rendered
+  // under a page inside app/[league]/..., so the league slug is always in
+  // the URL.
+  const { league } = useParams<{ league: string }>();
   const [phFilter, setPhFilter] = useState<"all" | "H" | "P">("all");
   const [roleFilter, setRoleFilter] = useState<Set<string>>(new Set());
   // Age filter (2026-09-06, Rees's ask) -- plain text state (not number) so
@@ -513,7 +518,7 @@ export function PlayerTable({ rows, showTeam, showProspectCols, showStatLevel, s
                 <td style={{ whiteSpace: "nowrap" }}>
                   {/* Name links to our own player detail page (2026-08-29);
                       StatsPlus is a small separate "↗" link right after. */}
-                  <Link href={`/players/${r.player_id}`} style={{ color: r.isInjured ? "rgb(220,38,38)" : "inherit" }}>{r.first_name} {r.last_name}</Link>
+                  <Link href={`/${league}/players/${r.player_id}`} style={{ color: r.isInjured ? "rgb(220,38,38)" : "inherit" }}>{r.first_name} {r.last_name}</Link>
                   {/* Injury badge (2026-09-10, Rees's ask -- red name plus
                       injury length, "in a small, discreet way so it doesn't
                       add another wide column"). Compact text right next to
