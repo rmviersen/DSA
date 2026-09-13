@@ -1,6 +1,7 @@
 import { getTopDraftees } from "../../../lib/queries";
 import { resolveLeagueId } from "../../../lib/league";
 import { PlayerTable } from "../../_components/PlayerTable";
+import { DraftAutoRefresh } from "./DraftAutoRefresh";
 
 export const dynamic = "force-dynamic";
 
@@ -19,11 +20,12 @@ export default async function DraftPage({ params }: { params: Promise<{ league: 
         {draftYear && (
           <p style={{ color: "var(--color-text-muted, #888)", fontSize: 12 }}>
             Full {rows.length}-player pool -- sort/filter freely (e.g. click "Potential" or set Age's max to see the high-school demographic).
-            "Drafted By" reflects the last <code>npm run check-draft-picks -- --year={draftYear}</code> run, not live-live -- re-run it to refresh who's off the board.
+            Con/Stf, Pow/Mov, and Eye/Ctrl show each player's POTENTIAL grade here, not current -- an amateur's current tools are close to meaningless next to a rostered player's.
           </p>
         )}
       </header>
-      <PlayerTable rows={rows} showTeam={false} showProspectCols={true} showDraftStatus={true} />
+      {draftYear && <DraftAutoRefresh league={league} />}
+      <PlayerTable rows={rows} showTeam={false} showProspectCols={true} showDraftStatus={true} showPotentialTools={true} />
     </>
   );
 }

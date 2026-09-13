@@ -206,6 +206,14 @@ async function latestDraftClassImportId(leagueId: number): Promise<{ id: number;
 interface RatingsSlice {
   cntct: number | null; pow: number | null; eye: number | null; speed: number | null;
   stf: number | null; mov: number | null; ctrl: number | null; stm: number | null;
+  // Potential-side counterparts (2026-09-13, Rees's ask, for /draft -- an
+  // amateur's CURRENT Con/Pow/Eye/Stf/Mov/Ctrl is close to meaningless next
+  // to a rostered player's, so the draft board shows these instead). No
+  // pot_speed/pot_stm exist in this data at all (confirmed against the real
+  // schema) -- Speed/Stamina have no potential-side grade to swap to, which
+  // is exactly why Rees's ask named only these three pairs, not all four.
+  pot_cntct: number | null; pot_pow: number | null; pot_eye: number | null;
+  pot_stf: number | null; pot_mov: number | null; pot_ctrl: number | null;
   pos: string | null;
   // Injury proneness (2026-09-09, Rees's ask -- a filter for /free-agency).
   // Real distinct values confirmed: "Iron Man"/"Durable"/"Normal"/"Fragile"/
@@ -462,7 +470,7 @@ export async function fetchComputedPlayers(opts: { leagueId: number; orgId?: num
   const ratingsData = await fetchByIdsChunked<{ player_id: number } & RatingsSlice>(relevantIds, (chunk) =>
     supabase
       .from("player_ratings_snapshots")
-      .select("player_id,cntct,pow,eye,speed,stf,mov,ctrl,stm,pos,prone")
+      .select("player_id,cntct,pow,eye,speed,stf,mov,ctrl,stm,pos,prone,pot_cntct,pot_pow,pot_eye,pot_stf,pot_mov,pot_ctrl")
       .eq("refresh_run_id", refreshRunId)
       .in("player_id", chunk) as never
   );

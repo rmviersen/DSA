@@ -65,7 +65,7 @@ type SortKey =
 // nullable-ph default in this component).
 const combined = (r: PlayerRow, hitterVal: number | null, pitcherVal: number | null) => (r.ph === "P" ? pitcherVal : hitterVal);
 
-export function PlayerTable({ rows, showTeam, showProspectCols, showStatLevel, showValueVsDemand, showSign, showDraftStatus, renderLimit }: { rows: PlayerRow[]; showTeam: boolean; showProspectCols: boolean; showStatLevel?: boolean; showValueVsDemand?: boolean; showSign?: boolean; showDraftStatus?: boolean; renderLimit?: number }) {
+export function PlayerTable({ rows, showTeam, showProspectCols, showStatLevel, showValueVsDemand, showSign, showDraftStatus, showPotentialTools, renderLimit }: { rows: PlayerRow[]; showTeam: boolean; showProspectCols: boolean; showStatLevel?: boolean; showValueVsDemand?: boolean; showSign?: boolean; showDraftStatus?: boolean; showPotentialTools?: boolean; renderLimit?: number }) {
   // Multi-league routing (2026-09-10) -- this table is only ever rendered
   // under a page inside app/[league]/..., so the league slug is always in
   // the URL.
@@ -105,6 +105,19 @@ export function PlayerTable({ rows, showTeam, showProspectCols, showStatLevel, s
   const [availableOnly, setAvailableOnly] = useState(true);
   const [sortKey, setSortKey] = useState<SortKey>("overall");
   const [sortDir, setSortDir] = useState<"asc" | "desc">("desc");
+
+  // Potential-side tool grades (2026-09-13, Rees's ask, for /draft: "I want
+  // the ratings (Con/STF, POW/MOV, EYE/CTRL) to show as their potential
+  // values"). Only these three pairs -- Speed/Stamina has no pot_speed/
+  // pot_stm field in this data at all (confirmed against the real schema),
+  // so there's nothing to swap it to; it always shows current, on every
+  // page, matching Rees's own request naming only three of the four pairs.
+  // Swapping which value combined() reads, not adding a new column, so
+  // every existing consumer (/players, /rule5-draft) is untouched unless it
+  // explicitly opts in via showPotentialTools.
+  const conStfVal = (r: PlayerRow) => (showPotentialTools ? combined(r, r.pot_cntct, r.pot_stf) : combined(r, r.cntct, r.stf));
+  const powMovVal = (r: PlayerRow) => (showPotentialTools ? combined(r, r.pot_pow, r.pot_mov) : combined(r, r.pow, r.mov));
+  const eyeCtrlVal = (r: PlayerRow) => (showPotentialTools ? combined(r, r.pot_eye, r.pot_ctrl) : combined(r, r.eye, r.ctrl));
 
   function toggleSort(key: SortKey) {
     if (key === sortKey) setSortDir((d) => (d === "desc" ? "asc" : "desc"));
@@ -199,9 +212,9 @@ export function PlayerTable({ rows, showTeam, showProspectCols, showStatLevel, s
         case "role": av = a.role ?? ""; bv = b.role ?? ""; break;
         case "team": av = a.team_abbr ?? a.team_nickname ?? ""; bv = b.team_abbr ?? b.team_nickname ?? ""; break;
         case "age": av = a.age ?? -1; bv = b.age ?? -1; break;
-        case "contactStuff": av = combined(a, a.cntct, a.stf) ?? -1; bv = combined(b, b.cntct, b.stf) ?? -1; break;
-        case "powerMovement": av = combined(a, a.pow, a.mov) ?? -1; bv = combined(b, b.pow, b.mov) ?? -1; break;
-        case "eyeControl": av = combined(a, a.eye, a.ctrl) ?? -1; bv = combined(b, b.eye, b.ctrl) ?? -1; break;
+        case "contactStuff": av = conStfVal(a) ?? -1; bv = conStfVal(b) ?? -1; break;
+        case "powerMovement": av = powMovVal(a) ?? -1; bv = powMovVal(b) ?? -1; break;
+        case "eyeControl": av = eyeCtrlVal(a) ?? -1; bv = eyeCtrlVal(b) ?? -1; break;
         case "speedStamina": av = combined(a, a.speed, a.stm) ?? -1; bv = combined(b, b.speed, b.stm) ?? -1; break;
         case "overall": av = a.overall ?? -1; bv = b.overall ?? -1; break;
         case "potential": av = a.potential ?? -1; bv = b.potential ?? -1; break;
@@ -534,9 +547,9 @@ export function PlayerTable({ rows, showTeam, showProspectCols, showStatLevel, s
                   {th("Prospect Rank", "prospect_rank")}
                 </>
               )}
-              {th("Con/Stf", "contactStuff")}
-              {th("Pow/Mov", "powerMovement")}
-              {th("Eye/Ctrl", "eyeControl")}
+              {th(showPotentialTools ? "Pot. Con/Stf" : "Con/Stf", "contactStuff")}
+              {th(showPotentialTools ? "Pot. Pow/Mov" : "Pow/Mov", "powerMovement")}
+              {th(showPotentialTools ? "Pot. Eye/Ctrl" : "Eye/Ctrl", "eyeControl")}
               {th("Spd/Stm", "speedStamina")}
             </tr>
           </thead>
@@ -606,9 +619,9 @@ export function PlayerTable({ rows, showTeam, showProspectCols, showStatLevel, s
                     <td>{r.prospect_rank ?? "—"}</td>
                   </>
                 )}
-                <td style={gradeStyle(combined(r, r.cntct, r.stf))}>{fmtInt(combined(r, r.cntct, r.stf))}</td>
-                <td style={gradeStyle(combined(r, r.pow, r.mov))}>{fmtInt(combined(r, r.pow, r.mov))}</td>
-                <td style={gradeStyle(combined(r, r.eye, r.ctrl))}>{fmtInt(combined(r, r.eye, r.ctrl))}</td>
+                <td style={gradeStyle(conStfVal(r))}>{fmtInt(conStfVal(r))}</td>
+                <td style={gradeStyle(powMovVal(r))}>{fmtInt(powMovVal(r))}</td>
+                <td style={gradeStyle(eyeCtrlVal(r))}>{fmtInt(eyeCtrlVal(r))}</td>
                 <td style={gradeStyle(combined(r, r.speed, r.stm))}>{fmtInt(combined(r, r.speed, r.stm))}</td>
               </tr>
             ))}
