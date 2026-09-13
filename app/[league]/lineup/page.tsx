@@ -10,26 +10,24 @@ const fmt1 = (n: number | null) => (n === null || n === undefined ? "—" : n.to
 // same formatting rule ProspectTable.tsx's own `rate()` already uses.
 const rate = (n: number | null) => (n === null || n === undefined ? "—" : n.toFixed(3).replace(/^0/, ""));
 
-// Real season performance, one combined string per player (2026-09-13,
-// Rees's ask: "track performance vs each pitching hand (avg/slg/ops/ops+),
-// as well as ZR at the position they are listed at" -- then trimmed the
-// same day to just PA/OPS/OPS+/ZR once the original 5-stat version made an
-// already-wide table scroll horizontally badly enough to be unusable).
-// Additive to Bat vs Hand/Defense (the scouted numbers that actually build
-// the lineup) -- this is real, observed performance, shown for context
-// only. `isFallback` gets a trailing, deliberately subtle "*" (not a
-// leading "YYYY:" prefix, per Rees's ask for something quieter) --
-// LineupPage renders one shared footnote naming the actual year once,
-// rather than repeating it on every row. ZR is omitted entirely for DH (no
-// fielding position to report) rather than shown as a dash, to avoid
-// implying a real "no defensive value" ZR of zero was actually on file.
-function realStatLine(p: LineupSlotPlayer, isFallback: boolean): string {
-  if (p.paVsHand === null) return "No Stats";
-  const opsPlusPart = p.opsPlusVsHand !== null ? ` (${p.opsPlusVsHand})` : "";
-  const zrPart = p.zrAtPosition !== null ? ` · ${fmt1(p.zrAtPosition)} ZR` : "";
-  const star = isFallback ? "*" : "";
-  return `${p.paVsHand} PA · ${rate(p.opsVsHand)} OPS${opsPlusPart}${zrPart}${star}`;
-}
+// Real season performance (2026-09-13, Rees's ask: "track performance vs
+// each pitching hand (avg/slg/ops/ops+), as well as ZR at the position
+// they are listed at" -- trimmed to PA/OPS/OPS+/ZR once the original
+// 5-stat version made the table scroll badly, then that trimmed version
+// STILL combined all four into one wide text cell per player-slot, which
+// turned out to be the real problem: a "145 PA · .806 OPS (112) · 12.7 ZR"
+// string needs a much wider column than four narrow tabular-numeric
+// columns do, even though it's "the same" four numbers -- repeating a unit
+// label ("PA"/"OPS"/"ZR") in every single row wastes far more space than
+// stating it once in the column header. Split into 4 real columns
+// (2026-09-13, Rees: "make the stats their own columns... think more
+// critically") -- each just a plain number now, "—" when null exactly
+// like Def already does for DH's positionGrade, no special-casing needed.
+// No more per-row fallback-year asterisk either: statsIsFallback is one
+// flag for the WHOLE page (every player here shares it), so the page-level
+// footnote already says it once, accurately, for every row -- repeating a
+// marker that's true for 100% of rows on every single row is exactly the
+// kind of redundant text this whole pass is about removing.
 
 // Optimal Lineup (2026-09-10, Rees's ask) -- two independent 9-man lineups,
 // one built for facing a left-handed starter and one for a right-handed
@@ -50,11 +48,11 @@ function realStatLine(p: LineupSlotPlayer, isFallback: boolean): string {
 // full player-slots side by side, so it needs this more than most.
 const thWrap: React.CSSProperties = { whiteSpace: "normal", lineHeight: 1.2, maxWidth: "4.5rem" };
 
-function PlayerCell({ player, sideLabel, league, statsIsFallback }: { player: LineupSlotPlayer | null; sideLabel: string; league: string; statsIsFallback: boolean }) {
+function PlayerCell({ player, sideLabel, league }: { player: LineupSlotPlayer | null; sideLabel: string; league: string }) {
   if (!player) {
     return (
       <>
-        <td colSpan={4} style={{ color: "var(--color-text-muted, #888)", textAlign: "center" }}>
+        <td colSpan={7} style={{ color: "var(--color-text-muted, #888)", textAlign: "center" }}>
           No eligible player on the active roster
         </td>
       </>
@@ -69,9 +67,10 @@ function PlayerCell({ player, sideLabel, league, statsIsFallback }: { player: Li
         {fmt1(player.battingVsHand)}
       </td>
       <td style={gradeStyle(player.positionGrade)}>{player.positionGrade === null ? "—" : Math.round(player.positionGrade)}</td>
-      <td style={{ whiteSpace: "nowrap", fontSize: "0.85em" }} title="Real PA/OPS/OPS+ vs. this hand, and ZR at this exact position -- observed performance, shown for context, not used to build the lineup">
-        {realStatLine(player, statsIsFallback)}
-      </td>
+      <td title="Real plate appearances vs. this hand">{player.paVsHand === null ? "—" : player.paVsHand}</td>
+      <td title="Real OPS vs. this hand">{rate(player.opsVsHand)}</td>
+      <td title="Real OPS+ vs. this hand (100 = league average for this split)">{player.opsPlusVsHand === null ? "—" : player.opsPlusVsHand}</td>
+      <td title="Real Zone Rating at this exact position">{player.zrAtPosition === null ? "—" : fmt1(player.zrAtPosition)}</td>
     </>
   );
 }
@@ -80,43 +79,53 @@ function PlayerCell({ player, sideLabel, league, statsIsFallback }: { player: Li
 // missing entry (roster doesn't have that many eligible bodies) renders the
 // same "no eligible player" cell PlayerCell shows for a missing starter,
 // rather than leaving a blank gap that could be mistaken for a table glitch.
-function BackupCell({ backups, index, sideLabel, league, statsIsFallback }: { backups: LineupSlotPlayer[]; index: number; sideLabel: string; league: string; statsIsFallback: boolean }) {
-  return <PlayerCell player={backups[index] ?? null} sideLabel={sideLabel} league={league} statsIsFallback={statsIsFallback} />;
+function BackupCell({ backups, index, sideLabel, league }: { backups: LineupSlotPlayer[]; index: number; sideLabel: string; league: string }) {
+  return <PlayerCell player={backups[index] ?? null} sideLabel={sideLabel} league={league} />;
 }
 
-function LineupTable({ slots, sideLabel, league, statsIsFallback }: { slots: LineupSlot[]; sideLabel: string; league: string; statsIsFallback: boolean }) {
+// One player-slot's sub-header row -- pulled into its own component since
+// it's now 7 columns repeated identically 3 times (Starter/Backup 1/Backup
+// 2), and typing that out by hand a third time is exactly the kind of
+// thing that drifts out of sync (see the Def/PA/OPS wording staying
+// consistent across all three by construction, not by careful copy-paste).
+function PlayerSubHeaders({ sideLabel }: { sideLabel: string }) {
+  return (
+    <>
+      <th style={thWrap}>Name</th>
+      <th style={thWrap} title={`Batting rating vs. ${sideLabel}`}>Bat</th>
+      <th style={thWrap} title="Current position grade (0-80) at this exact spot">Def</th>
+      <th style={thWrap} title="Real plate appearances vs. this hand">PA</th>
+      <th style={thWrap} title="Real OPS vs. this hand">OPS</th>
+      <th style={thWrap} title="Real OPS+ vs. this hand (100 = league average for this split)">OPS+</th>
+      <th style={thWrap} title="Real Zone Rating at this exact position">ZR</th>
+    </>
+  );
+}
+
+function LineupTable({ slots, sideLabel, league }: { slots: LineupSlot[]; sideLabel: string; league: string }) {
   return (
     <div className="table-wrap">
       <table>
         <thead>
           <tr>
             <th rowSpan={2} style={{ verticalAlign: "bottom" }}>Pos</th>
-            <th colSpan={4}>Starter</th>
-            <th colSpan={4}>Backup 1</th>
-            <th colSpan={4}>Backup 2</th>
+            <th colSpan={7}>Starter</th>
+            <th colSpan={7}>Backup 1</th>
+            <th colSpan={7}>Backup 2</th>
           </tr>
           <tr>
-            <th style={thWrap}>Name</th>
-            <th style={thWrap} title={`Batting rating vs. ${sideLabel}`}>Bat</th>
-            <th style={thWrap} title="Current position grade (0-80) at this exact spot">Def</th>
-            <th style={thWrap} title="Real PA/OPS/OPS+ vs. this hand, and ZR at this exact position -- for context, not used to build the lineup">Stats</th>
-            <th style={thWrap}>Name</th>
-            <th style={thWrap} title={`Batting rating vs. ${sideLabel}`}>Bat</th>
-            <th style={thWrap} title="Current position grade (0-80) at this exact spot">Def</th>
-            <th style={thWrap} title="Real PA/OPS/OPS+ vs. this hand, and ZR at this exact position -- for context, not used to build the lineup">Stats</th>
-            <th style={thWrap}>Name</th>
-            <th style={thWrap} title={`Batting rating vs. ${sideLabel}`}>Bat</th>
-            <th style={thWrap} title="Current position grade (0-80) at this exact spot">Def</th>
-            <th style={thWrap} title="Real PA/OPS/OPS+ vs. this hand, and ZR at this exact position -- for context, not used to build the lineup">Stats</th>
+            <PlayerSubHeaders sideLabel={sideLabel} />
+            <PlayerSubHeaders sideLabel={sideLabel} />
+            <PlayerSubHeaders sideLabel={sideLabel} />
           </tr>
         </thead>
         <tbody>
           {slots.map((slot) => (
             <tr key={slot.position}>
               <td style={{ fontWeight: 700, textAlign: "left" }}>{slot.position}</td>
-              <PlayerCell player={slot.starter} sideLabel={sideLabel} league={league} statsIsFallback={statsIsFallback} />
-              <BackupCell backups={slot.backups} index={0} sideLabel={sideLabel} league={league} statsIsFallback={statsIsFallback} />
-              <BackupCell backups={slot.backups} index={1} sideLabel={sideLabel} league={league} statsIsFallback={statsIsFallback} />
+              <PlayerCell player={slot.starter} sideLabel={sideLabel} league={league} />
+              <BackupCell backups={slot.backups} index={0} sideLabel={sideLabel} league={league} />
+              <BackupCell backups={slot.backups} index={1} sideLabel={sideLabel} league={league} />
             </tr>
           ))}
         </tbody>
@@ -151,18 +160,19 @@ export default async function LineupPage({
           &quot;Bat&quot; is that player&apos;s Batting-shaped rating specifically against that pitcher handedness
           (not his flat, unblended Batting grade); &quot;Def&quot; is his current position grade (0–80) at that exact
           spot. Selection blends the two 70/30 in favor of the bat — both are scouted ratings, and are what actually
-          build these lineups. &quot;Stats&quot; is real, observed MLB performance shown alongside for context only:
-          plate appearances and OPS (with OPS+ in parens) against this exact pitcher handedness, plus ZR at this
-          exact position. &quot;Backup 1&quot;/&quot;Backup 2&quot; are the two best remaining eligible players at
-          that position who aren&apos;t already starting elsewhere in this same lineup — the same bench player can be
-          listed as a backup at more than one spot.
+          build these lineups. &quot;PA&quot;/&quot;OPS&quot;/&quot;OPS+&quot;/&quot;ZR&quot; are real, observed
+          MLB performance shown alongside for context only (not used to build the lineup): plate appearances and OPS
+          against this exact pitcher handedness, OPS+ against a real league-wide baseline for that same split, and
+          Zone Rating at this exact position. &quot;Backup 1&quot;/&quot;Backup 2&quot; are the two best remaining
+          eligible players at that position who aren&apos;t already starting elsewhere in this same lineup — the
+          same bench player can be listed as a backup at more than one spot.
           A sim in this league covers about two weeks, so any hitter currently projected to miss{" "}
           <strong>5 or more days</strong> is left out of both lineups entirely, not just scored lower — see the list
           below if one of your regulars is missing.
         </p>
         {statsIsFallback && statsYear !== null && (
           <p style={{ color: "var(--color-text-muted, #888)", fontSize: 11, marginTop: -6 }}>
-            * this season doesn&apos;t have enough at-bats on file yet — &quot;Stats&quot; is showing {statsYear} instead.
+            This season doesn&apos;t have enough at-bats on file yet — PA/OPS/OPS+/ZR below are all showing {statsYear} instead.
           </p>
         )}
       </header>
@@ -183,10 +193,10 @@ export default async function LineupPage({
       )}
 
       <h2 style={{ margin: "0 0 0.5rem" }}>vs. Left-Handed Pitching</h2>
-      <LineupTable slots={vsLHP} sideLabel="LHP" league={league} statsIsFallback={statsIsFallback} />
+      <LineupTable slots={vsLHP} sideLabel="LHP" league={league} />
 
       <h2 style={{ margin: "2rem 0 0.5rem" }}>vs. Right-Handed Pitching</h2>
-      <LineupTable slots={vsRHP} sideLabel="RHP" league={league} statsIsFallback={statsIsFallback} />
+      <LineupTable slots={vsRHP} sideLabel="RHP" league={league} />
 
       {unused.length > 0 && (
         <section style={{ marginTop: "2rem" }}>
