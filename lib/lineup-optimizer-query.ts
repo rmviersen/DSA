@@ -219,6 +219,14 @@ export interface OptimalLineups {
   // exist for ANY season at all) is NOT a fallback, just genuinely no data.
   statsYear: number | null;
   statsIsFallback: boolean;
+  // Real league-wide handedness splits (2026-09-13, Rees's ask) -- see the
+  // fetch comment in getOptimalLineups for what these are and why they're
+  // read from refresh_runs rather than recomputed here. Null across all
+  // four when compute-ratings.ts hasn't processed this refresh_run yet.
+  battingPctVsL: number | null;
+  battingPctVsR: number | null;
+  pitchingPctVsL: number | null;
+  pitchingPctVsR: number | null;
 }
 
 interface Candidate {
@@ -344,6 +352,19 @@ function buildLineup(candidates: Candidate[], hand: "l" | "r", ctx: RealStatsCon
 export async function getOptimalLineups(leagueId: number, orgId: number): Promise<OptimalLineups> {
   const refreshRunId = await latestRefreshRunId(leagueId);
 
+  // Real league-wide handedness splits (2026-09-13, Rees's ask) -- the same
+  // HandednessSplits compute-ratings.ts computes fresh every run to blend
+  // the Batting/Pitching composites (rating-engine.ts), persisted onto
+  // refresh_runs so this page can display "what % of real at-bats/innings
+  // actually came against each hand" without re-running that (expensive,
+  // multi-year, paginated) query itself. Null on a refresh_run compute-
+  // ratings.ts hasn't processed yet -- same graceful-degradation posture
+  // as everything else here that depends on player_computed already
+  // existing for this run.
+  const { data: handednessRow } = await supabase
+    .from("refresh_runs").select("batting_pct_vs_l,batting_pct_vs_r,pitching_pct_vs_l,pitching_pct_vs_r").eq("id", refreshRunId).maybeSingle();
+  const handedness = handednessRow as { batting_pct_vs_l: number | null; batting_pct_vs_r: number | null; pitching_pct_vs_l: number | null; pitching_pct_vs_r: number | null } | null;
+
   // Real active MLB roster only -- same organization_id+team_id+level=1
   // filter org-minors-query.ts already established for this exact "MLB and
   // int'l" split, plus is_active (excludes DFA'd/mistagged level-1 rows,
@@ -363,7 +384,11 @@ export async function getOptimalLineups(leagueId: number, orgId: number): Promis
       .range(from, to) as never
   );
   const allIds = rosterPlayers.map((p) => p.id);
-  if (allIds.length === 0) return { vsLHP: emptyLineup(), vsRHP: emptyLineup(), injuredOut: [], unused: [], statsYear: null, statsIsFallback: false };
+  if (allIds.length === 0) return {
+    vsLHP: emptyLineup(), vsRHP: emptyLineup(), injuredOut: [], unused: [], statsYear: null, statsIsFallback: false,
+    battingPctVsL: handedness?.batting_pct_vs_l ?? null, battingPctVsR: handedness?.batting_pct_vs_r ?? null,
+    pitchingPctVsL: handedness?.pitching_pct_vs_l ?? null, pitchingPctVsR: handedness?.pitching_pct_vs_r ?? null,
+  };
 
   // player_computed (ph, for the hitter/pitcher split) is needed for the
   // FULL roster, not just the available ones -- injuredOut below has to
@@ -389,7 +414,11 @@ export async function getOptimalLineups(leagueId: number, orgId: number): Promis
     .sort((a, b) => (a.daysLeft ?? Infinity) - (b.daysLeft ?? Infinity));
 
   const ids = availablePlayers.map((p) => p.id);
-  if (ids.length === 0) return { vsLHP: emptyLineup(), vsRHP: emptyLineup(), injuredOut, unused: [], statsYear: null, statsIsFallback: false };
+  if (ids.length === 0) return {
+    vsLHP: emptyLineup(), vsRHP: emptyLineup(), injuredOut, unused: [], statsYear: null, statsIsFallback: false,
+    battingPctVsL: handedness?.batting_pct_vs_l ?? null, battingPctVsR: handedness?.batting_pct_vs_r ?? null,
+    pitchingPctVsL: handedness?.pitching_pct_vs_l ?? null, pitchingPctVsR: handedness?.pitching_pct_vs_r ?? null,
+  };
 
   const { data: ratingsRaw, error: ratErr } = await supabase
     .from("player_ratings_snapshots")
@@ -539,5 +568,9 @@ export async function getOptimalLineups(leagueId: number, orgId: number): Promis
     }))
     .sort((a, b) => (b.overall ?? -Infinity) - (a.overall ?? -Infinity));
 
-  return { vsLHP, vsRHP, injuredOut, unused, statsYear, statsIsFallback };
+  return {
+    vsLHP, vsRHP, injuredOut, unused, statsYear, statsIsFallback,
+    battingPctVsL: handedness?.batting_pct_vs_l ?? null, battingPctVsR: handedness?.batting_pct_vs_r ?? null,
+    pitchingPctVsL: handedness?.pitching_pct_vs_l ?? null, pitchingPctVsR: handedness?.pitching_pct_vs_r ?? null,
+  };
 }

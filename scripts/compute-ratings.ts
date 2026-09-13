@@ -732,6 +732,13 @@ async function computeRatingsForRun(supabase: ReturnType<typeof makeSupabaseClie
   await supabase.from("refresh_runs").update({
     hitter_overall_mean: hitterStats.mean, hitter_overall_sd: hitterStats.sd,
     pitcher_overall_mean: pitcherStats.mean, pitcher_overall_sd: pitcherStats.sd,
+    // Real league handedness splits (2026-09-13) -- computed above as
+    // `splits` for the Batting/Pitching composite blend, persisted here too
+    // (same reasoning as hitter/pitcher_overall_mean/sd) so a page can
+    // display "what % of real innings/at-bats actually came against each
+    // hand" without re-running that query -- Rees's ask, for /lineup.
+    batting_pct_vs_l: splits.battingPctVsL, batting_pct_vs_r: splits.battingPctVsR,
+    pitching_pct_vs_l: splits.pitchingPctVsL, pitching_pct_vs_r: splits.pitchingPctVsR,
   }).eq("id", refreshRunId);
 
   // Persist the level anchors too (2026-09-04) -- history of how each

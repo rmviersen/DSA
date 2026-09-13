@@ -145,7 +145,8 @@ export default async function LineupPage({
   const search = await searchParams;
   const leagueId = await resolveLeagueId(league);
   const orgId = search.org ? Number(search.org) : await resolveDefaultOrgId(leagueId);
-  const { vsLHP, vsRHP, injuredOut, unused, statsYear, statsIsFallback } = await getOptimalLineups(leagueId, orgId);
+  const { vsLHP, vsRHP, injuredOut, unused, statsYear, statsIsFallback, battingPctVsL, battingPctVsR, pitchingPctVsL, pitchingPctVsR } = await getOptimalLineups(leagueId, orgId);
+  const pct = (n: number | null) => (n === null ? "—" : `${(n * 100).toFixed(1)}%`);
 
   return (
     <>
@@ -175,6 +176,11 @@ export default async function LineupPage({
             This season doesn&apos;t have enough at-bats on file yet — PA/OPS/OPS+/ZR below are all showing {statsYear} instead.
           </p>
         )}
+        <p style={{ color: "var(--color-text-muted, #888)", fontSize: 11, marginTop: statsIsFallback ? 4 : -6 }}>
+          Real league-wide split over the last 3 real seasons, the same numbers this engine actually blends the
+          Batting/Pitching composites with: hitters see {pct(battingPctVsR)} RHP / {pct(battingPctVsL)} LHP; pitchers
+          throw {pct(pitchingPctVsR)} of their innings to RHB / {pct(pitchingPctVsL)} to LHB.
+        </p>
       </header>
 
       {injuredOut.length > 0 && (
@@ -192,11 +198,11 @@ export default async function LineupPage({
         </section>
       )}
 
-      <h2 style={{ margin: "0 0 0.5rem" }}>vs. Left-Handed Pitching</h2>
-      <LineupTable slots={vsLHP} sideLabel="LHP" league={league} />
-
-      <h2 style={{ margin: "2rem 0 0.5rem" }}>vs. Right-Handed Pitching</h2>
+      <h2 style={{ margin: "0 0 0.5rem" }}>vs. Right-Handed Pitching</h2>
       <LineupTable slots={vsRHP} sideLabel="RHP" league={league} />
+
+      <h2 style={{ margin: "2rem 0 0.5rem" }}>vs. Left-Handed Pitching</h2>
+      <LineupTable slots={vsLHP} sideLabel="LHP" league={league} />
 
       {unused.length > 0 && (
         <section style={{ marginTop: "2rem" }}>
