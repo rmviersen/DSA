@@ -41,6 +41,14 @@ function PlayerCell({ player, sideLabel, league }: { player: LineupSlotPlayer | 
   );
 }
 
+// Renders backup slot N (0-indexed) out of a slot's backups[] array -- a
+// missing entry (roster doesn't have that many eligible bodies) renders the
+// same "no eligible player" cell PlayerCell shows for a missing starter,
+// rather than leaving a blank gap that could be mistaken for a table glitch.
+function BackupCell({ backups, index, sideLabel, league }: { backups: LineupSlotPlayer[]; index: number; sideLabel: string; league: string }) {
+  return <PlayerCell player={backups[index] ?? null} sideLabel={sideLabel} league={league} />;
+}
+
 function LineupTable({ slots, sideLabel, league }: { slots: LineupSlot[]; sideLabel: string; league: string }) {
   return (
     <div className="table-wrap">
@@ -49,9 +57,13 @@ function LineupTable({ slots, sideLabel, league }: { slots: LineupSlot[]; sideLa
           <tr>
             <th rowSpan={2} style={{ verticalAlign: "bottom" }}>Pos</th>
             <th colSpan={3}>Starter</th>
-            <th colSpan={3}>Backup</th>
+            <th colSpan={3}>Backup 1</th>
+            <th colSpan={3}>Backup 2</th>
           </tr>
           <tr>
+            <th>Name</th>
+            <th title={`Batting rating vs. ${sideLabel}`}>Bat vs {sideLabel}</th>
+            <th title="Current position grade (0-80) at this exact spot">Defense</th>
             <th>Name</th>
             <th title={`Batting rating vs. ${sideLabel}`}>Bat vs {sideLabel}</th>
             <th title="Current position grade (0-80) at this exact spot">Defense</th>
@@ -65,7 +77,8 @@ function LineupTable({ slots, sideLabel, league }: { slots: LineupSlot[]; sideLa
             <tr key={slot.position}>
               <td style={{ fontWeight: 700, textAlign: "left" }}>{slot.position}</td>
               <PlayerCell player={slot.starter} sideLabel={sideLabel} league={league} />
-              <PlayerCell player={slot.backup} sideLabel={sideLabel} league={league} />
+              <BackupCell backups={slot.backups} index={0} sideLabel={sideLabel} league={league} />
+              <BackupCell backups={slot.backups} index={1} sideLabel={sideLabel} league={league} />
             </tr>
           ))}
         </tbody>
@@ -85,7 +98,7 @@ export default async function LineupPage({
   const search = await searchParams;
   const leagueId = await resolveLeagueId(league);
   const orgId = search.org ? Number(search.org) : await resolveDefaultOrgId(leagueId);
-  const { vsLHP, vsRHP } = await getOptimalLineups(leagueId, orgId);
+  const { vsLHP, vsRHP, injuredOut } = await getOptimalLineups(leagueId, orgId);
 
   return (
     <>
@@ -99,12 +112,29 @@ export default async function LineupPage({
           a player eligible at more than one position is placed wherever the whole lineup benefits most).
           &quot;Bat vs L/R&quot; is that player&apos;s Batting-shaped rating specifically against that pitcher
           handedness (not his flat, unblended Batting grade); &quot;Defense&quot; is his current position grade
-          (0–80) at that exact spot. Selection blends the two 70/30 in favor of the bat. &quot;Backup&quot; is the
-          best remaining eligible player at that position who isn&apos;t already starting elsewhere in this same
-          lineup — the same bench player can be listed as the backup at more than one spot. Only healthy (or
-          day-to-day / back within a week) active-roster players are considered.
+          (0–80) at that exact spot. Selection blends the two 70/30 in favor of the bat. &quot;Backup 1&quot;/&quot;Backup
+          2&quot; are the two best remaining eligible players at that position who aren&apos;t already starting
+          elsewhere in this same lineup — the same bench player can be listed as a backup at more than one spot.
+          A sim in this league covers about two weeks, so any hitter currently projected to miss{" "}
+          <strong>5 or more days</strong> is left out of both lineups entirely, not just scored lower — see the list
+          below if one of your regulars is missing.
         </p>
       </header>
+
+      {injuredOut.length > 0 && (
+        <section style={{ marginBottom: "1.5rem" }}>
+          <h2 style={{ margin: "0 0 0.5rem" }}>Out 5+ Days (excluded from both lineups)</h2>
+          <ul style={{ margin: 0, paddingLeft: "1.25rem" }}>
+            {injuredOut.map((p) => (
+              <li key={p.playerId}>
+                <Link href={`/${league}/players/${p.playerId}`} style={{ color: "inherit" }}>{p.name}</Link>
+                {" — "}
+                {p.daysLeft === null ? "day count unknown" : `${p.daysLeft} day${p.daysLeft === 1 ? "" : "s"} left`}
+              </li>
+            ))}
+          </ul>
+        </section>
+      )}
 
       <h2 style={{ margin: "0 0 0.5rem" }}>vs. Left-Handed Pitching</h2>
       <LineupTable slots={vsLHP} sideLabel="LHP" league={league} />

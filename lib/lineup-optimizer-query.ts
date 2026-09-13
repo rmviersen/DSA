@@ -1,6 +1,6 @@
 import { makeSupabaseClient } from "./supabase-client";
 import { latestRefreshRunId } from "./queries";
-import { fetchAll, isAvailable } from "./org-minors-query";
+import { fetchAll } from "./org-minors-query";
 import { computeBattingVsHand } from "./rating-engine";
 import { optimalAssignment } from "./assignment";
 
@@ -29,7 +29,15 @@ const supabase = makeSupabaseClient();
 //   coarser c_rating/inf_rating/of_rating tool composite shared across a
 //   whole family of positions.
 // - "Top backup" = one per position (9 total): the best remaining eligible
-//   player not already starting anywhere in that same lineup.
+//   player not already starting anywhere in that same lineup. Widened to
+//   TWO backups per position (2026-09-13, Rees's ask) -- see `backups` on
+//   LineupSlot below.
+//
+// Injuries (2026-09-13, Rees's ask): a sim in this league covers roughly
+// two weeks, so any hitter projected to miss 5+ days of that window is
+// excluded from both lineups outright (see isAvailableForLineup below),
+// with the excluded list itself surfaced via `injuredOut` so it's visible
+// WHY a regular is missing, not just that he is.
 export const FIELD_POSITIONS = ["C", "1B", "2B", "3B", "SS", "LF", "CF", "RF"] as const;
 export type FieldPosition = (typeof FIELD_POSITIONS)[number];
 export const LINEUP_POSITIONS = [...FIELD_POSITIONS, "DH"] as const;
@@ -82,6 +90,37 @@ const ELIGIBILITY_MIN: Record<FieldPosition, number> = {
 const OFFENSE_WEIGHT = 0.7;
 const DEFENSE_WEIGHT = 0.3;
 
+// Injury exclusion (2026-09-13, Rees's ask): a sim in this league covers
+// roughly two weeks, so a player projected to miss 5+ days of that window
+// is excluded from the optimal lineup outright, not just flagged with a
+// lower score. Deliberately its own rule, NOT a reuse of org-minors-
+// query.ts's isAvailable()/HEALTHY_WITHIN_DAYS (7 days) -- that helper
+// answers a different question ("healthy enough to count toward
+// organizational depth right now," for Org Minors' Role Health) and,
+// critically, only ever checks injury_left for a player already flagged
+// is_on_dl/is_on_dl60 -- a day-to-day (not formally DL'd) injury was
+// ALWAYS treated as available there regardless of how long it actually
+// runs. Confirmed via real data this matters: DTD-tagged players in TBL
+// right now have injury_left values as high as 61 days, not just the
+// short nicks "day-to-day" implies. This function ignores the DTD/DL
+// distinction entirely and judges purely by the real day count, since
+// that's the actual question Rees asked ("out for at least 5 or more
+// days"), not how the injury happens to be formally classified.
+const LINEUP_INJURY_THRESHOLD_DAYS = 5;
+function isAvailableForLineup(p: { injury_is_injured: boolean | null; injury_left: number | null }): boolean {
+  if (!p.injury_is_injured) return true;
+  return (p.injury_left ?? Infinity) < LINEUP_INJURY_THRESHOLD_DAYS;
+}
+
+// Visualizes exactly who got excluded and why (2026-09-13, Rees's other
+// ask, "a way to visualize" the exclusion) -- hitters only, since pitchers
+// were never lineup candidates regardless of health.
+export interface InjuredOutPlayer {
+  playerId: number;
+  name: string;
+  daysLeft: number | null; // null is the "injured but no day count on file" edge case, treated as long-term/unknown, not healthy
+}
+
 export interface LineupSlotPlayer {
   playerId: number;
   name: string;
@@ -96,12 +135,20 @@ export interface LineupSlotPlayer {
 export interface LineupSlot {
   position: LineupPosition;
   starter: LineupSlotPlayer | null; // null only if literally no eligible candidate exists on the roster
-  backup: LineupSlotPlayer | null;
+  // Top TWO remaining eligible bench players (2026-09-13, Rees's ask,
+  // widened from one) -- same rule as before otherwise: best-score-first,
+  // not already starting anywhere in this same lineup. Length 0-2; shorter
+  // only when the roster genuinely doesn't have that many eligible bodies.
+  backups: LineupSlotPlayer[];
 }
 
 export interface OptimalLineups {
   vsLHP: LineupSlot[];
   vsRHP: LineupSlot[];
+  // Active-roster hitters excluded from BOTH lineups above due to a 5+ day
+  // injury (2026-09-13) -- same list either way, since availability doesn't
+  // depend on which pitcher hand a lineup is built against.
+  injuredOut: InjuredOutPlayer[];
 }
 
 interface Candidate {
@@ -132,8 +179,12 @@ function toSlotPlayer(c: Candidate, position: LineupPosition, battingVsHand: num
 }
 
 function emptyLineup(): LineupSlot[] {
-  return LINEUP_POSITIONS.map((position) => ({ position, starter: null, backup: null }));
+  return LINEUP_POSITIONS.map((position) => ({ position, starter: null, backups: [] }));
 }
+
+// Top TWO remaining eligible bench players (2026-09-13, widened from one) --
+// best-score-first, not already starting anywhere in this same lineup.
+const BACKUPS_PER_SLOT = 2;
 
 function buildLineup(candidates: Candidate[], hand: "l" | "r"): LineupSlot[] {
   const battingFor = (c: Candidate) => (hand === "l" ? c.vsL : c.vsR);
@@ -157,27 +208,25 @@ function buildLineup(candidates: Candidate[], hand: "l" | "r"): LineupSlot[] {
     const candIdx = assignment[slotIdx];
     const starter = candIdx !== null ? toSlotPlayer(candidates[candIdx], position, battingFor(candidates[candIdx])) : null;
 
-    // Backup: best remaining eligible player not starting ANYWHERE in this
-    // lineup (Rees's spec -- one per position, "the best eligible player
-    // NOT included in the lineup"). Deliberately not itself a second
-    // assignment problem -- the same bench bat can be listed as the backup
-    // at more than one position, same as how a real bench actually works
-    // (a backup catcher who's also the emergency 1B, say).
+    // Backups: best TWO remaining eligible players not starting ANYWHERE in
+    // this lineup (Rees's spec, widened 2026-09-13 from "one per position" --
+    // "the best eligible player[s] NOT included in the lineup"). Deliberately
+    // not itself a second assignment problem -- the same bench bat can be
+    // listed as a backup at more than one position, same as how a real bench
+    // actually works (a backup catcher who's also the emergency 1B, say).
     const bench = candidates.filter((c) => !startingIds.has(c.playerId));
     const eligibleBench = position === "DH" ? bench : bench.filter((c) => c.eligible[position as FieldPosition]);
-    let bestBackup: Candidate | null = null;
-    let bestScore = -Infinity;
-    for (const c of eligibleBench) {
-      const bat = battingFor(c);
-      const score = position === "DH" ? bat : scoreForField(c, position as FieldPosition, bat);
-      if (score !== null && score > bestScore) {
-        bestScore = score;
-        bestBackup = c;
-      }
-    }
-    const backup = bestBackup !== null ? toSlotPlayer(bestBackup, position, battingFor(bestBackup)) : null;
+    const scored = eligibleBench
+      .map((c) => {
+        const bat = battingFor(c);
+        const score = position === "DH" ? bat : scoreForField(c, position as FieldPosition, bat);
+        return score !== null ? { c, bat, score } : null;
+      })
+      .filter((x): x is { c: Candidate; bat: number; score: number } => x !== null)
+      .sort((a, b) => b.score - a.score);
+    const backups = scored.slice(0, BACKUPS_PER_SLOT).map(({ c, bat }) => toSlotPlayer(c, position, bat));
 
-    return { position, starter, backup };
+    return { position, starter, backups };
   });
 }
 
@@ -202,31 +251,41 @@ export async function getOptimalLineups(leagueId: number, orgId: number): Promis
       .gt("league_id", 0)
       .range(from, to) as never
   );
-  // Same "realistically available" rule /org-minors already uses (Rees's
-  // spec): DTD always counts, an actual DL stint only counts if he'd be
-  // back within a week. A guy who can't play doesn't belong in a lineup
-  // being built for right now.
-  const availablePlayers = rosterPlayers.filter(isAvailable);
-  const ids = availablePlayers.map((p) => p.id);
-  if (ids.length === 0) return { vsLHP: emptyLineup(), vsRHP: emptyLineup() };
+  const allIds = rosterPlayers.map((p) => p.id);
+  if (allIds.length === 0) return { vsLHP: emptyLineup(), vsRHP: emptyLineup(), injuredOut: [] };
 
-  const [{ data: computedRaw, error: compErr }, { data: ratingsRaw, error: ratErr }, { data: weightRow, error: wErr }] = await Promise.all([
-    supabase.from("player_computed").select("player_id,ph,overall").eq("refresh_run_id", refreshRunId).in("player_id", ids),
-    supabase
-      .from("player_ratings_snapshots")
-      .select("player_id,cntct_l,cntct_r,gap_l,gap_r,pow_l,pow_r,eye_l,eye_r,speed,pos_c,pos_1b,pos_2b,pos_3b,pos_ss,pos_lf,pos_cf,pos_rf,pot_c,pot_1b,pot_2b,pot_3b,pot_ss,pot_lf,pot_cf,pot_rf")
-      .eq("refresh_run_id", refreshRunId).in("player_id", ids),
+  // player_computed (ph, for the hitter/pitcher split) is needed for the
+  // FULL roster, not just the available ones -- injuredOut below has to
+  // know which excluded players were even hitters in the first place.
+  const [{ data: computedRaw, error: compErr }, { data: weightRow, error: wErr }] = await Promise.all([
+    supabase.from("player_computed").select("player_id,ph,overall").eq("refresh_run_id", refreshRunId).in("player_id", allIds),
     supabase.from("rating_weights").select("contact,gap,power,eye,speed").eq("dsa_league_id", leagueId).eq("is_active", true).single(),
   ]);
   if (compErr) throw compErr;
-  if (ratErr) throw ratErr;
   if (wErr || !weightRow) throw new Error(`No active weight set found: ${wErr?.message}`);
-
   const computedById = new Map(
     (computedRaw as { player_id: number; ph: "H" | "P" | null; overall: number | null }[]).map((c) => [c.player_id, c])
   );
-  const ratingsById = new Map((ratingsRaw as RatingsRow[]).map((r) => [r.player_id, r]));
   const weights = weightRow as { contact: number; gap: number; power: number; eye: number; speed: number };
+
+  const availablePlayers = rosterPlayers.filter(isAvailableForLineup);
+  // Visualization list (2026-09-13): hitters excluded from both lineups for
+  // being out 5+ days, soonest-back-first (the most actionable ordering --
+  // "who might I get back soon" reads better than an arbitrary roster order).
+  const injuredOut: InjuredOutPlayer[] = rosterPlayers
+    .filter((p) => !isAvailableForLineup(p) && computedById.get(p.id)?.ph === "H")
+    .map((p) => ({ playerId: p.id, name: `${p.first_name} ${p.last_name}`, daysLeft: p.injury_left }))
+    .sort((a, b) => (a.daysLeft ?? Infinity) - (b.daysLeft ?? Infinity));
+
+  const ids = availablePlayers.map((p) => p.id);
+  if (ids.length === 0) return { vsLHP: emptyLineup(), vsRHP: emptyLineup(), injuredOut };
+
+  const { data: ratingsRaw, error: ratErr } = await supabase
+    .from("player_ratings_snapshots")
+    .select("player_id,cntct_l,cntct_r,gap_l,gap_r,pow_l,pow_r,eye_l,eye_r,speed,pos_c,pos_1b,pos_2b,pos_3b,pos_ss,pos_lf,pos_cf,pos_rf,pot_c,pot_1b,pot_2b,pot_3b,pot_ss,pot_lf,pot_cf,pot_rf")
+    .eq("refresh_run_id", refreshRunId).in("player_id", ids);
+  if (ratErr) throw ratErr;
+  const ratingsById = new Map((ratingsRaw as RatingsRow[]).map((r) => [r.player_id, r]));
 
   const candidates: Candidate[] = [];
   for (const p of availablePlayers) {
@@ -251,5 +310,6 @@ export async function getOptimalLineups(leagueId: number, orgId: number): Promis
   return {
     vsLHP: buildLineup(candidates, "l"),
     vsRHP: buildLineup(candidates, "r"),
+    injuredOut,
   };
 }
