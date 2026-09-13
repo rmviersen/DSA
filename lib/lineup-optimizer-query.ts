@@ -144,16 +144,20 @@ export interface LineupSlotPlayer {
   // above (scouted ratings) still drive the actual lineup selection
   // unchanged. MLB-level only (level_id=1), split by the SAME pitcher hand
   // as the lineup this player appears in (split_id 2=vsLHP, 3=vsRHP).
-  // statsYear falls back to the most recently COMPLETED season when the
-  // current one has no at-bats yet -- same offseason rule as
-  // getTopProspectsDetailed/getFreeAgents (queries.ts / free-agency-
-  // query.ts) -- and every field below is null when a player genuinely has
-  // no real MLB at-bats in either season (e.g. hasn't debuted yet) or, for
-  // zrAtPosition, no real innings on file at this exact position (always
-  // null for DH, which has no fielding position at all).
-  statsYear: number | null;
-  avgVsHand: number | null;
-  slgVsHand: number | null;
+  // Falls back to the most recently COMPLETED season when the current one
+  // has no at-bats yet -- same offseason rule as getTopProspectsDetailed/
+  // getFreeAgents (queries.ts / free-agency-query.ts); the resolved year
+  // and whether it's a fallback are exposed ONCE on OptimalLineups itself,
+  // not repeated per player here. Every field below is null when a player
+  // genuinely has no real MLB at-bats in either season (e.g. hasn't
+  // debuted yet) or, for zrAtPosition, no real innings on file at this
+  // exact position (always null for DH, which has no fielding position).
+  //
+  // Trimmed to PA/OPS/OPS+/ZR (2026-09-13, Rees's ask -- the original
+  // AVG/SLG/OPS/OPS+/ZR five-stat line made an already-wide table scroll
+  // horizontally badly enough to be unusable). OBP/SLG are still computed
+  // internally (needed for OPS/OPS+ either way) just no longer exposed.
+  paVsHand: number | null;
   opsVsHand: number | null;
   // Simple, unadjusted OPS+ (100 * (OBP/lgOBP + SLG/lgSLG - 1)) against the
   // real league-wide MLB baseline for this SAME split/season -- no park
@@ -206,6 +210,15 @@ export interface OptimalLineups {
   // the most surprising/notable case (a well-rated player still not
   // finding real playing time) leads.
   unused: UnusedCandidate[];
+  // Real-stats resolution, exposed ONCE here (2026-09-13) rather than only
+  // per-player on LineupSlotPlayer.statsYear (which repeats the identical
+  // value on every row) -- lets the page render a single shared footnote
+  // instead of re-deriving "is this a fallback" per row. statsIsFallback is
+  // true iff the CURRENT season had no real MLB at-bats yet at the moment
+  // of this call (the offseason case); a null statsYear (no real stats
+  // exist for ANY season at all) is NOT a fallback, just genuinely no data.
+  statsYear: number | null;
+  statsIsFallback: boolean;
 }
 
 interface Candidate {
@@ -225,7 +238,7 @@ function scoreForField(c: Candidate, pos: FieldPosition, battingVsHand: number):
   return battingVsHand * OFFENSE_WEIGHT + posGrade * DEFENSE_WEIGHT;
 }
 
-interface BattingCounts { ab: number; h: number; d: number; t: number; hr: number; bb: number; hp: number; sf: number }
+interface BattingCounts { pa: number; ab: number; h: number; d: number; t: number; hr: number; bb: number; hp: number; sf: number }
 
 // Real season performance context (2026-09-13) -- built once per
 // getOptimalLineups() call and passed through to every toSlotPlayer() call
@@ -245,14 +258,14 @@ function realStatLine(
   hand: "l" | "r",
   position: LineupPosition,
   ctx: RealStatsContext
-): Pick<LineupSlotPlayer, "statsYear" | "avgVsHand" | "slgVsHand" | "opsVsHand" | "opsPlusVsHand" | "zrAtPosition"> {
+): Pick<LineupSlotPlayer, "paVsHand" | "opsVsHand" | "opsPlusVsHand" | "zrAtPosition"> {
   const bat = ctx.battingBySplit.get(SPLIT_ID_FOR_HAND[hand])?.get(playerId);
-  let avg: number | null = null, slg: number | null = null, ops: number | null = null, opsPlus: number | null = null;
+  let pa: number | null = null, ops: number | null = null, opsPlus: number | null = null;
   if (bat && bat.ab > 0) {
+    pa = bat.pa;
     const singles = bat.h - bat.d - bat.t - bat.hr;
     const totalBases = singles + 2 * bat.d + 3 * bat.t + 4 * bat.hr;
-    avg = bat.h / bat.ab;
-    slg = totalBases / bat.ab;
+    const slg = totalBases / bat.ab;
     const obpDenom = bat.ab + bat.bb + bat.hp + bat.sf;
     const obp = obpDenom > 0 ? (bat.h + bat.bb + bat.hp) / obpDenom : null;
     if (obp !== null) {
@@ -262,7 +275,7 @@ function realStatLine(
     }
   }
   const zr = position === "DH" ? null : ctx.zrByPosition.get(FIELD_POSITION_CODE[position as FieldPosition])?.get(playerId) ?? null;
-  return { statsYear: ctx.statsYear, avgVsHand: avg, slgVsHand: slg, opsVsHand: ops, opsPlusVsHand: opsPlus, zrAtPosition: zr };
+  return { paVsHand: pa, opsVsHand: ops, opsPlusVsHand: opsPlus, zrAtPosition: zr };
 }
 
 function toSlotPlayer(c: Candidate, position: LineupPosition, battingVsHand: number, hand: "l" | "r", ctx: RealStatsContext): LineupSlotPlayer {
@@ -350,7 +363,7 @@ export async function getOptimalLineups(leagueId: number, orgId: number): Promis
       .range(from, to) as never
   );
   const allIds = rosterPlayers.map((p) => p.id);
-  if (allIds.length === 0) return { vsLHP: emptyLineup(), vsRHP: emptyLineup(), injuredOut: [], unused: [] };
+  if (allIds.length === 0) return { vsLHP: emptyLineup(), vsRHP: emptyLineup(), injuredOut: [], unused: [], statsYear: null, statsIsFallback: false };
 
   // player_computed (ph, for the hitter/pitcher split) is needed for the
   // FULL roster, not just the available ones -- injuredOut below has to
@@ -376,7 +389,7 @@ export async function getOptimalLineups(leagueId: number, orgId: number): Promis
     .sort((a, b) => (a.daysLeft ?? Infinity) - (b.daysLeft ?? Infinity));
 
   const ids = availablePlayers.map((p) => p.id);
-  if (ids.length === 0) return { vsLHP: emptyLineup(), vsRHP: emptyLineup(), injuredOut, unused: [] };
+  if (ids.length === 0) return { vsLHP: emptyLineup(), vsRHP: emptyLineup(), injuredOut, unused: [], statsYear: null, statsIsFallback: false };
 
   const { data: ratingsRaw, error: ratErr } = await supabase
     .from("player_ratings_snapshots")
@@ -419,6 +432,7 @@ export async function getOptimalLineups(leagueId: number, orgId: number): Promis
   // across files that don't otherwise depend on each other.
   let statsYear: number | null = null;
   let statsRefreshRunId = refreshRunId;
+  let statsIsFallback = false;
   {
     const { data: currentYearRow } = await supabase
       .from("player_batting_stats_snapshots").select("year").eq("refresh_run_id", refreshRunId).order("year", { ascending: false }).limit(1).maybeSingle();
@@ -431,6 +445,7 @@ export async function getOptimalLineups(leagueId: number, orgId: number): Promis
       if (fallback) {
         statsYear = fallback.year;
         statsRefreshRunId = fallback.refresh_run_id;
+        statsIsFallback = true;
       }
     }
   }
@@ -448,21 +463,23 @@ export async function getOptimalLineups(leagueId: number, orgId: number): Promis
     // same-level in-season trade) -- summed per player, same pattern as
     // getTopProspectsDetailed.
     const { data: ownBatRaw, error: ownBatErr } = await supabase
-      .from("player_batting_stats_snapshots").select("player_id,split_id,ab,h,d,t,hr,bb,hp,sf")
+      .from("player_batting_stats_snapshots").select("player_id,split_id,pa,ab,h,d,t,hr,bb,hp,sf")
       .eq("refresh_run_id", statsRefreshRunId).eq("year", statsYear).eq("level_id", 1).in("split_id", [2, 3]).in("player_id", candidateIds);
     if (ownBatErr) throw ownBatErr;
-    for (const r of (ownBatRaw ?? []) as { player_id: number; split_id: number; ab: number; h: number; d: number; t: number; hr: number; bb: number; hp: number; sf: number }[]) {
+    for (const r of (ownBatRaw ?? []) as { player_id: number; split_id: number; pa: number; ab: number; h: number; d: number; t: number; hr: number; bb: number; hp: number; sf: number }[]) {
       const bySplit = battingBySplit.get(r.split_id);
       if (!bySplit) continue;
-      const cur = bySplit.get(r.player_id) ?? { ab: 0, h: 0, d: 0, t: 0, hr: 0, bb: 0, hp: 0, sf: 0 };
-      cur.ab += r.ab; cur.h += r.h; cur.d += r.d; cur.t += r.t; cur.hr += r.hr; cur.bb += r.bb; cur.hp += r.hp; cur.sf += r.sf;
+      const cur = bySplit.get(r.player_id) ?? { pa: 0, ab: 0, h: 0, d: 0, t: 0, hr: 0, bb: 0, hp: 0, sf: 0 };
+      cur.pa += r.pa; cur.ab += r.ab; cur.h += r.h; cur.d += r.d; cur.t += r.t; cur.hr += r.hr; cur.bb += r.bb; cur.hp += r.hp; cur.sf += r.sf;
       bySplit.set(r.player_id, cur);
     }
 
     // League-wide MLB baseline for the SAME split/season/refresh_run_id, for
     // OPS+ -- every real MLB hitter's split-specific line, not just this
-    // roster's, paginated since this is league-wide.
-    const leagueTotalsBySplit = new Map<number, BattingCounts>([[2, { ab: 0, h: 0, d: 0, t: 0, hr: 0, bb: 0, hp: 0, sf: 0 }], [3, { ab: 0, h: 0, d: 0, t: 0, hr: 0, bb: 0, hp: 0, sf: 0 }]]);
+    // roster's, paginated since this is league-wide. No PA needed here
+    // (only ever used for OBP/SLG), hence its own lighter type.
+    type LeagueCounts = Omit<BattingCounts, "pa">;
+    const leagueTotalsBySplit = new Map<number, LeagueCounts>([[2, { ab: 0, h: 0, d: 0, t: 0, hr: 0, bb: 0, hp: 0, sf: 0 }], [3, { ab: 0, h: 0, d: 0, t: 0, hr: 0, bb: 0, hp: 0, sf: 0 }]]);
     const leagueBatRows = await fetchAll<{ split_id: number; ab: number; h: number; d: number; t: number; hr: number; bb: number; hp: number; sf: number }>((from, to) =>
       supabase.from("player_batting_stats_snapshots").select("split_id,ab,h,d,t,hr,bb,hp,sf")
         .eq("refresh_run_id", statsRefreshRunId).eq("year", statsYear).eq("level_id", 1).in("split_id", [2, 3]).range(from, to) as never
@@ -522,5 +539,5 @@ export async function getOptimalLineups(leagueId: number, orgId: number): Promis
     }))
     .sort((a, b) => (b.overall ?? -Infinity) - (a.overall ?? -Infinity));
 
-  return { vsLHP, vsRHP, injuredOut, unused };
+  return { vsLHP, vsRHP, injuredOut, unused, statsYear, statsIsFallback };
 }
