@@ -67,6 +67,14 @@ const POS_KEYS: Record<FieldPosition, { pot: keyof RatingsRow; pos: keyof Rating
   RF: { pot: "pot_rf", pos: "pos_rf" },
 };
 
+// OOTP's own numeric position codes (1=P, confirmed and reused elsewhere
+// this session -- e.g. Kyle Teel/position=2=C, Anthony Kay/position=1=P).
+// Needed to filter player_fielding_stats_snapshots, which records ZR per
+// real numeric position, not by our FieldPosition label.
+const FIELD_POSITION_CODE: Record<FieldPosition, number> = {
+  C: 2, "1B": 3, "2B": 4, "3B": 5, SS: 6, LF: 7, CF: 8, RF: 9,
+};
+
 // Eligibility threshold, per position -- 55 everywhere except catcher (50,
 // Rees's 2026-09-10 correction: catching is scarce/harder to grade the same
 // way as everywhere else, so it gets its own lower bar, same as this
@@ -130,6 +138,31 @@ export interface LineupSlotPlayer {
   battingVsHand: number;
   positionGrade: number | null; // current pos_X grade at this slot; null for DH
   overall: number | null;
+  // Real season performance (2026-09-13, Rees's ask: "track performance vs
+  // each pitching hand... as well as ZR at the position they are listed
+  // at"). Purely additive display data -- battingVsHand/positionGrade
+  // above (scouted ratings) still drive the actual lineup selection
+  // unchanged. MLB-level only (level_id=1), split by the SAME pitcher hand
+  // as the lineup this player appears in (split_id 2=vsLHP, 3=vsRHP).
+  // statsYear falls back to the most recently COMPLETED season when the
+  // current one has no at-bats yet -- same offseason rule as
+  // getTopProspectsDetailed/getFreeAgents (queries.ts / free-agency-
+  // query.ts) -- and every field below is null when a player genuinely has
+  // no real MLB at-bats in either season (e.g. hasn't debuted yet) or, for
+  // zrAtPosition, no real innings on file at this exact position (always
+  // null for DH, which has no fielding position at all).
+  statsYear: number | null;
+  avgVsHand: number | null;
+  slgVsHand: number | null;
+  opsVsHand: number | null;
+  // Simple, unadjusted OPS+ (100 * (OBP/lgOBP + SLG/lgSLG - 1)) against the
+  // real league-wide MLB baseline for this SAME split/season -- no park
+  // adjustment, matching the same level of rigor as this codebase's other
+  // display-only (not regression-input) OPS+-style numbers. Null when the
+  // league baseline itself has no real at-bats for this split/season
+  // (can't divide by a zero/missing OBP or SLG).
+  opsPlusVsHand: number | null;
+  zrAtPosition: number | null;
 }
 
 export interface LineupSlot {
@@ -142,6 +175,25 @@ export interface LineupSlot {
   backups: LineupSlotPlayer[];
 }
 
+// A healthy, eligible hitter who never lands as a starter or PRIMARY
+// (first) backup anywhere, in either lineup (2026-09-13, Rees's ask) --
+// real bench overflow: candidates worth considering for a minors option to
+// open a roster spot, since the best role this engine can find for them
+// anywhere is third-string-or-deeper. Deliberately still counts someone
+// who shows up as a plain (non-primary) second backup somewhere as
+// "unused" -- that's not meaningfully different from not being used at
+// all for roster-construction purposes.
+export interface UnusedCandidate {
+  playerId: number;
+  name: string;
+  overall: number | null;
+  // Real field positions (not counting DH, which every hitter is
+  // trivially "eligible" for -- listing it on every single row would be
+  // pure noise) this player cleared the eligibility bar for. Empty means
+  // bat-only: didn't clear the bar anywhere in the field.
+  eligiblePositions: FieldPosition[];
+}
+
 export interface OptimalLineups {
   vsLHP: LineupSlot[];
   vsRHP: LineupSlot[];
@@ -149,6 +201,11 @@ export interface OptimalLineups {
   // injury (2026-09-13) -- same list either way, since availability doesn't
   // depend on which pitcher hand a lineup is built against.
   injuredOut: InjuredOutPlayer[];
+  // Healthy, eligible hitters who never surface as a starter or primary
+  // backup in EITHER lineup (2026-09-13) -- sorted best-Overall-first, so
+  // the most surprising/notable case (a well-rated player still not
+  // finding real playing time) leads.
+  unused: UnusedCandidate[];
 }
 
 interface Candidate {
@@ -168,13 +225,54 @@ function scoreForField(c: Candidate, pos: FieldPosition, battingVsHand: number):
   return battingVsHand * OFFENSE_WEIGHT + posGrade * DEFENSE_WEIGHT;
 }
 
-function toSlotPlayer(c: Candidate, position: LineupPosition, battingVsHand: number): LineupSlotPlayer {
+interface BattingCounts { ab: number; h: number; d: number; t: number; hr: number; bb: number; hp: number; sf: number }
+
+// Real season performance context (2026-09-13) -- built once per
+// getOptimalLineups() call and passed through to every toSlotPlayer() call
+// for both lineups, so the (potentially large) league-wide baseline/roster
+// stat fetches only ever happen once, not once per slot.
+interface RealStatsContext {
+  statsYear: number | null;
+  battingBySplit: Map<number, Map<number, BattingCounts>>; // split_id (2/3) -> player_id -> counts
+  leagueBaselineBySplit: Map<number, { obp: number; slg: number }>; // split_id -> real MLB-wide OBP/SLG for that split/season
+  zrByPosition: Map<number, Map<number, number>>; // OOTP position code -> player_id -> ZR
+}
+
+const SPLIT_ID_FOR_HAND: Record<"l" | "r", number> = { l: 2, r: 3 };
+
+function realStatLine(
+  playerId: number,
+  hand: "l" | "r",
+  position: LineupPosition,
+  ctx: RealStatsContext
+): Pick<LineupSlotPlayer, "statsYear" | "avgVsHand" | "slgVsHand" | "opsVsHand" | "opsPlusVsHand" | "zrAtPosition"> {
+  const bat = ctx.battingBySplit.get(SPLIT_ID_FOR_HAND[hand])?.get(playerId);
+  let avg: number | null = null, slg: number | null = null, ops: number | null = null, opsPlus: number | null = null;
+  if (bat && bat.ab > 0) {
+    const singles = bat.h - bat.d - bat.t - bat.hr;
+    const totalBases = singles + 2 * bat.d + 3 * bat.t + 4 * bat.hr;
+    avg = bat.h / bat.ab;
+    slg = totalBases / bat.ab;
+    const obpDenom = bat.ab + bat.bb + bat.hp + bat.sf;
+    const obp = obpDenom > 0 ? (bat.h + bat.bb + bat.hp) / obpDenom : null;
+    if (obp !== null) {
+      ops = obp + slg;
+      const lg = ctx.leagueBaselineBySplit.get(SPLIT_ID_FOR_HAND[hand]);
+      if (lg && lg.obp > 0 && lg.slg > 0) opsPlus = Math.round(100 * (obp / lg.obp + slg / lg.slg - 1));
+    }
+  }
+  const zr = position === "DH" ? null : ctx.zrByPosition.get(FIELD_POSITION_CODE[position as FieldPosition])?.get(playerId) ?? null;
+  return { statsYear: ctx.statsYear, avgVsHand: avg, slgVsHand: slg, opsVsHand: ops, opsPlusVsHand: opsPlus, zrAtPosition: zr };
+}
+
+function toSlotPlayer(c: Candidate, position: LineupPosition, battingVsHand: number, hand: "l" | "r", ctx: RealStatsContext): LineupSlotPlayer {
   return {
     playerId: c.playerId,
     name: c.name,
     battingVsHand,
     positionGrade: position === "DH" ? null : c.posGrade[position as FieldPosition] ?? null,
     overall: c.overall,
+    ...realStatLine(c.playerId, hand, position, ctx),
   };
 }
 
@@ -186,7 +284,7 @@ function emptyLineup(): LineupSlot[] {
 // best-score-first, not already starting anywhere in this same lineup.
 const BACKUPS_PER_SLOT = 2;
 
-function buildLineup(candidates: Candidate[], hand: "l" | "r"): LineupSlot[] {
+function buildLineup(candidates: Candidate[], hand: "l" | "r", ctx: RealStatsContext): LineupSlot[] {
   const battingFor = (c: Candidate) => (hand === "l" ? c.vsL : c.vsR);
 
   // Row per candidate, one column per lineup slot (8 field positions + DH),
@@ -206,7 +304,7 @@ function buildLineup(candidates: Candidate[], hand: "l" | "r"): LineupSlot[] {
 
   return LINEUP_POSITIONS.map((position, slotIdx) => {
     const candIdx = assignment[slotIdx];
-    const starter = candIdx !== null ? toSlotPlayer(candidates[candIdx], position, battingFor(candidates[candIdx])) : null;
+    const starter = candIdx !== null ? toSlotPlayer(candidates[candIdx], position, battingFor(candidates[candIdx]), hand, ctx) : null;
 
     // Backups: best TWO remaining eligible players not starting ANYWHERE in
     // this lineup (Rees's spec, widened 2026-09-13 from "one per position" --
@@ -224,7 +322,7 @@ function buildLineup(candidates: Candidate[], hand: "l" | "r"): LineupSlot[] {
       })
       .filter((x): x is { c: Candidate; bat: number; score: number } => x !== null)
       .sort((a, b) => b.score - a.score);
-    const backups = scored.slice(0, BACKUPS_PER_SLOT).map(({ c, bat }) => toSlotPlayer(c, position, bat));
+    const backups = scored.slice(0, BACKUPS_PER_SLOT).map(({ c, bat }) => toSlotPlayer(c, position, bat, hand, ctx));
 
     return { position, starter, backups };
   });
@@ -252,7 +350,7 @@ export async function getOptimalLineups(leagueId: number, orgId: number): Promis
       .range(from, to) as never
   );
   const allIds = rosterPlayers.map((p) => p.id);
-  if (allIds.length === 0) return { vsLHP: emptyLineup(), vsRHP: emptyLineup(), injuredOut: [] };
+  if (allIds.length === 0) return { vsLHP: emptyLineup(), vsRHP: emptyLineup(), injuredOut: [], unused: [] };
 
   // player_computed (ph, for the hitter/pitcher split) is needed for the
   // FULL roster, not just the available ones -- injuredOut below has to
@@ -278,7 +376,7 @@ export async function getOptimalLineups(leagueId: number, orgId: number): Promis
     .sort((a, b) => (a.daysLeft ?? Infinity) - (b.daysLeft ?? Infinity));
 
   const ids = availablePlayers.map((p) => p.id);
-  if (ids.length === 0) return { vsLHP: emptyLineup(), vsRHP: emptyLineup(), injuredOut };
+  if (ids.length === 0) return { vsLHP: emptyLineup(), vsRHP: emptyLineup(), injuredOut, unused: [] };
 
   const { data: ratingsRaw, error: ratErr } = await supabase
     .from("player_ratings_snapshots")
@@ -307,9 +405,122 @@ export async function getOptimalLineups(leagueId: number, orgId: number): Promis
     candidates.push({ playerId: p.id, name: `${p.first_name} ${p.last_name}`, overall: c.overall, vsL, vsR, posGrade, eligible });
   }
 
-  return {
-    vsLHP: buildLineup(candidates, "l"),
-    vsRHP: buildLineup(candidates, "r"),
-    injuredOut,
-  };
+  // Real season performance (2026-09-13, Rees's ask) -- resolved once here,
+  // not per slot. Offseason fallback: the latest refresh run's own stat
+  // rows are only ever for the CURRENT season (refresh.ts only pulls that
+  // each run) -- the instant a new season begins with zero games played
+  // yet, that run has no stat rows at all. Falls back to the most recently
+  // COMPLETED season (and the specific, older refresh_run_id that actually
+  // captured it) when that happens -- same rule, same reasoning, as
+  // getTopProspectsDetailed (queries.ts) and getFreeAgents
+  // (free-agency-query.ts); kept as its own copy here rather than a shared
+  // helper, matching this codebase's own established preference for
+  // duplicating a small, stable rule over introducing a shared abstraction
+  // across files that don't otherwise depend on each other.
+  let statsYear: number | null = null;
+  let statsRefreshRunId = refreshRunId;
+  {
+    const { data: currentYearRow } = await supabase
+      .from("player_batting_stats_snapshots").select("year").eq("refresh_run_id", refreshRunId).order("year", { ascending: false }).limit(1).maybeSingle();
+    statsYear = (currentYearRow as { year: number } | null)?.year ?? null;
+    if (statsYear === null) {
+      const { data: fallbackRow } = await supabase
+        .from("player_batting_stats_snapshots").select("year,refresh_run_id").eq("dsa_league_id", leagueId)
+        .order("year", { ascending: false }).order("refresh_run_id", { ascending: false }).limit(1).maybeSingle();
+      const fallback = fallbackRow as { year: number; refresh_run_id: number } | null;
+      if (fallback) {
+        statsYear = fallback.year;
+        statsRefreshRunId = fallback.refresh_run_id;
+      }
+    }
+  }
+
+  const candidateIds = candidates.map((c) => c.playerId);
+  const battingBySplit = new Map<number, Map<number, BattingCounts>>([[2, new Map()], [3, new Map()]]);
+  const leagueBaselineBySplit = new Map<number, { obp: number; slg: number }>();
+  const zrByPosition = new Map<number, Map<number, number>>();
+
+  if (statsYear !== null && candidateIds.length > 0) {
+    // This roster's own hitters, both hand splits, MLB level only -- level_id=1
+    // matches the same "how would this bat perform in an MLB lineup" framing
+    // as the rest of this page (these are all current MLB roster players).
+    // A player can have more than one stint at this level/split/season (a
+    // same-level in-season trade) -- summed per player, same pattern as
+    // getTopProspectsDetailed.
+    const { data: ownBatRaw, error: ownBatErr } = await supabase
+      .from("player_batting_stats_snapshots").select("player_id,split_id,ab,h,d,t,hr,bb,hp,sf")
+      .eq("refresh_run_id", statsRefreshRunId).eq("year", statsYear).eq("level_id", 1).in("split_id", [2, 3]).in("player_id", candidateIds);
+    if (ownBatErr) throw ownBatErr;
+    for (const r of (ownBatRaw ?? []) as { player_id: number; split_id: number; ab: number; h: number; d: number; t: number; hr: number; bb: number; hp: number; sf: number }[]) {
+      const bySplit = battingBySplit.get(r.split_id);
+      if (!bySplit) continue;
+      const cur = bySplit.get(r.player_id) ?? { ab: 0, h: 0, d: 0, t: 0, hr: 0, bb: 0, hp: 0, sf: 0 };
+      cur.ab += r.ab; cur.h += r.h; cur.d += r.d; cur.t += r.t; cur.hr += r.hr; cur.bb += r.bb; cur.hp += r.hp; cur.sf += r.sf;
+      bySplit.set(r.player_id, cur);
+    }
+
+    // League-wide MLB baseline for the SAME split/season/refresh_run_id, for
+    // OPS+ -- every real MLB hitter's split-specific line, not just this
+    // roster's, paginated since this is league-wide.
+    const leagueTotalsBySplit = new Map<number, BattingCounts>([[2, { ab: 0, h: 0, d: 0, t: 0, hr: 0, bb: 0, hp: 0, sf: 0 }], [3, { ab: 0, h: 0, d: 0, t: 0, hr: 0, bb: 0, hp: 0, sf: 0 }]]);
+    const leagueBatRows = await fetchAll<{ split_id: number; ab: number; h: number; d: number; t: number; hr: number; bb: number; hp: number; sf: number }>((from, to) =>
+      supabase.from("player_batting_stats_snapshots").select("split_id,ab,h,d,t,hr,bb,hp,sf")
+        .eq("refresh_run_id", statsRefreshRunId).eq("year", statsYear).eq("level_id", 1).in("split_id", [2, 3]).range(from, to) as never
+    );
+    for (const r of leagueBatRows) {
+      const cur = leagueTotalsBySplit.get(r.split_id);
+      if (!cur) continue;
+      cur.ab += r.ab; cur.h += r.h; cur.d += r.d; cur.t += r.t; cur.hr += r.hr; cur.bb += r.bb; cur.hp += r.hp; cur.sf += r.sf;
+    }
+    for (const [splitId, t] of leagueTotalsBySplit) {
+      if (t.ab <= 0) continue;
+      const singles = t.h - t.d - t.t - t.hr;
+      const totalBases = singles + 2 * t.d + 3 * t.t + 4 * t.hr;
+      const obpDenom = t.ab + t.bb + t.hp + t.sf;
+      if (obpDenom <= 0) continue;
+      leagueBaselineBySplit.set(splitId, { obp: (t.h + t.bb + t.hp) / obpDenom, slg: totalBases / t.ab });
+    }
+
+    // ZR at each real field position, this roster's hitters only -- overall
+    // split (split_id=0, fielding's own "overall" convention, DIFFERENT from
+    // batting/pitching's split_id=1 -- see getTopProspectsDetailed's comment
+    // for the gotcha this already caught once).
+    const { data: fieldRaw, error: fieldErr } = await supabase
+      .from("player_fielding_stats_snapshots").select("player_id,position,zr")
+      .eq("refresh_run_id", statsRefreshRunId).eq("year", statsYear).eq("level_id", 1).eq("split_id", 0).in("player_id", candidateIds);
+    if (fieldErr) throw fieldErr;
+    for (const r of (fieldRaw ?? []) as { player_id: number; position: number | null; zr: number | null }[]) {
+      if (r.position === null || r.zr === null) continue;
+      const byPos = zrByPosition.get(r.position) ?? new Map<number, number>();
+      byPos.set(r.player_id, r.zr); // a player has at most one row per position per season -- no stint-summing needed here
+      zrByPosition.set(r.position, byPos);
+    }
+  }
+
+  const ctx: RealStatsContext = { statsYear, battingBySplit, leagueBaselineBySplit, zrByPosition };
+  const vsLHP = buildLineup(candidates, "l", ctx);
+  const vsRHP = buildLineup(candidates, "r", ctx);
+
+  // Bench overflow (2026-09-13, Rees's ask): healthy, eligible hitters who
+  // never land as a starter or PRIMARY (index-0) backup in EITHER lineup --
+  // real candidates for a minors option to open a roster spot, since the
+  // best role this engine finds for them anywhere is third-string-or-deeper.
+  const usedMeaningfully = new Set<number>();
+  for (const lineup of [vsLHP, vsRHP]) {
+    for (const slot of lineup) {
+      if (slot.starter) usedMeaningfully.add(slot.starter.playerId);
+      if (slot.backups[0]) usedMeaningfully.add(slot.backups[0].playerId);
+    }
+  }
+  const unused: UnusedCandidate[] = candidates
+    .filter((c) => !usedMeaningfully.has(c.playerId))
+    .map((c) => ({
+      playerId: c.playerId,
+      name: c.name,
+      overall: c.overall,
+      eligiblePositions: FIELD_POSITIONS.filter((pos) => c.eligible[pos]),
+    }))
+    .sort((a, b) => (b.overall ?? -Infinity) - (a.overall ?? -Infinity));
+
+  return { vsLHP, vsRHP, injuredOut, unused };
 }

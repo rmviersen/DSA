@@ -6,6 +6,28 @@ import { resolveLeagueId, resolveDefaultOrgId } from "@/lib/league";
 export const dynamic = "force-dynamic";
 
 const fmt1 = (n: number | null) => (n === null || n === undefined ? "—" : n.toFixed(1));
+// 0-1 ratio -> ".XXX", the standard baseball convention (no leading zero) --
+// same formatting rule ProspectTable.tsx's own `rate()` already uses.
+const rate = (n: number | null) => (n === null || n === undefined ? "—" : n.toFixed(3).replace(/^0/, ""));
+
+// Real season performance, one combined string per player (2026-09-13,
+// Rees's ask: "track performance vs each pitching hand (avg/slg/ops/ops+),
+// as well as ZR at the position they are listed at"). Additive to Bat vs
+// Hand/Defense above (the scouted numbers that actually drive lineup
+// selection) -- this is real, observed performance, shown for context, not
+// used to build the lineup. Leads with the season it's from (matching the
+// same label Top Prospects uses) since this can be last season's numbers
+// via the offseason fallback, not necessarily the season in progress. ZR
+// is omitted entirely for DH (no fielding position to report) rather than
+// shown as a dash, to avoid implying a real "no defensive value" ZR of
+// zero was actually on file.
+function realStatLine(p: LineupSlotPlayer): string {
+  if (p.avgVsHand === null) return "No Stats";
+  const yearLabel = p.statsYear !== null ? `${p.statsYear}: ` : "";
+  const opsPlusPart = p.opsPlusVsHand !== null ? ` (${p.opsPlusVsHand})` : "";
+  const zrPart = p.zrAtPosition !== null ? ` · ${fmt1(p.zrAtPosition)} ZR` : "";
+  return `${yearLabel}${rate(p.avgVsHand)}/${rate(p.slgVsHand)}/${rate(p.opsVsHand)}${opsPlusPart}${zrPart}`;
+}
 
 // Optimal Lineup (2026-09-10, Rees's ask) -- two independent 9-man lineups,
 // one built for facing a left-handed starter and one for a right-handed
@@ -22,7 +44,7 @@ function PlayerCell({ player, sideLabel, league }: { player: LineupSlotPlayer | 
   if (!player) {
     return (
       <>
-        <td colSpan={3} style={{ color: "var(--color-text-muted, #888)", textAlign: "center" }}>
+        <td colSpan={4} style={{ color: "var(--color-text-muted, #888)", textAlign: "center" }}>
           No eligible player on the active roster
         </td>
       </>
@@ -37,6 +59,9 @@ function PlayerCell({ player, sideLabel, league }: { player: LineupSlotPlayer | 
         {fmt1(player.battingVsHand)}
       </td>
       <td style={gradeStyle(player.positionGrade)}>{player.positionGrade === null ? "—" : Math.round(player.positionGrade)}</td>
+      <td style={{ whiteSpace: "nowrap", fontSize: "0.85em" }} title="Real AVG/SLG/OPS (OPS+) vs. this hand, and ZR at this exact position -- observed performance, shown for context, not used to build the lineup">
+        {realStatLine(player)}
+      </td>
     </>
   );
 }
@@ -56,20 +81,23 @@ function LineupTable({ slots, sideLabel, league }: { slots: LineupSlot[]; sideLa
         <thead>
           <tr>
             <th rowSpan={2} style={{ verticalAlign: "bottom" }}>Pos</th>
-            <th colSpan={3}>Starter</th>
-            <th colSpan={3}>Backup 1</th>
-            <th colSpan={3}>Backup 2</th>
+            <th colSpan={4}>Starter</th>
+            <th colSpan={4}>Backup 1</th>
+            <th colSpan={4}>Backup 2</th>
           </tr>
           <tr>
             <th>Name</th>
             <th title={`Batting rating vs. ${sideLabel}`}>Bat vs {sideLabel}</th>
             <th title="Current position grade (0-80) at this exact spot">Defense</th>
+            <th title="Real AVG/SLG/OPS (OPS+) vs. this hand, and ZR at this exact position -- for context, not used to build the lineup">Real Stats</th>
             <th>Name</th>
             <th title={`Batting rating vs. ${sideLabel}`}>Bat vs {sideLabel}</th>
             <th title="Current position grade (0-80) at this exact spot">Defense</th>
+            <th title="Real AVG/SLG/OPS (OPS+) vs. this hand, and ZR at this exact position -- for context, not used to build the lineup">Real Stats</th>
             <th>Name</th>
             <th title={`Batting rating vs. ${sideLabel}`}>Bat vs {sideLabel}</th>
             <th title="Current position grade (0-80) at this exact spot">Defense</th>
+            <th title="Real AVG/SLG/OPS (OPS+) vs. this hand, and ZR at this exact position -- for context, not used to build the lineup">Real Stats</th>
           </tr>
         </thead>
         <tbody>
@@ -98,7 +126,7 @@ export default async function LineupPage({
   const search = await searchParams;
   const leagueId = await resolveLeagueId(league);
   const orgId = search.org ? Number(search.org) : await resolveDefaultOrgId(leagueId);
-  const { vsLHP, vsRHP, injuredOut } = await getOptimalLineups(leagueId, orgId);
+  const { vsLHP, vsRHP, injuredOut, unused } = await getOptimalLineups(leagueId, orgId);
 
   return (
     <>
@@ -112,9 +140,13 @@ export default async function LineupPage({
           a player eligible at more than one position is placed wherever the whole lineup benefits most).
           &quot;Bat vs L/R&quot; is that player&apos;s Batting-shaped rating specifically against that pitcher
           handedness (not his flat, unblended Batting grade); &quot;Defense&quot; is his current position grade
-          (0–80) at that exact spot. Selection blends the two 70/30 in favor of the bat. &quot;Backup 1&quot;/&quot;Backup
-          2&quot; are the two best remaining eligible players at that position who aren&apos;t already starting
-          elsewhere in this same lineup — the same bench player can be listed as a backup at more than one spot.
+          (0–80) at that exact spot. Selection blends the two 70/30 in favor of the bat — both are scouted ratings,
+          and are what actually build these lineups. &quot;Real Stats&quot; is real, observed performance shown
+          alongside for context only: AVG/SLG/OPS and OPS+ (in parens) against this exact pitcher handedness, plus
+          ZR at this exact position — sourced from last season until this one has enough at-bats on file, labeled
+          with whichever year it&apos;s actually showing. &quot;Backup 1&quot;/&quot;Backup 2&quot; are the two best
+          remaining eligible players at that position who aren&apos;t already starting elsewhere in this same lineup
+          — the same bench player can be listed as a backup at more than one spot.
           A sim in this league covers about two weeks, so any hitter currently projected to miss{" "}
           <strong>5 or more days</strong> is left out of both lineups entirely, not just scored lower — see the list
           below if one of your regulars is missing.
@@ -141,6 +173,39 @@ export default async function LineupPage({
 
       <h2 style={{ margin: "2rem 0 0.5rem" }}>vs. Right-Handed Pitching</h2>
       <LineupTable slots={vsRHP} sideLabel="RHP" league={league} />
+
+      {unused.length > 0 && (
+        <section style={{ marginTop: "2rem" }}>
+          <h2 style={{ margin: "0 0 0.5rem" }}>Not Finding Playing Time</h2>
+          <p style={{ color: "var(--color-text-muted, #888)", fontSize: 12, marginTop: 0, marginBottom: 10 }}>
+            Healthy, eligible hitters who aren&apos;t a starter or primary (Backup 1) anywhere in either lineup above
+            — real candidates for a minors option to open a roster spot, since the best role this finds for them
+            anywhere is third-string or deeper. Sorted by Overall, highest first.
+          </p>
+          <div className="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>Name</th>
+                  <th>Overall</th>
+                  <th>Eligible Positions</th>
+                </tr>
+              </thead>
+              <tbody>
+                {unused.map((p) => (
+                  <tr key={p.playerId}>
+                    <td style={{ whiteSpace: "nowrap" }}>
+                      <Link href={`/${league}/players/${p.playerId}`} style={{ color: "inherit" }}>{p.name}</Link>
+                    </td>
+                    <td style={gradeStyle(p.overall)}>{p.overall === null ? "—" : fmt1(p.overall)}</td>
+                    <td>{p.eligiblePositions.length > 0 ? p.eligiblePositions.join("/") : "DH only"}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </section>
+      )}
     </>
   );
 }
