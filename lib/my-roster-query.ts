@@ -254,7 +254,7 @@ export async function getMyRosterAnalysis(leagueId: number, orgId: number): Prom
     if (control < MIN_FUTURE_YEARS_OF_CONTROL) continue;
     const metric = futureMetric(c.potential, c.prospect_potential);
     if (metric === null) continue;
-    const effLvl = effectiveLevel(p.level, p.league_id);
+    const effLvl = effectiveLevel(p.level, p.league_id, leagueId);
     const arr = futurePoolByOrg.get(p.organization_id) ?? [];
     arr.push({
       playerId: p.id,

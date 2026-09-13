@@ -62,19 +62,73 @@ export function levelLabel(level: number | null): string {
 // effectiveLevel()), and inline isInternational checks in org-minors-
 // query.ts/player-detail-query.ts, none of which knew about the level=4
 // split (see LEVEL_LABELS' comment above for the full finding). League IDs
-// 203/204 are this specific save's own numeric league IDs (same convention
-// as -200/200 for international/MLB elsewhere in this codebase), not a
-// general OOTP constant -- reverse-engineered from real rosters (Wellington
-// =203=A+, Napanee=204=A), not documented anywhere by StatsPlus. An
-// unrecognized league_id at level=4 (shouldn't happen -- confirmed only
-// 203/204 exist there across all 32 orgs) defaults to A+, the majority path.
-export function effectiveLevel(level: number | null | undefined, leagueId: number | null | undefined): number | null {
+// 203/204 are TBL's own numeric league IDs (same convention as -200/200 for
+// international/MLB elsewhere in this codebase), not a general OOTP
+// constant -- reverse-engineered from real rosters (Wellington=203=A+,
+// Napanee=204=A), not documented anywhere by StatsPlus. An unrecognized
+// league_id at level=4 (shouldn't happen -- confirmed only 203/204 exist
+// there across all 32 TBL orgs) defaults to A+, the majority path.
+//
+// Multi-league correctness (2026-09-13, Step 7 follow-up): Duud reuses
+// these exact same raw numbers for COMPLETELY different real leagues --
+// Duud's own league_id 203 is MLB itself, not a Single-A sub-league; its
+// 204 is the (AAA) International League, not "A". This function has to
+// know which PLATFORM league it's resolving for, not just the raw
+// (level, league_id) pair, or it will silently produce a wrong-but-
+// plausible answer for whichever save it wasn't originally built against.
+// `platformLeagueId` is the two platform leagues' own `leagues.id` values
+// (hardcoded here rather than imported from lib/league.ts, since this file
+// is deliberately kept free of any Supabase dependency -- see its own
+// header comment -- so a "use client" component can still import this
+// function safely).
+const TBL_PLATFORM_LEAGUE_ID = 1;
+const DUUD_PLATFORM_LEAGUE_ID = 2;
+
+// Duud's own raw players.level=4 (Single-A tier) spans SIX real leagues,
+// not TBL's two -- confirmed 2026-09-13 against the game's own player-info
+// CSV export (`LG`/`Lev` columns), not guessed: South Atlantic (210),
+// Midwest (211), and Northwest (209) are A+; Carolina (213), Florida State
+// (252), and California (212) are A. (Carolina=A was confirmed twice over
+// -- Kannapolis, Rees's own org's A affiliate, plays there.)
+const DUUD_LEVEL4_A_LEAGUE_IDS = new Set([212, 213, 252]); // CAL, CAR, FSL -- everything else at level 4 defaults to A+
+
+// Duud's raw players.level=6 groups FOUR leagues together, not one clean
+// "Rookie" tier: DSL (234) and ACL (217) are genuine Rookie-level academy
+// affiliates (confirmed directly by Rees), FCL (218) the same (confirmed
+// via the same CSV export). The 4th, KFL (222, the KBO's own domestic farm
+// league) is NOT part of any of the 30 US orgs' farm systems at all --
+// same treatment as the independent leagues below: excluded, not folded
+// into "Rookie" just because it happens to share the same raw level code.
+const DUUD_LEVEL6_ROOKIE_LEAGUE_IDS = new Set([234, 217, 218]); // DSL, ACL, FCL
+
+// Independent leagues (raw level=7: American Association, Atlantic League,
+// Frontier League, Pioneer League) and the KBO itself (raw level=8, Korea's
+// top pro league) are real leagues players genuinely pass through, but per
+// Rees's explicit call (2026-09-13) they are NOT part of the MLB farm/
+// prospect system -- excluded from the level ladder entirely (the same
+// `null` this function already returns for "no real level," e.g. an
+// unassigned free agent), not shoehorned into a synthetic 9th/10th tier.
+export function effectiveLevel(level: number | null | undefined, leagueId: number | null | undefined, platformLeagueId: number): number | null {
   if (level == null) return null;
-  if (level === 1) return leagueId != null && leagueId < 0 ? 8 : 1; // International vs. MLB
-  if (level === 4) return leagueId === 204 ? 5 : 4; // A (204) vs. A+ (203, and default)
-  if (level === 5) return 6; // A-
-  if (level === 6) return 7; // Rookie
-  return level; // 2 (AAA), 3 (AA) unchanged
+  if (level === 1) return leagueId != null && leagueId < 0 ? 8 : 1; // International vs. MLB -- confirmed universal across both leagues
+
+  if (platformLeagueId === DUUD_PLATFORM_LEAGUE_ID) {
+    if (level === 4) return leagueId != null && DUUD_LEVEL4_A_LEAGUE_IDS.has(leagueId) ? 5 : 4; // A vs. A+ (and the default)
+    if (level === 6) return leagueId != null && DUUD_LEVEL6_ROOKIE_LEAGUE_IDS.has(leagueId) ? 7 : null; // Rookie, or excluded (KFL)
+    if (level === 7 || level === 8) return null; // independent leagues / KBO -- outside the farm system entirely
+    return level; // 2 (AAA), 3 (AA) unchanged
+  }
+
+  if (platformLeagueId === TBL_PLATFORM_LEAGUE_ID) {
+    if (level === 4) return leagueId === 204 ? 5 : 4; // A (204) vs. A+ (203, and default)
+    if (level === 5) return 6; // A-
+    if (level === 6) return 7; // Rookie
+    return level; // 2 (AAA), 3 (AA) unchanged
+  }
+
+  // Fallback for any future third league without its own branch above yet --
+  // best-effort passthrough (better than throwing) until it gets one.
+  return level;
 }
 
 // StatsPlus serves team logos at a predictable slug of "{name}_{nickname}",

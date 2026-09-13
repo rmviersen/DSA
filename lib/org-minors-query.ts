@@ -409,7 +409,7 @@ export async function getOrgMinorsPlayers(leagueId: number, orgId: number): Prom
     const p = leaguePlayerById.get(c.player_id);
     if (!p || p.level === null || p.team_id === null) continue;
     if (p.level === 1 && p.is_active !== true) continue; // real MLB roster only
-    const effLevel = effectiveLevel(p.level, p.league_id);
+    const effLevel = effectiveLevel(p.level, p.league_id, leagueId);
     if (effLevel === null || effLevel === 8) continue; // exclude international signees at every org, not just this one
     const key = `${effLevel}|${c.role}`;
     const byTeam = leagueByTeamLevelRole.get(key) ?? new Map<number, number[]>();
@@ -471,7 +471,7 @@ export async function getOrgMinorsPlayers(leagueId: number, orgId: number): Prom
     // players.level=4 secretly covers two real leagues (A+ and A). Every
     // level-semantic use below (display, promote/demote, benchmark lookups,
     // team/role grouping) reads effLevel, never raw p.level.
-    const effLevel = effectiveLevel(p.level, p.league_id);
+    const effLevel = effectiveLevel(p.level, p.league_id, leagueId);
     const isInternational = effLevel === 8;
     const effectiveTeamId = isInternational ? internationalTeamId : p.team_id;
     const team = p.team_id ? teamById.get(p.team_id) : undefined;

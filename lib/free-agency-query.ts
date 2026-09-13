@@ -234,8 +234,8 @@ export async function getFreeAgents(leagueId: number, myOrgId: number): Promise<
           war: chosen.hasWar ? chosen.war : null,
           ab: chosen.displayStat,
           ip: null,
-          statLevel: levelLabel(effectiveLevel(chosen.level_id, chosen.league_id)),
-          levelNum: effectiveLevel(chosen.level_id, chosen.league_id),
+          statLevel: levelLabel(effectiveLevel(chosen.level_id, chosen.league_id, leagueId)),
+          levelNum: effectiveLevel(chosen.level_id, chosen.league_id, leagueId),
         });
       } else if (r.ph === "P") {
         const byLevel = pitLevelsByPlayer.get(r.player_id);
@@ -246,8 +246,8 @@ export async function getFreeAgents(leagueId: number, myOrgId: number): Promise<
           war: chosen.hasWar ? chosen.war : null,
           ab: null,
           ip: chosen.displayStat,
-          statLevel: levelLabel(effectiveLevel(chosen.level_id, chosen.league_id)),
-          levelNum: effectiveLevel(chosen.level_id, chosen.league_id),
+          statLevel: levelLabel(effectiveLevel(chosen.level_id, chosen.league_id, leagueId)),
+          levelNum: effectiveLevel(chosen.level_id, chosen.league_id, leagueId),
         });
       }
     }
@@ -325,7 +325,7 @@ export async function getFreeAgents(leagueId: number, myOrgId: number): Promise<
   for (const c of myOrgComputed) {
     if (!c.role) continue;
     const p = myOrgPlayerById.get(c.player_id);
-    const level = effectiveLevel(p?.level ?? null, p?.league_id ?? null);
+    const level = effectiveLevel(p?.level ?? null, p?.league_id ?? null, leagueId);
     if (level === null) continue;
     const key = `${level}|${c.role}`;
     const bucket = myOrgByRoleLevel.get(key) ?? { talent: [], potential: [] };

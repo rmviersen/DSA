@@ -251,7 +251,7 @@ export async function getPlayerDetail(leagueId: number, playerId: number): Promi
   // Same international-signee convention as org-minors-query.ts: level=1
   // with a negative league_id is a not-yet-rostered amateur signee parked
   // under their org's own MLB team_id, not a real active-roster player.
-  const effLevel = effectiveLevel(p.level, p.league_id);
+  const effLevel = effectiveLevel(p.level, p.league_id, leagueId);
   const isInternational = effLevel === 8;
   const team = p.team_id !== null ? teamById.get(p.team_id) : undefined;
   const draftTeam = p.draft_team_id !== null ? teamById.get(p.draft_team_id) : undefined;
@@ -347,7 +347,7 @@ export async function getPlayerDetail(leagueId: number, playerId: number): Promi
   const battingHistory: SeasonStatLine[] = sumStints((batData ?? []) as { year: number; level_id: number | null; league_id: number | null; team_id: number | null; stint: number | null; g: number | null; ab: number | null; h: number | null; d: number | null; t: number | null; hr: number | null; r: number | null; rbi: number | null; bb: number | null; k: number | null; sb: number | null; cs: number | null; war: number | null }[])
     .sort((a, b) => b.year - a.year)
     .map((row) => ({
-      year: row.year, levelLabel: levelLabel(effectiveLevel(row.level_id, row.league_id)), teamName: row.team_id !== null ? (teamById.get(row.team_id)?.nickname ?? null) : null,
+      year: row.year, levelLabel: levelLabel(effectiveLevel(row.level_id, row.league_id, leagueId)), teamName: row.team_id !== null ? (teamById.get(row.team_id)?.nickname ?? null) : null,
       g: row.g, ab: row.ab, h: row.h, d: row.d, t: row.t, hr: row.hr, r: row.r, rbi: row.rbi, bb: row.bb, k: row.k, sb: row.sb, cs: row.cs,
       gs: null, ip: null, er: null, w: null, l: null, sv: null, war: row.war,
     }));
@@ -355,7 +355,7 @@ export async function getPlayerDetail(leagueId: number, playerId: number): Promi
   const pitchingHistory: SeasonStatLine[] = sumStints((pitData ?? []) as { year: number; level_id: number | null; league_id: number | null; team_id: number | null; stint: number | null; g: number | null; gs: number | null; ip: number | null; er: number | null; w: number | null; l: number | null; s: number | null; k: number | null; bb: number | null; ha: number | null; hra: number | null; war: number | null }[])
     .sort((a, b) => b.year - a.year)
     .map((row) => ({
-      year: row.year, levelLabel: levelLabel(effectiveLevel(row.level_id, row.league_id)), teamName: row.team_id !== null ? (teamById.get(row.team_id)?.nickname ?? null) : null,
+      year: row.year, levelLabel: levelLabel(effectiveLevel(row.level_id, row.league_id, leagueId)), teamName: row.team_id !== null ? (teamById.get(row.team_id)?.nickname ?? null) : null,
       g: row.g, ab: null, h: row.ha, d: null, t: null, hr: row.hra, r: null, rbi: null, bb: row.bb, k: row.k, sb: null, cs: null,
       gs: row.gs, ip: row.ip, er: row.er, w: row.w, l: row.l, sv: row.s, war: row.war,
     }));

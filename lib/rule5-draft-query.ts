@@ -131,7 +131,7 @@ export async function getRule5DraftBoard(leagueId: number, orgId: number): Promi
   );
 
   const eligible = candidates.filter((p) => {
-    const effLvl = effectiveLevel(p.level, p.league_id);
+    const effLvl = effectiveLevel(p.level, p.league_id, leagueId);
     // Real minor-league levels only (2=AAA through 7=Rookie) -- excludes
     // level 1 (MLB) explicitly, matching the official draft-pool filter's
     // "League Level is not Major League" condition, not just implicitly via

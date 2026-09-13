@@ -503,7 +503,7 @@ export async function fetchComputedPlayers(opts: { leagueId: number; orgId?: num
       // Same label the player themself would show elsewhere (e.g. org-minors,
       // player detail) -- effectiveLevel resolves the level=4 A/A+ ambiguity
       // using this player's own league_id, not a guess.
-      const statLevel = levelLabel(effectiveLevel(p.level, p.league_id));
+      const statLevel = levelLabel(effectiveLevel(p.level, p.league_id, opts.leagueId));
       // A player can have more than one stint AT their current level in a
       // season (optioned/recalled, etc.) -- sum across matching stints
       // rather than taking the first, same fix as HANDOFF gotcha 15.
@@ -628,7 +628,7 @@ export async function getRoleLevelBenchmarks(leagueId: number, metric: RoleLevel
   for (const c of computed) {
     if (!c.role) continue;
     const p = playerById.get(c.player_id);
-    const level = effectiveLevel(p?.level ?? null, p?.league_id ?? null);
+    const level = effectiveLevel(p?.level ?? null, p?.league_id ?? null, leagueId);
     if (level == null || level < 1 || level > 8) continue;
     if (level === 1 && p?.is_active !== true) continue; // real MLB row only -- international players already remapped to 7 above, so this can't accidentally exclude them
     if (!sums.has(c.role)) sums.set(c.role, new Map());
@@ -686,7 +686,7 @@ export async function getLevelAgeBenchmarks(leagueId: number): Promise<LevelAgeB
   const sums = new Map<number, { sum: number; n: number; sumH: number; nH: number; sumP: number; nP: number }>();
   for (const c of computed) {
     const p = playerById.get(c.player_id);
-    const level = effectiveLevel(p?.level ?? null, p?.league_id ?? null);
+    const level = effectiveLevel(p?.level ?? null, p?.league_id ?? null, leagueId);
     if (level == null || level < 1 || level > 8) continue;
     if (level === 1 && p?.is_active !== true) continue; // real MLB roster only -- same rule as getRoleLevelBenchmarks
     const age = p?.age ?? null;
@@ -1202,7 +1202,7 @@ export async function getTopProspectsDetailed(leagueId: number, orgId?: number, 
   // effectiveLevel, not raw p.level -- players.level=4 alone can't tell a
   // real A+ affiliate from a real A affiliate (see display-helpers.ts's
   // effectiveLevel for the full finding); both would otherwise show "A+".
-  const levelById = new Map(playersExtra.map((p) => [p.id, effectiveLevel(p.level, p.league_id)]));
+  const levelById = new Map(playersExtra.map((p) => [p.id, effectiveLevel(p.level, p.league_id, leagueId)]));
   const teamIdById = new Map(playersExtra.map((p) => [p.id, p.team_id]));
   const orgIdById = new Map(playersExtra.map((p) => [p.id, p.organization_id]));
 

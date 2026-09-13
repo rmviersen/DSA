@@ -342,7 +342,7 @@ async function computeRatingsForRun(supabase: ReturnType<typeof makeSupabaseClie
   for (const c of computed) {
     if (!c.role) continue; // rare degenerate case (see rating-engine.ts's sp_rp "" fallback) -- excluded, not a real bucket
     const player = playerById.get(c.player_id);
-    const level = effectiveLevel(player?.level, player?.league_id);
+    const level = effectiveLevel(player?.level, player?.league_id, leagueId);
     if (level == null || level < 1 || level > INTERNATIONAL_LEVEL) continue;
     // The MLB row specifically must be restricted to the real active roster
     // (Rees 2026-08-24) -- confirmed via direct query that `is_active` is
@@ -669,7 +669,7 @@ async function computeRatingsForRun(supabase: ReturnType<typeof makeSupabaseClie
   const levelSums = new Map<string, { sum: number; n: number }>(); // key: `${ph}|${level}`
   for (const c of computed) {
     const p = playerById.get(c.player_id);
-    const level = effectiveLevel(p?.level, p?.league_id);
+    const level = effectiveLevel(p?.level, p?.league_id, leagueId);
     if (level == null || level < 2 || level > 8) continue;
     const key = `${c.ph}|${level}`;
     const cell = levelSums.get(key) ?? { sum: 0, n: 0 };
@@ -963,7 +963,7 @@ async function computeRatingsForRun(supabase: ReturnType<typeof makeSupabaseClie
     org_rank: orgRankByPlayer.get(c.player_id) ?? null,
     prospect_org_rank: prospectOrgRankByPlayer.get(c.player_id) ?? null,
     prospect_role_rank: prospectRoleRankByPlayer.get(c.player_id) ?? null,
-    eta: prospectRankByPlayer.has(c.player_id) ? estimateEta(c.role, effectiveLevel(playerById.get(c.player_id)?.level, playerById.get(c.player_id)?.league_id), c.overall, c.potential) : null,
+    eta: prospectRankByPlayer.has(c.player_id) ? estimateEta(c.role, effectiveLevel(playerById.get(c.player_id)?.level, playerById.get(c.player_id)?.league_id, leagueId), c.overall, c.potential) : null,
     comp_player_id: compByPlayer.get(c.player_id)?.comp_player_id ?? null,
     comp_similarity: compByPlayer.get(c.player_id)?.comp_similarity ?? null,
     captured_at: capturedAt,

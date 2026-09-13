@@ -623,13 +623,14 @@ than one giant change:
      `getMyRosterAnalysis`, `getOptimalLineups`, `getOrgMinorsPlayers`, and
      `getRule5DraftBoard` all called exactly as their pages call them,
      confirming both TBL (org 15) and Duud (org 5) resolve real, sane data.
-   - **One real, lower-severity gap found and deliberately NOT fixed**:
-     `effectiveLevel()`'s A-vs-A+ disambiguation is a TBL-specific literal
-     that can never fire for Duud (whose level=4 players span 6 different
-     `league_id`s, none matching TBL's `204`) — every Duud "A" player
-     currently displays as "A+". Needs Rees's own knowledge of Duud's real
-     league structure to fix correctly, not a guess. Full detail:
-     `HANDOFF.md` gotcha 41.
+   - **Follow-up, 2026-09-13: `effectiveLevel()`'s TBL-specific A-vs-A+
+     literal fixed properly**, using Rees's real answers (Winston-Salem=A+,
+     Kannapolis=A) plus the game's own player-info CSV export for the other
+     4 of Duud's 6 level-4 leagues, rather than guessed. Also excluded
+     Duud's independent leagues and the KBO from the level ladder entirely
+     per Rees's explicit call, and fixed a real, previously-invisible gap
+     (Duud's raw level=6 secretly includes a Korean farm league that isn't
+     really "Rookie" either). Full detail: `HANDOFF.md` gotcha 42.
    - This closes the multi-league architecture's build order (§8) end to
      end — Duud has its own data pipeline (Step 5), its own computed
      ratings (Step 6), and now renders through the exact same routing,
