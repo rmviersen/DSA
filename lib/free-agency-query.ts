@@ -156,10 +156,33 @@ export async function getFreeAgents(leagueId: number, myOrgId: number): Promise<
   // snapshotted (the exact bug already caught and fixed in rating-
   // validation-query.ts and compute-draft-pick-value.ts -- same rule
   // applies here).
-  const { data: statYearRow } = await supabase
-    .from("player_batting_stats_snapshots").select("year")
-    .eq("refresh_run_id", refreshRunId).order("year", { ascending: false }).limit(1).maybeSingle();
-  const statSeasonYear = (statYearRow as { year: number } | null)?.year ?? null;
+  // Offseason fallback (2026-09-13, same fix and same reason as
+  // getTopProspectsDetailed in queries.ts): the latest refresh run's own
+  // stat rows are only ever for the CURRENT season (refresh.ts only pulls
+  // that each run) -- the instant a new season begins with zero games
+  // played yet, that run has no stat rows at all, and this used to come up
+  // empty, silently blanking every free agent's stat line and Level column.
+  // Falls back to the most recently COMPLETED season (and the specific,
+  // older refresh_run_id that actually captured it) when that happens.
+  let statSeasonYear: number | null = null;
+  let statsRefreshRunId = refreshRunId;
+  {
+    const { data: statYearRow } = await supabase
+      .from("player_batting_stats_snapshots").select("year")
+      .eq("refresh_run_id", refreshRunId).order("year", { ascending: false }).limit(1).maybeSingle();
+    statSeasonYear = (statYearRow as { year: number } | null)?.year ?? null;
+
+    if (statSeasonYear === null) {
+      const { data: fallbackRow } = await supabase
+        .from("player_batting_stats_snapshots").select("year,refresh_run_id").eq("dsa_league_id", leagueId)
+        .order("year", { ascending: false }).order("refresh_run_id", { ascending: false }).limit(1).maybeSingle();
+      const fallback = fallbackRow as { year: number; refresh_run_id: number } | null;
+      if (fallback) {
+        statSeasonYear = fallback.year;
+        statsRefreshRunId = fallback.refresh_run_id;
+      }
+    }
+  }
 
   // Which level's stint counts as "the" stat line (2026-09-04, Rees's ask,
   // refining the original "always highest level" rule): prefer the highest
@@ -187,11 +210,11 @@ export async function getFreeAgents(leagueId: number, myOrgId: number): Promise<
   if (statSeasonYear !== null) {
     const batData = await fetchByIdsChunked<{ player_id: number; level_id: number; league_id: number | null; pa: number; ab: number; war: number | null }>(displayIds, (chunk) =>
       supabase.from("player_batting_stats_snapshots").select("player_id,level_id,league_id,pa,ab,war")
-        .eq("refresh_run_id", refreshRunId).eq("year", statSeasonYear).eq("split_id", 1).in("player_id", chunk) as never
+        .eq("refresh_run_id", statsRefreshRunId).eq("year", statSeasonYear).eq("split_id", 1).in("player_id", chunk) as never
     );
     const pitData = await fetchByIdsChunked<{ player_id: number; level_id: number; league_id: number | null; ip: number; war: number | null }>(displayIds, (chunk) =>
       supabase.from("player_pitching_stats_snapshots").select("player_id,level_id,league_id,ip,war")
-        .eq("refresh_run_id", refreshRunId).eq("year", statSeasonYear).eq("split_id", 1).in("player_id", chunk) as never
+        .eq("refresh_run_id", statsRefreshRunId).eq("year", statSeasonYear).eq("split_id", 1).in("player_id", chunk) as never
     );
 
     // Group each player's stints by level FIRST (a same-level in-season

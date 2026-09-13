@@ -1237,10 +1237,37 @@ export async function getTopProspectsDetailed(leagueId: number, orgId?: number, 
   const etaById = new Map(computedExtra.map((c) => [c.player_id, c.eta]));
   const phById = new Map(computedExtra.map((c) => [c.player_id, c.ph]));
 
-  // Most recent season we have any stats for.
-  const { data: yearRow } = await supabase
-    .from("player_batting_stats_snapshots").select("year").eq("refresh_run_id", refreshRunId).order("year", { ascending: false }).limit(1).maybeSingle();
-  const seasonYear = (yearRow as { year: number } | null)?.year ?? null;
+  // Most recent season we have any stats for. During the season, the latest
+  // refresh run's own batting-stats rows are always for the CURRENT year
+  // (refresh.ts only pulls the current season each run, past seasons don't
+  // change) -- but the instant a new season begins with zero games played
+  // yet, that run has NO stat rows at all, and this used to come up empty,
+  // silently dropping every prospect's stat line site-wide until the new
+  // season had real games. Fixed 2026-09-13 (Rees's ask): if the latest run
+  // has nothing, fall back to the most recently COMPLETED season instead --
+  // found via ITS OWN refresh_run_id (an older one, not the current run,
+  // since that's where last season's rows actually live), leaguewide (not
+  // scoped to any one refresh_run_id) but explicitly filtered by
+  // dsa_league_id since this table is now shared across leagues and each
+  // one's "most recent season" is a different real year.
+  let seasonYear: number | null = null;
+  let statsRefreshRunId = refreshRunId;
+  {
+    const { data: currentYearRow } = await supabase
+      .from("player_batting_stats_snapshots").select("year").eq("refresh_run_id", refreshRunId).order("year", { ascending: false }).limit(1).maybeSingle();
+    seasonYear = (currentYearRow as { year: number } | null)?.year ?? null;
+
+    if (seasonYear === null) {
+      const { data: fallbackRow } = await supabase
+        .from("player_batting_stats_snapshots").select("year,refresh_run_id").eq("dsa_league_id", leagueId)
+        .order("year", { ascending: false }).order("refresh_run_id", { ascending: false }).limit(1).maybeSingle();
+      const fallback = fallbackRow as { year: number; refresh_run_id: number } | null;
+      if (fallback) {
+        seasonYear = fallback.year;
+        statsRefreshRunId = fallback.refresh_run_id;
+      }
+    }
+  }
 
   // A player can have one row PER LEVEL they played at this season
   // (promotions/demotions mid-year each get their own stint row) — collect
@@ -1261,13 +1288,13 @@ export async function getTopProspectsDetailed(leagueId: number, orgId?: number, 
       const chunk = ids.slice(i, i + 500);
       const { data: bat } = await supabase.from("player_batting_stats_snapshots")
         .select("player_id,level_id,ab,h,d,t,hr,bb,hp,sf,sb,war")
-        .eq("refresh_run_id", refreshRunId).eq("year", seasonYear).eq("split_id", 1).in("player_id", chunk);
+        .eq("refresh_run_id", statsRefreshRunId).eq("year", seasonYear).eq("split_id", 1).in("player_id", chunk);
       (bat as never as ({ player_id: number } & { level_id: number; ab: number; h: number; d: number; t: number; hr: number; bb: number; hp: number; sf: number; sb: number; war: number | null })[] | null)
         ?.forEach((r) => { const arr = battingByPlayer.get(r.player_id) ?? []; arr.push(r); battingByPlayer.set(r.player_id, arr); });
 
       const { data: pit } = await supabase.from("player_pitching_stats_snapshots")
         .select("player_id,level_id,ip,er,k,bb,hp,hra,war")
-        .eq("refresh_run_id", refreshRunId).eq("year", seasonYear).eq("split_id", 1).in("player_id", chunk);
+        .eq("refresh_run_id", statsRefreshRunId).eq("year", seasonYear).eq("split_id", 1).in("player_id", chunk);
       (pit as never as ({ player_id: number } & { level_id: number; ip: number; er: number; k: number; bb: number; hp: number; hra: number; war: number | null })[] | null)
         ?.forEach((r) => { const arr = pitchingByPlayer.get(r.player_id) ?? []; arr.push(r); pitchingByPlayer.set(r.player_id, arr); });
 
@@ -1281,7 +1308,7 @@ export async function getTopProspectsDetailed(leagueId: number, orgId?: number, 
       // directly against the raw table before shipping.
       const { data: field } = await supabase.from("player_fielding_stats_snapshots")
         .select("player_id,level_id,zr")
-        .eq("refresh_run_id", refreshRunId).eq("year", seasonYear).eq("split_id", 0).in("player_id", chunk);
+        .eq("refresh_run_id", statsRefreshRunId).eq("year", seasonYear).eq("split_id", 0).in("player_id", chunk);
       (field as never as ({ player_id: number } & { level_id: number; zr: number | null })[] | null)
         ?.forEach((r) => { const arr = fieldingByPlayer.get(r.player_id) ?? []; arr.push(r); fieldingByPlayer.set(r.player_id, arr); });
     }
