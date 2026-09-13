@@ -268,7 +268,27 @@ async function computeRatingsForRun(supabase: ReturnType<typeof makeSupabaseClie
     // league's refresh_run_ids exist in this same table, "most recent stats-
     // bearing run" could resolve to the WRONG league's run just because its
     // id happens to be numerically higher.
-    const { data } = await supabase.from(table).select("refresh_run_id").eq("dsa_league_id", leagueId).order("refresh_run_id", { ascending: false }).limit(1).maybeSingle();
+    //
+    // Real bug found and fixed 2026-09-13 (Rees challenged an implausible
+    // exact 50.0%/50.0% batting handedness split): this query can legitimately
+    // TIME OUT under load -- player_batting_stats_snapshots has 1M+ rows and,
+    // before today, no index covering (dsa_league_id, refresh_run_id), so
+    // "ORDER BY refresh_run_id DESC LIMIT 1 WHERE dsa_league_id=X" forced a
+    // full sort. The old code destructured only `data` and silently discarded
+    // `error`, so a timeout (confirmed real: Postgres error 57014, "canceling
+    // statement due to statement timeout") looked identical to "no rows for
+    // this league" and fell through to `?? refreshRunId` -- silently using
+    // THIS run (which, in the offseason, has zero stats) instead of genuinely
+    // failing loudly. That in turn made sumBySplit() below compute a real 0/0,
+    // which hit the *other* hardcoded 50/50 fallback -- a fake, too-perfect
+    // split that was never actually "no data exists," just a swallowed error.
+    // Added the missing index (migration add_league_refreshrun_index_on_stat_
+    // snapshots) so this lookup is a cheap index scan instead of a full sort,
+    // and now THROW on a real query error instead of treating it as "found
+    // nothing" -- a failure here should stop the run, not quietly fabricate a
+    // plausible-looking number.
+    const { data, error } = await supabase.from(table).select("refresh_run_id").eq("dsa_league_id", leagueId).order("refresh_run_id", { ascending: false }).limit(1).maybeSingle();
+    if (error) throw new Error(`latestStatsRunId(${table}) failed: ${error.message}`);
     return (data as { refresh_run_id: number } | null)?.refresh_run_id ?? refreshRunId;
   }
 
@@ -281,7 +301,13 @@ async function computeRatingsForRun(supabase: ReturnType<typeof makeSupabaseClie
       const rows = await fetchAll<{ split_id: number; [key: string]: number }>((from, to) =>
         supabase.from(table)
           .select(`${statCol},split_id`)
-          .eq("refresh_run_id", statsRunId).in("year", last3Years).in("split_id", [2, 3]).in("player_id", chunk)
+          // level_id=1 added 2026-09-13, same investigation as the timeout fix
+          // above -- the comment above last3Years always claimed "MLB level
+          // only (level=1)" but this query only ever filtered by CURRENT
+          // roster membership (mlbPlayerIds), not by the stat ROW's own level.
+          // A current MLB player's minor-league at-bats/innings from earlier
+          // in the 3-year window were silently being counted as MLB ones.
+          .eq("refresh_run_id", statsRunId).eq("level_id", 1).in("year", last3Years).in("split_id", [2, 3]).in("player_id", chunk)
           .range(from, to) as never
       );
       rows.forEach((row) => {
