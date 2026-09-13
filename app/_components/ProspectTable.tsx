@@ -44,16 +44,24 @@ function fmtStaleDate(iso: string): string {
 // unchanged by this rewrite, just the punctuation/wording around it.
 // "value LABEL" throughout (2026-08-20 decision), e.g. "26 AB" not "AB 26" --
 // matches how the slash line already reads (no leading label at all).
+//
+// Leading "YYYY Stats ·" label (2026-09-13, Rees's ask) -- added once the
+// offseason fallback in getTopProspectsDetailed (queries.ts) meant this
+// card can now show a PRIOR season's totals (e.g. 2031) while the site is
+// otherwise already into 2032, with no visual difference from a normal
+// current-season line. r.seasonYear is real data already returned by that
+// query (not derived here) -- just wasn't rendered before this.
 function statLine(r: ProspectRow): string {
   const t = r.seasonTotals;
+  const yearLabel = r.seasonYear !== null ? `${r.seasonYear} Stats · ` : "";
   const levelsSuffix = t.levels.length > 0 ? ` · ${t.levels.join("/")}` : "";
   if (r.ph === "P") {
     if (t.ip === null) return "No Stats";
-    return `${fmt1(t.ip)} IP · ${fmt2(t.fip)} FIP · ${fmt2(t.era)} ERA · ${fmt1(t.k9)} K/9 · ${fmt1(t.war)} WAR${levelsSuffix}`;
+    return `${yearLabel}${fmt1(t.ip)} IP · ${fmt2(t.fip)} FIP · ${fmt2(t.era)} ERA · ${fmt1(t.k9)} K/9 · ${fmt1(t.war)} WAR${levelsSuffix}`;
   }
   if (r.ph === "H") {
     if (t.ab === null) return "No Stats";
-    return `${fmtInt(t.ab)} AB · ${rate(t.avg)}/${rate(t.obp)}/${rate(t.slg)} · ${fmtInt(t.hr)} HR · ${fmtInt(t.sb)} SB · ${fmt1(t.zr)} ZR · ${fmt1(t.war)} WAR${levelsSuffix}`;
+    return `${yearLabel}${fmtInt(t.ab)} AB · ${rate(t.avg)}/${rate(t.obp)}/${rate(t.slg)} · ${fmtInt(t.hr)} HR · ${fmtInt(t.sb)} SB · ${fmt1(t.zr)} ZR · ${fmt1(t.war)} WAR${levelsSuffix}`;
   }
   return "No Stats";
 }
