@@ -58,14 +58,14 @@ type SortKey =
   // loses no information.
   | "contactStuff" | "powerMovement" | "eyeControl" | "speedStamina"
   | "overall" | "potential" | "ab" | "ip" | "war" | "prospect_potential" | "prospect_rank"
-  | "demand" | "fairValue" | "valueGap" | "sign" | "prone";
+  | "demand" | "fairValue" | "valueGap" | "sign" | "prone" | "drafted";
 
 // r.ph is "H" for a hitter, "P" for a pitcher (null is not expected in
 // practice but falls back to the hitter side, matching every other
 // nullable-ph default in this component).
 const combined = (r: PlayerRow, hitterVal: number | null, pitcherVal: number | null) => (r.ph === "P" ? pitcherVal : hitterVal);
 
-export function PlayerTable({ rows, showTeam, showProspectCols, showStatLevel, showValueVsDemand, showSign, renderLimit }: { rows: PlayerRow[]; showTeam: boolean; showProspectCols: boolean; showStatLevel?: boolean; showValueVsDemand?: boolean; showSign?: boolean; renderLimit?: number }) {
+export function PlayerTable({ rows, showTeam, showProspectCols, showStatLevel, showValueVsDemand, showSign, showDraftStatus, renderLimit }: { rows: PlayerRow[]; showTeam: boolean; showProspectCols: boolean; showStatLevel?: boolean; showValueVsDemand?: boolean; showSign?: boolean; showDraftStatus?: boolean; renderLimit?: number }) {
   // Multi-league routing (2026-09-10) -- this table is only ever rendered
   // under a page inside app/[league]/..., so the league slug is always in
   // the URL.
@@ -97,6 +97,12 @@ export function PlayerTable({ rows, showTeam, showProspectCols, showStatLevel, s
   // rather than raw dollars -- typing "5" for $5M beats typing "5000000".
   const [demandMinM, setDemandMinM] = useState("");
   const [demandMaxM, setDemandMaxM] = useState("");
+  // Available-only filter (2026-09-13, Rees's ask, mid-first-round of a live
+  // draft: "add a filter... for only available players"). Only meaningful
+  // where showDraftStatus itself is shown, same gating as Sign/Demand above.
+  // Defaults ON -- the whole point of checking this page mid-draft is "who's
+  // left," not "who's gone."
+  const [availableOnly, setAvailableOnly] = useState(true);
   const [sortKey, setSortKey] = useState<SortKey>("overall");
   const [sortDir, setSortDir] = useState<"asc" | "desc">("desc");
 
@@ -178,8 +184,9 @@ export function PlayerTable({ rows, showTeam, showProspectCols, showStatLevel, s
     // "at least $X" is a real bar a no-demand player hasn't cleared.
     if (demandMax !== null && !Number.isNaN(demandMax)) out = out.filter((r) => r.demandSalary === null || r.demandSalary <= demandMax);
     if (signOnly) out = out.filter((r) => r.signFlag === true);
+    if (showDraftStatus && availableOnly) out = out.filter((r) => r.draftedByTeam === null);
     return out;
-  }, [phFiltered, roleFilter, proneFilter, ageMin, ageMax, overallMin, demandMinM, demandMaxM, signOnly]);
+  }, [phFiltered, roleFilter, proneFilter, ageMin, ageMax, overallMin, demandMinM, demandMaxM, signOnly, showDraftStatus, availableOnly]);
 
   const sortedRows = useMemo(() => {
     const dir = sortDir === "desc" ? -1 : 1;
@@ -220,6 +227,9 @@ export function PlayerTable({ rows, showTeam, showProspectCols, showStatLevel, s
         // alphabetically -- higher score = more durable, so "desc" reads as
         // "most durable first," consistent with every other column here.
         case "prone": av = a.prone ? PRONE_ORDER.length - PRONE_ORDER.indexOf(a.prone) : -1; bv = b.prone ? PRONE_ORDER.length - PRONE_ORDER.indexOf(b.prone) : -1; break;
+        // Available (no team) sorts first on "desc" -- reads as "best
+        // available first," the natural way to scan a draft board.
+        case "drafted": av = a.draftedByTeam === null ? 0 : 1; bv = b.draftedByTeam === null ? 0 : 1; break;
       }
       if (av < bv) return -1 * dir;
       if (av > bv) return 1 * dir;
@@ -262,7 +272,7 @@ export function PlayerTable({ rows, showTeam, showProspectCols, showStatLevel, s
   // match" message just wouldn't span the real table width in those
   // cases). Bumped 13->14 on 2026-09-09 for the new always-shown
   // Durability column.
-  const colCount = 14 + (showTeam ? 1 : 0) + (showStatLevel ? 1 : 0) + (showValueVsDemand ? 3 : 0) + (showProspectCols ? 2 : 0) + (showSign ? 1 : 0);
+  const colCount = 14 + (showTeam ? 1 : 0) + (showStatLevel ? 1 : 0) + (showValueVsDemand ? 3 : 0) + (showProspectCols ? 2 : 0) + (showSign ? 1 : 0) + (showDraftStatus ? 1 : 0);
 
   return (
     // player-table-page marker (2026-09-04, Rees's ask) -- widens .site-main
@@ -291,6 +301,26 @@ export function PlayerTable({ rows, showTeam, showProspectCols, showStatLevel, s
             {f === "all" ? "All" : f === "H" ? "Hitters" : "Pitchers"}
           </button>
         ))}
+        {/* Available-only filter (2026-09-13, Rees's ask) -- only where
+            showDraftStatus itself is shown; not a meaningful concept
+            elsewhere. Same toggle-button pattern as Sign-only below. */}
+        {showDraftStatus && (
+          <button
+            onClick={() => setAvailableOnly((v) => !v)}
+            aria-pressed={availableOnly}
+            style={{
+              padding: "3px 10px",
+              fontSize: 12,
+              border: "1px solid var(--color-border-strong)",
+              borderRadius: 4,
+              background: availableOnly ? "var(--color-navy)" : "transparent",
+              color: availableOnly ? "var(--color-text-on-navy)" : "inherit",
+              cursor: "pointer",
+            }}
+          >
+            ✓ Available only
+          </button>
+        )}
         <span style={{ fontSize: 12 }}>Role</span>
         {roleOptions.map((role) => (
           <button
@@ -471,6 +501,7 @@ export function PlayerTable({ rows, showTeam, showProspectCols, showStatLevel, s
           <thead>
             <tr>
               {th("Name", "name")}
+              {showDraftStatus && th("Drafted By", "drafted")}
               {th("Pos", "pos")}
               {th("Role", "role")}
               {showTeam && th("Team", "team")}
@@ -533,6 +564,11 @@ export function PlayerTable({ rows, showTeam, showProspectCols, showStatLevel, s
                   )}
                   <a href={statsPlusPlayerUrl(r.player_id)} target="_blank" rel="noopener noreferrer" title="View on StatsPlus" style={{ marginLeft: 4, fontSize: 11, opacity: 0.7 }}>↗</a>
                 </td>
+                {showDraftStatus && (
+                  <td style={r.draftedByTeam ? { color: "var(--color-text-muted, #888)" } : { color: "rgb(34,197,94)", fontWeight: 700 }}>
+                    {r.draftedByTeam ?? "Available"}
+                  </td>
+                )}
                 <td>{r.pos ?? "—"}</td>
                 <td>{r.role ?? "—"}</td>
                 {/* team_abbr comes from team_batting_stats_snapshots, which

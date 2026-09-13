@@ -292,6 +292,17 @@ export interface PlayerRow extends RatingsSlice {
   isInjured: boolean;
   injuryBadge: string | null;
   injuryLabel: string;
+  // Live draft status (2026-09-13, Rees's ask, mid-first-round) -- null for
+  // every consumer except /draft (same "null everywhere else" convention as
+  // demandSalary/signFlag above). NOT the same thing as draft_year/draft_
+  // round/draft_overall_pick above -- those come from the player's own
+  // `players` row, which StatsPlus doesn't populate until the WHOLE draft is
+  // finalized, so they read blank for a player picked minutes ago in a draft
+  // still in progress. draftedByTeam instead comes from the live draft_picks
+  // table (kept current by `npm run check-draft-picks`, which reads the
+  // public draftv2 feed directly) -- the only source that's actually correct
+  // while a draft is live. Set in getTopDraftees, not fetchComputedPlayers.
+  draftedByTeam: string | null;
 }
 
 // PERFORMANCE FIX (2026-08-25): this function used to fetch `players` FIRST
@@ -560,6 +571,7 @@ export async function fetchComputedPlayers(opts: { leagueId: number; orgId?: num
         compPlayerName: c.comp_player_id !== null ? (compNameById.get(c.comp_player_id) ?? null) : null,
         compSimilarity: c.comp_similarity,
         isInjured: inj.isInjured, injuryBadge: inj.badge, injuryLabel: inj.label,
+        draftedByTeam: null as string | null,
         ...rt,
       };
     })
@@ -1439,6 +1451,36 @@ export async function getTopDraftees(leagueId: number): Promise<{ draftYear: num
   const ids = members.map((m) => m.player_id);
   if (ids.length === 0) return { draftYear: latest.draft_year, rows: [] };
 
-  const rows = await fetchComputedPlayers({ leagueId, playerIds: ids, limit: 100 });
-  return { draftYear: latest.draft_year, rows };
+  // Real bug found 2026-09-13 (Rees, mid-first-round: "the pool is not
+  // including a lot of players, mainly high school age ones"). Root cause
+  // wasn't missing data -- every one of these ~1030 amateurs already has a
+  // real player_computed row -- it was this call's own `limit: 100`.
+  // fetchComputedPlayers sorts its ID-filtered candidates by current Overall
+  // and hard-cuts to `limit` -- fine for "top prospects leaguewide," wrong
+  // for a draft board, because an 18-year-old's CURRENT Overall is
+  // structurally far below a 21-22-year-old college player's, ceiling
+  // notwithstanding. Confirmed directly: of 573 real pool members aged 18 or
+  // under, exactly 1 survived a top-150 cut by Overall. `limit` here is now
+  // comfortably above any realistic pool size (~1030 today) so nothing gets
+  // silently trimmed before it ever reaches the page's own sortable/
+  // filterable table -- click "Potential" or set Age's max to 18 there to see
+  // the high-school demographic the old cutoff was hiding.
+  const rows = await fetchComputedPlayers({ leagueId, playerIds: ids, limit: 2000 });
+
+  // Live "who's already off the board" status (2026-09-13, Rees's ask, same
+  // day, mid-draft) -- sourced from draft_picks, kept current by `npm run
+  // check-draft-picks -- --year=YYYY` (a cheap, standalone pull of the public
+  // draftv2 feed -- see that script's header for why this can't just reuse
+  // players.draft_year, which StatsPlus doesn't populate until the whole
+  // draft is finalized). Not filtered by `.in("player_id", ids)` -- with
+  // ~1000+ ids that would risk the same PostgREST URL-length ceiling
+  // documented on fetchByIdsChunked elsewhere in this file, for no real
+  // benefit: one draft class's total picks-so-far is small (dozens to a few
+  // hundred, not thousands), so fetching all of them for this draft_year and
+  // matching in JS is simpler and just as cheap.
+  const { data: pickRows } = await supabase
+    .from("draft_picks").select("player_id,team_name").eq("dsa_league_id", leagueId).eq("draft_year", latest.draft_year);
+  const draftedByPlayerId = new Map<number, string>((pickRows as { player_id: number; team_name: string }[] | null ?? []).map((r) => [r.player_id, r.team_name]));
+
+  return { draftYear: latest.draft_year, rows: rows.map((r) => ({ ...r, draftedByTeam: draftedByPlayerId.get(r.player_id) ?? null })) };
 }
