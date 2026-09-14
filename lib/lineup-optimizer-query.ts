@@ -57,6 +57,11 @@ interface RatingsRow {
   // grade, unchanged.
   pot_c: number | null; pot_1b: number | null; pot_2b: number | null; pot_3b: number | null;
   pot_ss: number | null; pot_lf: number | null; pot_cf: number | null; pot_rf: number | null;
+  // Raw infield range/arm (2026-09-14, Rees's ask) -- SS/3B's extra real-tool
+  // eligibility gates, see POSITION_ARM_MIN/POSITION_RANGE_MIN. Same fields
+  // c_rating/inf_rating are themselves built from, fetched here separately
+  // since eligibility needs the RAW tool, not the family composite.
+  ifr: number | null; ifa: number | null;
 }
 
 // pot_X only now (2026-09-14) -- eligibility still checks the POTENTIAL
@@ -108,6 +113,19 @@ const FIELD_POSITION_CODE: Record<FieldPosition, number> = {
 const ELIGIBILITY_MIN: Record<FieldPosition, number> = {
   C: 50, "1B": 55, "2B": 55, "3B": 55, SS: 55, LF: 55, CF: 55, RF: 55,
 };
+
+// Extra real-tool requirements for SS and 3B, on top of ELIGIBILITY_MIN's
+// potential-position-grade bar (2026-09-14, Rees's ask, from a real case:
+// David Ramirez cleared pot_ss=55/pot_3b=55 under ELIGIBILITY_MIN alone
+// despite a genuinely weak arm (ifa=45) -- StatsPlus's own flat pot_ss/pot_3b
+// number doesn't separately surface an arm floor the way a real defensive-
+// spectrum evaluation would). SS range reuses rating-engine.ts's own
+// ROLE_BUCKET_THRESHOLDS.ss_range (65) for consistency with the Role
+// classification this engine already computes elsewhere -- deliberately the
+// SAME number, not a coincidentally-similar new one. No position besides
+// SS/3B gets an extra gate; 1B/2B/C/OF still key on ELIGIBILITY_MIN alone.
+const POSITION_ARM_MIN: Partial<Record<FieldPosition, number>> = { SS: 50, "3B": 50 };
+const POSITION_RANGE_MIN: Partial<Record<FieldPosition, number>> = { SS: 65 };
 
 // Composite lineup-selection score = battingVsHand * OFFENSE_WEIGHT +
 // positionGrade * DEFENSE_WEIGHT (DH skips the defense term entirely -- no
@@ -478,7 +496,7 @@ export async function getOptimalLineups(leagueId: number, orgId: number): Promis
 
   const { data: ratingsRaw, error: ratErr } = await supabase
     .from("player_ratings_snapshots")
-    .select("player_id,cntct_l,cntct_r,gap_l,gap_r,pow_l,pow_r,eye_l,eye_r,speed,pot_c,pot_1b,pot_2b,pot_3b,pot_ss,pot_lf,pot_cf,pot_rf")
+    .select("player_id,cntct_l,cntct_r,gap_l,gap_r,pow_l,pow_r,eye_l,eye_r,speed,pot_c,pot_1b,pot_2b,pot_3b,pot_ss,pot_lf,pot_cf,pot_rf,ifr,ifa")
     .eq("refresh_run_id", refreshRunId).in("player_id", ids);
   if (ratErr) throw ratErr;
   const ratingsById = new Map((ratingsRaw as RatingsRow[]).map((r) => [r.player_id, r]));
@@ -496,7 +514,12 @@ export async function getOptimalLineups(leagueId: number, orgId: number): Promis
     for (const pos of FIELD_POSITIONS) {
       const { pot } = POS_KEYS[pos];
       const potVal = r[pot];
-      eligible[pos] = potVal !== null && potVal >= ELIGIBILITY_MIN[pos];
+      const armMin = POSITION_ARM_MIN[pos];
+      const rangeMin = POSITION_RANGE_MIN[pos];
+      eligible[pos] =
+        potVal !== null && potVal >= ELIGIBILITY_MIN[pos] &&
+        (armMin === undefined || (r.ifa !== null && r.ifa >= armMin)) &&
+        (rangeMin === undefined || (r.ifr !== null && r.ifr >= rangeMin));
       // Position-FAMILY composite (2026-09-14, Rees's ask), not the old
       // per-position pos_c/pos_1b/etc. grade -- e.g. every infielder's
       // "defense" score at any infield slot is the SAME inf_rating, since
