@@ -1168,6 +1168,12 @@ export interface ProspectRow extends PlayerRow {
   level: number | null;
   eta: number | null;
   seasonYear: number | null;
+  // True when seasonYear/seasonTotals came from the fallback (most recently
+  // COMPLETED season), not this player's own current-season data (2026-09-14
+  // fix -- see getTopProspectsDetailed's own comment for the real bug this
+  // closes: the fallback decision is now made PER PLAYER, not once for the
+  // whole page). Drives ProspectTable.tsx's italics on a fallback stat line.
+  statsIsFallback: boolean;
   seasonTotals: SeasonTotals;
   ph: "H" | "P" | null;
   orgName: string | null;
@@ -1193,8 +1199,18 @@ export interface ProspectRow extends PlayerRow {
 // production after this had already been 200 for a while).
 export const TOP_PROSPECTS_LIMIT = 200;
 
+// Real bug found and fixed 2026-09-14 (Rees: "when you filter by team it
+// shows all prospects for that team"). TOP_PROSPECTS_LIMIT (200) was always
+// applied regardless of orgId -- fine for the LEAGUEWIDE view it was tuned
+// for, but no single org's real prospect pool (players who actually clear
+// the prospect_rank gate) realistically reaches anywhere near 200, so an
+// org-filtered view was never actually being capped by it at all -- every
+// real prospect an org has always passed straight through. A dedicated,
+// genuinely-binding limit for the org-scoped view.
+export const TOP_PROSPECTS_ORG_LIMIT = 50;
+
 export async function getTopProspectsDetailed(leagueId: number, orgId?: number, baselineRefreshRunId?: number): Promise<ProspectRow[]> {
-  const base = await fetchComputedPlayers({ leagueId, orgId, prospectsOnly: true, limit: TOP_PROSPECTS_LIMIT });
+  const base = await fetchComputedPlayers({ leagueId, orgId, prospectsOnly: true, limit: orgId !== undefined ? TOP_PROSPECTS_ORG_LIMIT : TOP_PROSPECTS_LIMIT });
   if (base.length === 0) return [];
   const ids = base.map((r) => r.player_id);
   // "Most recent draft class" for the highlight, fixed 2026-08-28: this used
@@ -1295,37 +1311,49 @@ export async function getTopProspectsDetailed(leagueId: number, orgId?: number, 
   const etaById = new Map(computedExtra.map((c) => [c.player_id, c.eta]));
   const phById = new Map(computedExtra.map((c) => [c.player_id, c.ph]));
 
-  // Most recent season we have any stats for. During the season, the latest
-  // refresh run's own batting-stats rows are always for the CURRENT year
-  // (refresh.ts only pulls the current season each run, past seasons don't
-  // change) -- but the instant a new season begins with zero games played
-  // yet, that run has NO stat rows at all, and this used to come up empty,
-  // silently dropping every prospect's stat line site-wide until the new
-  // season had real games. Fixed 2026-09-13 (Rees's ask): if the latest run
-  // has nothing, fall back to the most recently COMPLETED season instead --
-  // found via ITS OWN refresh_run_id (an older one, not the current run,
-  // since that's where last season's rows actually live), leaguewide (not
-  // scoped to any one refresh_run_id) but explicitly filtered by
-  // dsa_league_id since this table is now shared across leagues and each
-  // one's "most recent season" is a different real year.
-  let seasonYear: number | null = null;
-  let statsRefreshRunId = refreshRunId;
-  {
-    const { data: currentYearRow } = await supabase
-      .from("player_batting_stats_snapshots").select("year").eq("refresh_run_id", refreshRunId).order("year", { ascending: false }).limit(1).maybeSingle();
-    seasonYear = (currentYearRow as { year: number } | null)?.year ?? null;
+  // Real bug found and fixed 2026-09-14 (Rees: "seeing a bunch of players
+  // with no stats again, with stats only coming through for MLB players
+  // that are still prospects since the MLB season starts before the
+  // minors"). The 2026-09-13 fix above resolved ONE global seasonYear/
+  // statsRefreshRunId for the WHOLE page, gated on whether the current
+  // refresh_run_id has ANY current-year rows AT ALL. Now that the MLB
+  // season has started, MLB players' rows make that check succeed --
+  // seasonYear resolves to the current year and NO fallback triggers -- but
+  // every MINOR-LEAGUE prospect's own season hasn't started yet, so THEY
+  // have zero rows at that year/refresh_run_id and silently rendered blank.
+  // The real fix has to be PER PLAYER, per Rees's own spec: "if there is
+  // current season data, show that. If not, revert to the prior season's
+  // data" -- for THIS player, not for the page as a whole.
+  //
+  // "This season" -- the year we'd show for a player who has real current
+  // data, same discovery as before (refresh.ts only ever pulls the current
+  // season's year each run).
+  const { data: currentYearRow } = await supabase
+    .from("player_batting_stats_snapshots").select("year").eq("refresh_run_id", refreshRunId).order("year", { ascending: false }).limit(1).maybeSingle();
+  const currentSeasonYear = (currentYearRow as { year: number } | null)?.year ?? null;
 
-    if (seasonYear === null) {
-      const { data: fallbackRow } = await supabase
-        .from("player_batting_stats_snapshots").select("year,refresh_run_id").eq("dsa_league_id", leagueId)
-        .order("year", { ascending: false }).order("refresh_run_id", { ascending: false }).limit(1).maybeSingle();
-      const fallback = fallbackRow as { year: number; refresh_run_id: number } | null;
-      if (fallback) {
-        seasonYear = fallback.year;
-        statsRefreshRunId = fallback.refresh_run_id;
-      }
-    }
-  }
+  // Most recently COMPLETED season with real data, leaguewide (not scoped to
+  // one refresh_run_id, since that's an OLDER run than the current one) --
+  // the fallback target for whichever INDIVIDUAL players don't have a
+  // current-year row. Real bug found and fixed 2026-09-14, caught during
+  // this very fix's own verification: without excluding currentSeasonYear,
+  // this query just re-found the SAME (2032, current run) combo the MLB
+  // level has already started writing -- identical to the "current" target,
+  // so it could never actually reach back to a real prior season for the
+  // minor-league players who needed it, leaving them blank exactly as
+  // before. `.lt("year", currentSeasonYear)` forces this to genuinely be an
+  // OLDER season (falls back to no upper bound at all if currentSeasonYear
+  // itself is null -- the "current run has nothing whatsoever" case).
+  let fallbackQuery = supabase
+    .from("player_batting_stats_snapshots").select("year,refresh_run_id").eq("dsa_league_id", leagueId);
+  if (currentSeasonYear !== null) fallbackQuery = fallbackQuery.lt("year", currentSeasonYear);
+  const { data: fallbackRow } = await fallbackQuery
+    .order("year", { ascending: false }).order("refresh_run_id", { ascending: false }).limit(1).maybeSingle();
+  const fallback = fallbackRow as { year: number; refresh_run_id: number } | null;
+
+  type BatRow = { player_id: number; level_id: number; ab: number; h: number; d: number; t: number; hr: number; bb: number; hp: number; sf: number; sb: number; war: number | null };
+  type PitRow = { player_id: number; level_id: number; ip: number; er: number; k: number; bb: number; hp: number; hra: number; war: number | null };
+  type FieldRow = { player_id: number; level_id: number; zr: number | null };
 
   // A player can have one row PER LEVEL they played at this season
   // (promotions/demotions mid-year each get their own stint row) — collect
@@ -1338,23 +1366,21 @@ export async function getTopProspectsDetailed(leagueId: number, orgId?: number, 
   // but whose card read as a 43-inning season). The stat line now reads
   // "... across AA & AAA" when more than one level contributed -- see
   // seasonLevels below and ProspectTable.tsx's statLine().
-  const battingByPlayer = new Map<number, { level_id: number; ab: number; h: number; d: number; t: number; hr: number; bb: number; hp: number; sf: number; sb: number; war: number | null }[]>();
-  const pitchingByPlayer = new Map<number, { level_id: number; ip: number; er: number; k: number; bb: number; hp: number; hra: number; war: number | null }[]>();
-  const fieldingByPlayer = new Map<number, { level_id: number; zr: number | null }[]>();
-  if (seasonYear !== null) {
-    for (let i = 0; i < ids.length; i += 500) {
-      const chunk = ids.slice(i, i + 500);
+  async function fetchStatsFor(year: number, statsRefreshRunId: number, playerIds: number[]) {
+    const battingByPlayer = new Map<number, BatRow[]>();
+    const pitchingByPlayer = new Map<number, PitRow[]>();
+    const fieldingByPlayer = new Map<number, FieldRow[]>();
+    for (let i = 0; i < playerIds.length; i += 500) {
+      const chunk = playerIds.slice(i, i + 500);
       const { data: bat } = await supabase.from("player_batting_stats_snapshots")
         .select("player_id,level_id,ab,h,d,t,hr,bb,hp,sf,sb,war")
-        .eq("refresh_run_id", statsRefreshRunId).eq("year", seasonYear).eq("split_id", 1).in("player_id", chunk);
-      (bat as never as ({ player_id: number } & { level_id: number; ab: number; h: number; d: number; t: number; hr: number; bb: number; hp: number; sf: number; sb: number; war: number | null })[] | null)
-        ?.forEach((r) => { const arr = battingByPlayer.get(r.player_id) ?? []; arr.push(r); battingByPlayer.set(r.player_id, arr); });
+        .eq("refresh_run_id", statsRefreshRunId).eq("year", year).eq("split_id", 1).in("player_id", chunk);
+      (bat as never as BatRow[] | null)?.forEach((r) => { const arr = battingByPlayer.get(r.player_id) ?? []; arr.push(r); battingByPlayer.set(r.player_id, arr); });
 
       const { data: pit } = await supabase.from("player_pitching_stats_snapshots")
         .select("player_id,level_id,ip,er,k,bb,hp,hra,war")
-        .eq("refresh_run_id", statsRefreshRunId).eq("year", seasonYear).eq("split_id", 1).in("player_id", chunk);
-      (pit as never as ({ player_id: number } & { level_id: number; ip: number; er: number; k: number; bb: number; hp: number; hra: number; war: number | null })[] | null)
-        ?.forEach((r) => { const arr = pitchingByPlayer.get(r.player_id) ?? []; arr.push(r); pitchingByPlayer.set(r.player_id, arr); });
+        .eq("refresh_run_id", statsRefreshRunId).eq("year", year).eq("split_id", 1).in("player_id", chunk);
+      (pit as never as PitRow[] | null)?.forEach((r) => { const arr = pitchingByPlayer.get(r.player_id) ?? []; arr.push(r); pitchingByPlayer.set(r.player_id, arr); });
 
       // Fielding wasn't fetched here before 2026-08-19 -- added specifically
       // for ZR (Zone Rating), which is a genuine raw field, not derived.
@@ -1366,11 +1392,48 @@ export async function getTopProspectsDetailed(leagueId: number, orgId?: number, 
       // directly against the raw table before shipping.
       const { data: field } = await supabase.from("player_fielding_stats_snapshots")
         .select("player_id,level_id,zr")
-        .eq("refresh_run_id", statsRefreshRunId).eq("year", seasonYear).eq("split_id", 0).in("player_id", chunk);
-      (field as never as ({ player_id: number } & { level_id: number; zr: number | null })[] | null)
-        ?.forEach((r) => { const arr = fieldingByPlayer.get(r.player_id) ?? []; arr.push(r); fieldingByPlayer.set(r.player_id, arr); });
+        .eq("refresh_run_id", statsRefreshRunId).eq("year", year).eq("split_id", 0).in("player_id", chunk);
+      (field as never as FieldRow[] | null)?.forEach((r) => { const arr = fieldingByPlayer.get(r.player_id) ?? []; arr.push(r); fieldingByPlayer.set(r.player_id, arr); });
+    }
+    return { battingByPlayer, pitchingByPlayer, fieldingByPlayer };
+  }
+
+  const emptyStats = { battingByPlayer: new Map<number, BatRow[]>(), pitchingByPlayer: new Map<number, PitRow[]>(), fieldingByPlayer: new Map<number, FieldRow[]>() };
+  const currentStats = currentSeasonYear !== null ? await fetchStatsFor(currentSeasonYear, refreshRunId, ids) : emptyStats;
+
+  // Which players got NOTHING for the current season -- a hitter is
+  // "missing" if he has no batting row this year at all; a pitcher if no
+  // pitching row. Only THESE players need the fallback query, not everyone.
+  const missingIds = ids.filter((id) => {
+    const ph = phById.get(id);
+    if (ph === "H") return !currentStats.battingByPlayer.has(id);
+    if (ph === "P") return !currentStats.pitchingByPlayer.has(id);
+    return true;
+  });
+  const fallbackStats = (fallback && missingIds.length > 0) ? await fetchStatsFor(fallback.year, fallback.refresh_run_id, missingIds) : emptyStats;
+
+  // Per-player: which season actually supplied this player's stat line, and
+  // whether that was the fallback -- drives both the "2032 Stats"/"2031
+  // Stats" label AND the italics flag ProspectTable.tsx renders it with.
+  const statsSourceByPlayer = new Map<number, { year: number; isFallback: boolean }>();
+  if (currentSeasonYear !== null) {
+    for (const id of ids) {
+      const ph = phById.get(id);
+      const hasCurrent = ph === "H" ? currentStats.battingByPlayer.has(id) : ph === "P" ? currentStats.pitchingByPlayer.has(id) : false;
+      if (hasCurrent) statsSourceByPlayer.set(id, { year: currentSeasonYear, isFallback: false });
     }
   }
+  if (fallback) {
+    for (const id of missingIds) {
+      const ph = phById.get(id);
+      const hasFallback = ph === "H" ? fallbackStats.battingByPlayer.has(id) : ph === "P" ? fallbackStats.pitchingByPlayer.has(id) : false;
+      if (hasFallback) statsSourceByPlayer.set(id, { year: fallback.year, isFallback: true });
+    }
+  }
+
+  const battingByPlayer = new Map([...fallbackStats.battingByPlayer, ...currentStats.battingByPlayer]);
+  const pitchingByPlayer = new Map([...fallbackStats.pitchingByPlayer, ...currentStats.pitchingByPlayer]);
+  const fieldingByPlayer = new Map([...fallbackStats.fieldingByPlayer, ...currentStats.fieldingByPlayer]);
 
   const sum = (arr: number[]) => arr.reduce((a, b) => a + b, 0);
 
@@ -1464,11 +1527,13 @@ export async function getTopProspectsDetailed(leagueId: number, orgId?: number, 
       }
     }
 
+    const statsSource = statsSourceByPlayer.get(r.player_id);
     return {
       ...r,
       level: levelById.get(r.player_id) ?? null,
       eta: etaById.get(r.player_id) ?? null,
-      seasonYear,
+      seasonYear: statsSource?.year ?? null,
+      statsIsFallback: statsSource?.isFallback ?? false,
       ph,
       seasonTotals,
       orgName: orgTeam?.name ?? null,

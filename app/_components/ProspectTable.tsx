@@ -45,15 +45,20 @@ function fmtStaleDate(iso: string): string {
 // "value LABEL" throughout (2026-08-20 decision), e.g. "26 AB" not "AB 26" --
 // matches how the slash line already reads (no leading label at all).
 //
-// Leading "YYYY Stats ·" label (2026-09-13, Rees's ask) -- added once the
-// offseason fallback in getTopProspectsDetailed (queries.ts) meant this
-// card can now show a PRIOR season's totals (e.g. 2031) while the site is
-// otherwise already into 2032, with no visual difference from a normal
-// current-season line. r.seasonYear is real data already returned by that
-// query (not derived here) -- just wasn't rendered before this.
+// Leading "YYYY: " label (2026-09-13, Rees's ask, reworded 2026-09-14) --
+// added once the offseason fallback in getTopProspectsDetailed (queries.ts)
+// meant this card can now show a PRIOR season's totals (e.g. 2031) while the
+// site is otherwise already into 2032, with no visual difference from a
+// normal current-season line. r.seasonYear is real data already returned by
+// that query (not derived here) -- just wasn't rendered before this. Prior-
+// season lines are now ALSO rendered in italics (see the render call site,
+// keyed off r.statsIsFallback) so a fallback line is identifiable even
+// without reading the year -- both signals are per-player now, not a single
+// page-wide fallback flag, since the real bug this whole area was fixed for
+// (2026-09-14) is that current-vs-fallback has to be decided per player.
 function statLine(r: ProspectRow): string {
   const t = r.seasonTotals;
-  const yearLabel = r.seasonYear !== null ? `${r.seasonYear} Stats · ` : "";
+  const yearLabel = r.seasonYear !== null ? `${r.seasonYear}: ` : "";
   const levelsSuffix = t.levels.length > 0 ? ` · ${t.levels.join("/")}` : "";
   if (r.ph === "P") {
     if (t.ip === null) return "No Stats";
@@ -457,7 +462,11 @@ export function ProspectTable({ rows, showInternalLinks }: { rows: ProspectRow[]
                         )}
                       </div>
                       <div className="prospect-stats">
-                        {statLine(r)}
+                        {/* Prior-season (fallback) stat lines render in
+                            italics (2026-09-14, Rees's ask) so a stale-season
+                            line is identifiable at a glance, not just by
+                            reading the year prefix. */}
+                        <span style={r.statsIsFallback ? { fontStyle: "italic" } : undefined}>{statLine(r)}</span>
                         {hasBio && <span className="prospect-bio-indicator">BIO {isOpen ? "▲" : "▼"}</span>}
                       </div>
                     </div>

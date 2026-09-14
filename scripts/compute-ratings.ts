@@ -287,7 +287,23 @@ async function computeRatingsForRun(supabase: ReturnType<typeof makeSupabaseClie
     // and now THROW on a real query error instead of treating it as "found
     // nothing" -- a failure here should stop the run, not quietly fabricate a
     // plausible-looking number.
-    const { data, error } = await supabase.from(table).select("refresh_run_id").eq("dsa_league_id", leagueId).order("refresh_run_id", { ascending: false }).limit(1).maybeSingle();
+    //
+    // Real bug found and fixed 2026-09-14 (caught during an unrelated ETA-
+    // fix verification run, same fake 50.0%/50.0% symptom recurring on BOTH
+    // tables this time): the exact "known limit" this function's own top
+    // comment flagged as "not yet hit in practice" got hit for real -- the
+    // MLB level's 2032 season started, so THIS refresh's own refresh_run_id
+    // now has SOME real rows in these tables (2032, level_id=1 only), which
+    // made this query correctly-by-its-old-logic resolve to the CURRENT run
+    // (no fallback needed, no error, no log message) -- but that run has
+    // ZERO rows for any of last3Years (2029-2031), so sumBySplit found
+    // nothing and silently hit the OTHER hardcoded 0.5 fallback below, same
+    // end symptom as the original bug via a different path. Fixed by
+    // requiring the discovered run to actually carry at least one of the
+    // SPECIFIC years this computation needs (`last3Years`), not just any
+    // row for the league at all -- the real question was never "does this
+    // table have data," it's "does it have OUR window's data."
+    const { data, error } = await supabase.from(table).select("refresh_run_id").eq("dsa_league_id", leagueId).in("year", last3Years).order("refresh_run_id", { ascending: false }).limit(1).maybeSingle();
     if (error) throw new Error(`latestStatsRunId(${table}) failed: ${error.message}`);
     return (data as { refresh_run_id: number } | null)?.refresh_run_id ?? refreshRunId;
   }
@@ -491,7 +507,23 @@ async function computeRatingsForRun(supabase: ReturnType<typeof makeSupabaseClie
     // (see the comment above it), and a same-season "ETA" is a contradiction
     // in terms once that season has actually finished playing out.
     const flooredYears = isOffseason ? Math.max(years, 1) : years;
-    return currentYear + flooredYears;
+    // Real bug found and fixed 2026-09-14 (Rees: "seeing 2031 ETAs now which
+    // makes no sense since we are in the 2032 season"). This used to add
+    // flooredYears to `currentYear` -- which is deliberately the last
+    // COMPLETED season (2031 right now, since the 2032 season is still in
+    // progress -- see currentYear's own comment above), correct for the
+    // handedness-split window that also uses it, but WRONG here: a "ready
+    // now" player (flooredYears=0) got eta = 2031 + 0 = 2031, a year that's
+    // already over, instead of 2032 (the season actually being played,
+    // where "ready now" genuinely means something). ETA's base year should
+    // always be `gameYear` -- the in-progress season while one's live
+    // (flooredYears=0 correctly means "this year"), or the season just
+    // completed while in the offseason (where flooredYears is floored to at
+    // least 1, correctly pushing to next year since there's no more of
+    // `gameYear` left to play). currentYear itself is untouched -- still
+    // correct for last3Years below, which genuinely wants the last 3
+    // COMPLETED seasons, not the year currently being played.
+    return gameYear + flooredYears;
   }
 
   // --- Player comp, 2026-08-31 (Rees's spec) --------------------------

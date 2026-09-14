@@ -1,4 +1,4 @@
-import { getOrgTeams, getTopProspectsDetailed, getProspectSnapshotOptions, getTeamRankings, TOP_PROSPECTS_LIMIT } from "../../lib/queries";
+import { getOrgTeams, getTopProspectsDetailed, getProspectSnapshotOptions, getTeamRankings, TOP_PROSPECTS_LIMIT, TOP_PROSPECTS_ORG_LIMIT } from "../../lib/queries";
 import { ProspectFilters } from "./ProspectFilters";
 import { ProspectTable } from "./ProspectTable";
 import { TeamRankingsTable } from "./TeamRankingsTable";
@@ -69,7 +69,7 @@ export async function FarmSystemReportBody({
     <div className="prospects-report-page">
       <header className="page-header">
         <h1>{title}</h1>
-        <p>{orgId ? "Organization rankings by Prospect Potential" : `League-wide top ${TOP_PROSPECTS_LIMIT} by Prospect Potential`}</p>
+        <p>{orgId ? `Organization top ${TOP_PROSPECTS_ORG_LIMIT} by Prospect Potential` : `League-wide top ${TOP_PROSPECTS_LIMIT} by Prospect Potential`}</p>
         {/* Subtle prospect-eligibility disclaimer (2026-08-27, Rees's spec) --
             added alongside the age <= 25 prospect-pool requirement in
             compute-ratings.ts, so a reader isn't left guessing why a given
@@ -78,6 +78,33 @@ export async function FarmSystemReportBody({
           Eligible players: under 45 days of MLB service time and age 25 or younger.
         </p>
       </header>
+      {/* "About the Rankings" (2026-09-14, Rees's ask) -- a high-level,
+          official-reading description of the rating system for anyone
+          landing on this report (this component is shared by the internal
+          /prospects page and the public /TBL/prospects one). Deliberately
+          stays at the level of WHAT the model weighs, not the exact
+          formulas/coefficients behind it -- Rees's own spec: "without going
+          into too much detail." */}
+      <div style={{ border: "1px solid var(--color-border)", borderRadius: 8, padding: "12px 16px", background: "var(--color-surface)", marginBottom: 16, fontSize: "0.875rem", lineHeight: 1.5 }}>
+        <h3 style={{ margin: "0 0 6px", fontSize: "0.9375rem" }}>About the Rankings</h3>
+        <p style={{ margin: "0 0 8px" }}>
+          Our prospect rankings come from a proprietary evaluation model, built and continuously recalibrated against real
+          TBL production and outcomes — not a fixed, one-time formula. Every player&apos;s grade blends his hitting,
+          fielding, baserunning, and pitching tools into role- and position-aware composites, crediting scarce, defensively
+          demanding positions appropriately and weighting each tool by what has actually translated into real production at
+          that level.
+        </p>
+        <p style={{ margin: "0 0 8px" }}>
+          Beyond raw ability, the model factors in a player&apos;s realistic development timeline, injury risk and
+          durability, and makeup factors like work ethic and intelligence. Handedness performance is blended using the
+          league&apos;s own real platoon exposure rather than a flat assumption, and every prospect is matched to the
+          closest real MLB comparable for an intuitive frame of reference.
+        </p>
+        <p style={{ margin: 0, color: "var(--color-text-muted, #888)", fontSize: "0.8125rem" }}>
+          Rankings update continuously as new game data comes in, reflecting the latest information rather than a static
+          preseason snapshot.
+        </p>
+      </div>
       <ProspectFilters teams={teams} selectedOrgId={orgId} snapshots={snapshots} selectedBaselineId={baselineRefreshRunId} action={basePath} />
       {showRankings ? (
         // Side-by-side layout (2026-08-20) -- each table keeps its own
