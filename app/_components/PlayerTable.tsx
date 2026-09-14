@@ -65,7 +65,7 @@ type SortKey =
 // nullable-ph default in this component).
 const combined = (r: PlayerRow, hitterVal: number | null, pitcherVal: number | null) => (r.ph === "P" ? pitcherVal : hitterVal);
 
-export function PlayerTable({ rows, showTeam, showProspectCols, showStatLevel, showValueVsDemand, showSign, showDraftStatus, showPotentialTools, showEligiblePositions, renderLimit }: { rows: PlayerRow[]; showTeam: boolean; showProspectCols: boolean; showStatLevel?: boolean; showValueVsDemand?: boolean; showSign?: boolean; showDraftStatus?: boolean; showPotentialTools?: boolean; showEligiblePositions?: boolean; renderLimit?: number }) {
+export function PlayerTable({ rows, showTeam, showProspectCols, showStatLevel, showValueVsDemand, showSign, showDraftStatus, showPotentialTools, showEligiblePositions, showTradeBlockInfo, renderLimit }: { rows: PlayerRow[]; showTeam: boolean; showProspectCols: boolean; showStatLevel?: boolean; showValueVsDemand?: boolean; showSign?: boolean; showDraftStatus?: boolean; showPotentialTools?: boolean; showEligiblePositions?: boolean; showTradeBlockInfo?: boolean; renderLimit?: number }) {
   // Multi-league routing (2026-09-10) -- this table is only ever rendered
   // under a page inside app/[league]/..., so the league slug is always in
   // the URL.
@@ -285,7 +285,7 @@ export function PlayerTable({ rows, showTeam, showProspectCols, showStatLevel, s
   // match" message just wouldn't span the real table width in those
   // cases). Bumped 13->14 on 2026-09-09 for the new always-shown
   // Durability column.
-  const colCount = 14 + (showTeam ? 1 : 0) + (showStatLevel ? 1 : 0) + (showValueVsDemand ? 3 : 0) + (showProspectCols ? 2 : 0) + (showSign ? 1 : 0) + (showDraftStatus ? 1 : 0) + (showEligiblePositions ? 1 : 0);
+  const colCount = 14 + (showTeam ? 1 : 0) + (showStatLevel ? 1 : 0) + (showValueVsDemand ? 3 : 0) + (showProspectCols ? 2 : 0) + (showSign ? 1 : 0) + (showDraftStatus ? 1 : 0) + (showEligiblePositions ? 1 : 0) + (showTradeBlockInfo ? 3 : 0);
 
   return (
     // player-table-page marker (2026-09-04, Rees's ask) -- widens .site-main
@@ -556,6 +556,13 @@ export function PlayerTable({ rows, showTeam, showProspectCols, showStatLevel, s
               {th(showPotentialTools ? "Pot. Pow/Mov" : "Pow/Mov", "powerMovement")}
               {th(showPotentialTools ? "Pot. Eye/Ctrl" : "Eye/Ctrl", "eyeControl")}
               {th("Spd/Stm", "speedStamina")}
+              {showTradeBlockInfo && (
+                <>
+                  <th style={{ whiteSpace: "normal", lineHeight: 1.2, maxWidth: "4.5rem" }}>Contract (AAV)</th>
+                  <th style={{ whiteSpace: "normal", lineHeight: 1.2, maxWidth: "4.5rem" }}>Control</th>
+                  <th style={{ whiteSpace: "normal", lineHeight: 1.2, maxWidth: "10rem" }}>Trade Block Note</th>
+                </>
+              )}
             </tr>
           </thead>
           <tbody>
@@ -629,6 +636,13 @@ export function PlayerTable({ rows, showTeam, showProspectCols, showStatLevel, s
                 <td style={gradeStyle(powMovVal(r))}>{fmtInt(powMovVal(r))}</td>
                 <td style={gradeStyle(eyeCtrlVal(r))}>{fmtInt(eyeCtrlVal(r))}</td>
                 <td style={gradeStyle(combined(r, r.speed, r.stm))}>{fmtInt(combined(r, r.speed, r.stm))}</td>
+                {showTradeBlockInfo && (
+                  <>
+                    <td>{fmtMoney(r.contractAav)}</td>
+                    <td>{r.controlYears ?? "—"}</td>
+                    <td style={{ whiteSpace: "normal", color: "var(--color-text-muted, #888)" }}>{r.tradeBlockNote || "—"}</td>
+                  </>
+                )}
               </tr>
             ))}
             {sortedRows.length === 0 && (

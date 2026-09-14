@@ -1,7 +1,7 @@
 import { makeSupabaseClient } from "./supabase-client";
 import { latestRefreshRunId } from "./queries";
 import { ROLE_HEALTH_ROWS, topNAvg } from "./org-minors-query";
-import { PITCHER_ROLES } from "./contract-classification";
+import { PITCHER_ROLES, computeAAV, type ContractSalaryFields } from "./contract-classification";
 import { FIELD_POSITIONS, type FieldPosition } from "./lineup-optimizer-query";
 import { yearsOfControl } from "./trade-value";
 
@@ -409,6 +409,7 @@ export interface TradeBlockCandidate {
   currentFloor: number;
   upgradeSize: number;
   yearsOfControl: number | null;
+  contractAav: number | null;
   note: string;
 }
 
@@ -423,7 +424,7 @@ export interface NeedWithTradeBlockCandidates {
 // `captured_at` timestamp (scrape-trade-block.ts stamps every row with one
 // `capturedAt` const per run), so filtering on the single latest value is
 // safe and exact -- no fuzzy "most recent N minutes" needed.
-async function fetchTradeBlockRows(leagueId: number): Promise<{ row: LeaguePlayerRow; teamName: string | null; yearsOfControl: number | null; note: string }[]> {
+async function fetchTradeBlockRows(leagueId: number): Promise<{ row: LeaguePlayerRow; teamName: string | null; yearsOfControl: number | null; contractAav: number | null; note: string }[]> {
   const { data: latestCapRow, error: capErr } = await supabase
     .from("trade_block_snapshots").select("captured_at").eq("dsa_league_id", leagueId).order("captured_at", { ascending: false }).limit(1).maybeSingle();
   if (capErr) throw capErr;
@@ -449,10 +450,15 @@ async function fetchTradeBlockRows(leagueId: number): Promise<{ row: LeaguePlaye
   if (teamsErr) throw teamsErr;
   const teamNameById = new Map((teamsRaw as { id: number; name: string }[]).map((t) => [t.id, t.name]));
 
+  // Full salary schedule (not just years/current_year) so computeAAV can
+  // give a real average-annual-value, not just a control-years count --
+  // Rees's follow-up ask: "and contract information" alongside the note.
+  const salaryCols = "player_id,years,current_year,salary0,salary1,salary2,salary3,salary4,salary5,salary6,salary7,salary8,salary9,salary10,salary11,salary12,salary13,salary14";
   const { data: contractsRaw, error: contractsErr } = await supabase
-    .from("contracts").select("player_id,years,current_year").eq("dsa_league_id", leagueId).in("player_id", ids);
+    .from("contracts").select(salaryCols).eq("dsa_league_id", leagueId).in("player_id", ids);
   if (contractsErr) throw contractsErr;
-  const contractById = new Map((contractsRaw as { player_id: number; years: number | null; current_year: number | null }[]).map((c) => [c.player_id, c]));
+  type ContractRow = { player_id: number } & ContractSalaryFields & { current_year: number | null };
+  const contractById = new Map((contractsRaw as never as ContractRow[]).map((c) => [c.player_id, c]));
 
   const enriched = await enrichPlayers(leagueId, players.map((p) => ({
     id: p.id, name: `${p.first_name} ${p.last_name}`, organization_id: p.organization_id ?? -1,
@@ -468,6 +474,7 @@ async function fetchTradeBlockRows(leagueId: number): Promise<{ row: LeaguePlaye
       yearsOfControl: yearsOfControl({
         contractYears: contract?.years ?? null, contractCurrentYear: contract?.current_year ?? null, mlbServiceYears: p.mlb_service_years,
       }),
+      contractAav: contract ? computeAAV(contract) : null,
       note: noteByPlayer.get(p.id) ?? "",
     };
   });
@@ -486,7 +493,7 @@ export async function getTradeBlockMatches(leagueId: number, orgId: number, need
         return {
           playerId: b.row.id, name: b.row.name, teamName: b.teamName,
           score, currentFloor: floor, upgradeSize: score - floor,
-          yearsOfControl: b.yearsOfControl, note: b.note,
+          yearsOfControl: b.yearsOfControl, contractAav: b.contractAav, note: b.note,
         };
       })
       .filter((c): c is TradeBlockCandidate => c !== null)
@@ -543,27 +550,32 @@ async function fetchSellerOrgIds(leagueId: number): Promise<Set<number>> {
   return sellers;
 }
 
-async function fetchControlYearsById(leagueId: number, ids: number[]): Promise<Map<number, number | null>> {
-  const controlById = new Map<number, number | null>();
+async function fetchControlYearsById(leagueId: number, ids: number[]): Promise<Map<number, { controlYears: number | null; contractAav: number | null }>> {
+  const result = new Map<number, { controlYears: number | null; contractAav: number | null }>();
+  const salaryCols = "player_id,years,current_year,salary0,salary1,salary2,salary3,salary4,salary5,salary6,salary7,salary8,salary9,salary10,salary11,salary12,salary13,salary14";
   const CHUNK = 500;
   for (let i = 0; i < ids.length; i += CHUNK) {
     const chunk = ids.slice(i, i + CHUNK);
     const [{ data: contracts, error: contractErr }, { data: service, error: serviceErr }] = await Promise.all([
-      supabase.from("contracts").select("player_id,years,current_year").eq("dsa_league_id", leagueId).in("player_id", chunk),
+      supabase.from("contracts").select(salaryCols).eq("dsa_league_id", leagueId).in("player_id", chunk),
       supabase.from("players").select("id,mlb_service_years").eq("dsa_league_id", leagueId).in("id", chunk),
     ]);
     if (contractErr) throw contractErr;
     if (serviceErr) throw serviceErr;
-    const contractById = new Map((contracts as { player_id: number; years: number | null; current_year: number | null }[]).map((c) => [c.player_id, c]));
+    type ContractRow = { player_id: number } & ContractSalaryFields & { current_year: number | null };
+    const contractById = new Map((contracts as never as ContractRow[]).map((c) => [c.player_id, c]));
     const serviceById = new Map((service as { id: number; mlb_service_years: number | null }[]).map((s) => [s.id, s.mlb_service_years]));
     for (const id of chunk) {
       const contract = contractById.get(id) ?? null;
-      controlById.set(id, yearsOfControl({
-        contractYears: contract?.years ?? null, contractCurrentYear: contract?.current_year ?? null, mlbServiceYears: serviceById.get(id) ?? null,
-      }));
+      result.set(id, {
+        controlYears: yearsOfControl({
+          contractYears: contract?.years ?? null, contractCurrentYear: contract?.current_year ?? null, mlbServiceYears: serviceById.get(id) ?? null,
+        }),
+        contractAav: contract ? computeAAV(contract) : null,
+      });
     }
   }
-  return controlById;
+  return result;
 }
 
 export interface BroaderCandidate {
@@ -574,6 +586,7 @@ export interface BroaderCandidate {
   currentFloor: number;
   upgradeSize: number;
   yearsOfControl: number | null;
+  contractAav: number | null;
   availabilitySignal: "short-control" | "weak-team" | "both";
 }
 
@@ -604,13 +617,14 @@ export async function getBroaderTargets(leagueId: number, orgId: number, needs: 
       .map((c) => {
         const score = candidateScoreForNeed(c, need);
         if (score === null || score <= floor) return null;
-        const control = controlById.get(c.id) ?? null;
+        const controlInfo = controlById.get(c.id) ?? null;
+        const control = controlInfo?.controlYears ?? null;
         const shortControl = control !== null && control <= BROADER_SCAN_MAX_CONTROL_YEARS;
         const weakTeam = sellerOrgIds.has(c.organization_id);
         if (!shortControl && !weakTeam) return null;
         return {
           playerId: c.id, name: c.name, teamName: teamNameById.get(c.organization_id) ?? null,
-          score, currentFloor: floor, upgradeSize: score - floor, yearsOfControl: control,
+          score, currentFloor: floor, upgradeSize: score - floor, yearsOfControl: control, contractAav: controlInfo?.contractAav ?? null,
           availabilitySignal: (shortControl && weakTeam ? "both" : shortControl ? "short-control" : "weak-team") as BroaderCandidate["availabilitySignal"],
         };
       })
@@ -622,15 +636,15 @@ export async function getBroaderTargets(leagueId: number, orgId: number, needs: 
 
 // --- Full trade-block table (2026-09-14, Rees's ask) -----------------------
 // "A full trade block table... at the bottom of all of the listed players,
-// their ratings, stats, and potential positions." Ratings/stats/sort/filter
-// (including a role filter) are already exactly what PlayerTable.tsx +
-// fetchComputedPlayers (lib/queries.ts) provide -- reused directly, not
-// rebuilt (the page calls fetchComputedPlayers with every block player id).
-// The one thing that infrastructure doesn't compute is "potential
-// positions" (every real field position a player's eligibility clears, not
-// just his nominal Pos) -- this file already has that exact eligibility
-// logic (EXACT_POS_ELIGIBILITY_MIN/ARM_MIN/RANGE_MIN), so it's computed here
-// and merged onto PlayerRow.eligiblePositions by the page.
+// their ratings, stats, and potential positions" -- plus two same-day
+// follow-ups: "the related note from the trade block" and "contract
+// information." Ratings/stats/sort/filter (including a role filter) are
+// already exactly what PlayerTable.tsx + fetchComputedPlayers (lib/
+// queries.ts) provide -- reused directly, not rebuilt (the page calls
+// fetchComputedPlayers with every block player id). What that shared
+// infrastructure doesn't carry -- potential positions, the listing note,
+// and this specific listing's contract/AAV -- is computed here and merged
+// onto PlayerRow by the page.
 
 function eligiblePositionsFor(r: LeaguePlayerRow): FieldPosition[] {
   if (r.ph !== "H") return [];
@@ -645,10 +659,23 @@ function eligiblePositionsFor(r: LeaguePlayerRow): FieldPosition[] {
   });
 }
 
-// One call gives the page everything it needs to build the full table: which
-// player ids are on the block (map keys, for fetchComputedPlayers) and each
-// one's real eligible positions.
-export async function getTradeBlockEligiblePositions(leagueId: number): Promise<Map<number, FieldPosition[]>> {
+export interface TradeBlockPlayerMeta {
+  eligiblePositions: FieldPosition[];
+  note: string;
+  contractAav: number | null;
+  yearsOfControl: number | null;
+}
+
+// One call gives the page everything it needs to build the full table
+// beyond what fetchComputedPlayers already covers: which player ids are on
+// the block (map keys, for fetchComputedPlayers itself), each one's real
+// eligible positions, listing note, and contract.
+export async function getTradeBlockMeta(leagueId: number): Promise<Map<number, TradeBlockPlayerMeta>> {
   const block = await fetchTradeBlockRows(leagueId);
-  return new Map(block.map((b) => [b.row.id, eligiblePositionsFor(b.row)]));
+  return new Map(block.map((b) => [b.row.id, {
+    eligiblePositions: eligiblePositionsFor(b.row),
+    note: b.note,
+    contractAav: b.contractAav,
+    yearsOfControl: b.yearsOfControl,
+  }]));
 }

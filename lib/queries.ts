@@ -319,6 +319,19 @@ export interface PlayerRow extends RatingsSlice {
   // needed -- empty array for every consumer that doesn't set it (same
   // "default everywhere else" convention as draftedByTeam above).
   eligiblePositions: string[];
+  // Trade-block-specific info (2026-09-14, Rees's follow-up asks: "the
+  // related note from the trade block" and "contract information") -- null/
+  // empty for every consumer except /trade-finder's full block table, same
+  // "default everywhere else" convention as draftedByTeam/eligiblePositions
+  // above. tradeBlockNote is the listing GM's own free-text asking price
+  // (often empty, matching trade_block_snapshots.note's own convention);
+  // contractAav/controlYears are this player's REAL current contract, not a
+  // Trade Finder-computed value -- populated externally in
+  // trade-finder-query.ts's getTradeBlockMeta since fetchComputedPlayers
+  // doesn't otherwise touch the contracts table at all.
+  tradeBlockNote: string | null;
+  contractAav: number | null;
+  controlYears: number | null;
 }
 
 // PERFORMANCE FIX (2026-08-25): this function used to fetch `players` FIRST
@@ -589,6 +602,7 @@ export async function fetchComputedPlayers(opts: { leagueId: number; orgId?: num
         isInjured: inj.isInjured, injuryBadge: inj.badge, injuryLabel: inj.label,
         draftedByTeam: null as string | null,
         eligiblePositions: [] as string[],
+        tradeBlockNote: null as string | null, contractAav: null as number | null, controlYears: null as number | null,
         ...rt,
       };
     })

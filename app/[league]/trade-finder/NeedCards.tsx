@@ -14,6 +14,16 @@ function fmt1(n: number | null): string {
   return n === null ? "—" : n.toFixed(1);
 }
 
+// Same formatting convention as PlayerTable.tsx's fmtMoney -- kept as its
+// own local copy rather than a shared import, matching that file's existing
+// precedent of each component owning its own small display helpers.
+function fmtMoney(n: number | null): string {
+  if (n === null) return "—";
+  if (Math.abs(n) >= 1_000_000) return `$${(n / 1_000_000).toFixed(1)}M`;
+  if (Math.abs(n) >= 1_000) return `$${(n / 1_000).toFixed(0)}K`;
+  return `$${n.toFixed(0)}`;
+}
+
 function fmtUpgrade(n: number): string {
   return `+${n.toFixed(2)}`;
 }
@@ -50,6 +60,7 @@ function CandidateTable({ title, rows }: { title: string; rows: (TradeBlockCandi
                 <th style={thStyle}>Team</th>
                 <th style={{ ...thStyle, textAlign: "right" }}>Score</th>
                 <th style={{ ...thStyle, textAlign: "right" }}>Upgrade</th>
+                <th style={{ ...thStyle, textAlign: "right" }}>Contract</th>
                 <th style={{ ...thStyle, textAlign: "right" }}>Control</th>
                 <th style={thStyle}>{isBlock(rows[0]) ? "Listing Note" : "Why Available"}</th>
               </tr>
@@ -63,6 +74,7 @@ function CandidateTable({ title, rows }: { title: string; rows: (TradeBlockCandi
                   <td style={{ ...tdStyle, color: "var(--color-text-muted)" }}>{c.teamName ?? "—"}</td>
                   <td style={{ ...tdStyle, textAlign: "right", ...gradeStyle(c.score) }}>{fmt1(c.score)}</td>
                   <td style={{ ...tdStyle, textAlign: "right", color: "rgb(34,197,94)", fontWeight: 700 }}>{fmtUpgrade(c.upgradeSize)}</td>
+                  <td style={{ ...tdStyle, textAlign: "right", color: "var(--color-text-muted)" }}>{fmtMoney(c.contractAav)}</td>
                   <td style={{ ...tdStyle, textAlign: "right", color: "var(--color-text-muted)" }}>{c.yearsOfControl ?? "—"}</td>
                   <td style={{ ...tdStyle, whiteSpace: "normal", color: "var(--color-text-muted)", maxWidth: "22rem" }}>
                     {isBlock(c) ? (c.note || "—") : AVAILABILITY_LABEL[c.availabilitySignal]}
