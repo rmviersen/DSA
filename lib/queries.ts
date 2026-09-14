@@ -311,6 +311,14 @@ export interface PlayerRow extends RatingsSlice {
   // public draftv2 feed directly) -- the only source that's actually correct
   // while a draft is live. Set in getTopDraftees, not fetchComputedPlayers.
   draftedByTeam: string | null;
+  // Real field positions this player clears eligibility for (2026-09-14,
+  // Trade Finder's ask) -- the Lineup optimizer's own eligibility gates
+  // (potential position grade, plus arm/range for SS/3B), computed and
+  // populated externally (see trade-finder-query.ts's eligiblePositionsFor)
+  // since fetchComputedPlayers doesn't fetch the raw pot_X/arm/range fields
+  // needed -- empty array for every consumer that doesn't set it (same
+  // "default everywhere else" convention as draftedByTeam above).
+  eligiblePositions: string[];
 }
 
 // PERFORMANCE FIX (2026-08-25): this function used to fetch `players` FIRST
@@ -580,6 +588,7 @@ export async function fetchComputedPlayers(opts: { leagueId: number; orgId?: num
         compSimilarity: c.comp_similarity,
         isInjured: inj.isInjured, injuryBadge: inj.badge, injuryLabel: inj.label,
         draftedByTeam: null as string | null,
+        eligiblePositions: [] as string[],
         ...rt,
       };
     })

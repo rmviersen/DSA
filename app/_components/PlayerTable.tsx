@@ -65,7 +65,7 @@ type SortKey =
 // nullable-ph default in this component).
 const combined = (r: PlayerRow, hitterVal: number | null, pitcherVal: number | null) => (r.ph === "P" ? pitcherVal : hitterVal);
 
-export function PlayerTable({ rows, showTeam, showProspectCols, showStatLevel, showValueVsDemand, showSign, showDraftStatus, showPotentialTools, renderLimit }: { rows: PlayerRow[]; showTeam: boolean; showProspectCols: boolean; showStatLevel?: boolean; showValueVsDemand?: boolean; showSign?: boolean; showDraftStatus?: boolean; showPotentialTools?: boolean; renderLimit?: number }) {
+export function PlayerTable({ rows, showTeam, showProspectCols, showStatLevel, showValueVsDemand, showSign, showDraftStatus, showPotentialTools, showEligiblePositions, renderLimit }: { rows: PlayerRow[]; showTeam: boolean; showProspectCols: boolean; showStatLevel?: boolean; showValueVsDemand?: boolean; showSign?: boolean; showDraftStatus?: boolean; showPotentialTools?: boolean; showEligiblePositions?: boolean; renderLimit?: number }) {
   // Multi-league routing (2026-09-10) -- this table is only ever rendered
   // under a page inside app/[league]/..., so the league slug is always in
   // the URL.
@@ -285,7 +285,7 @@ export function PlayerTable({ rows, showTeam, showProspectCols, showStatLevel, s
   // match" message just wouldn't span the real table width in those
   // cases). Bumped 13->14 on 2026-09-09 for the new always-shown
   // Durability column.
-  const colCount = 14 + (showTeam ? 1 : 0) + (showStatLevel ? 1 : 0) + (showValueVsDemand ? 3 : 0) + (showProspectCols ? 2 : 0) + (showSign ? 1 : 0) + (showDraftStatus ? 1 : 0);
+  const colCount = 14 + (showTeam ? 1 : 0) + (showStatLevel ? 1 : 0) + (showValueVsDemand ? 3 : 0) + (showProspectCols ? 2 : 0) + (showSign ? 1 : 0) + (showDraftStatus ? 1 : 0) + (showEligiblePositions ? 1 : 0);
 
   return (
     // player-table-page marker (2026-09-04, Rees's ask) -- widens .site-main
@@ -517,6 +517,11 @@ export function PlayerTable({ rows, showTeam, showProspectCols, showStatLevel, s
               {showDraftStatus && th("Drafted By", "drafted")}
               {th("Pos", "pos")}
               {th("Role", "role")}
+              {showEligiblePositions && (
+                <th style={{ whiteSpace: "normal", lineHeight: 1.2, maxWidth: "4.5rem" }} title="Every real field position this player's potential grade (and, for SS/3B, arm/range) clears -- the Lineup optimizer's own eligibility rule, not just his nominal Pos">
+                  Potential Pos
+                </th>
+              )}
               {showTeam && th("Team", "team")}
               {th("Age", "age")}
               {/* Durability (2026-09-09, Rees's ask) -- bio info, so grouped
@@ -584,6 +589,7 @@ export function PlayerTable({ rows, showTeam, showProspectCols, showStatLevel, s
                 )}
                 <td>{r.pos ?? "—"}</td>
                 <td>{r.role ?? "—"}</td>
+                {showEligiblePositions && <td style={{ whiteSpace: "normal" }}>{r.eligiblePositions.length > 0 ? r.eligiblePositions.join(", ") : "—"}</td>}
                 {/* team_abbr comes from team_batting_stats_snapshots, which
                     only covers MLB-level teams (2026-09-07 finding, on the
                     Rule 5 page -- almost every row there is a minor-league

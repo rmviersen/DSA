@@ -619,3 +619,36 @@ export async function getBroaderTargets(leagueId: number, orgId: number, needs: 
     return { need, candidates };
   });
 }
+
+// --- Full trade-block table (2026-09-14, Rees's ask) -----------------------
+// "A full trade block table... at the bottom of all of the listed players,
+// their ratings, stats, and potential positions." Ratings/stats/sort/filter
+// (including a role filter) are already exactly what PlayerTable.tsx +
+// fetchComputedPlayers (lib/queries.ts) provide -- reused directly, not
+// rebuilt (the page calls fetchComputedPlayers with every block player id).
+// The one thing that infrastructure doesn't compute is "potential
+// positions" (every real field position a player's eligibility clears, not
+// just his nominal Pos) -- this file already has that exact eligibility
+// logic (EXACT_POS_ELIGIBILITY_MIN/ARM_MIN/RANGE_MIN), so it's computed here
+// and merged onto PlayerRow.eligiblePositions by the page.
+
+function eligiblePositionsFor(r: LeaguePlayerRow): FieldPosition[] {
+  if (r.ph !== "H") return [];
+  return FIELD_POSITIONS.filter((pos) => {
+    const potVal = r[FIELD_POS_KEY[pos]] as number | null;
+    if (potVal === null || potVal < EXACT_POS_ELIGIBILITY_MIN[pos]) return false;
+    const armMin = EXACT_POS_ARM_MIN[pos];
+    if (armMin !== undefined && (r.ifa === null || r.ifa < armMin)) return false;
+    const rangeMin = EXACT_POS_RANGE_MIN[pos];
+    if (rangeMin !== undefined && (r.ifr === null || r.ifr < rangeMin)) return false;
+    return true;
+  });
+}
+
+// One call gives the page everything it needs to build the full table: which
+// player ids are on the block (map keys, for fetchComputedPlayers) and each
+// one's real eligible positions.
+export async function getTradeBlockEligiblePositions(leagueId: number): Promise<Map<number, FieldPosition[]>> {
+  const block = await fetchTradeBlockRows(leagueId);
+  return new Map(block.map((b) => [b.row.id, eligiblePositionsFor(b.row)]));
+}

@@ -29,18 +29,18 @@ const AVAILABILITY_LABEL: Record<BroaderCandidate["availabilitySignal"], string>
   both: "≤2 yrs control + weak team",
 };
 
-const thStyle: CSSProperties = { padding: "3px 8px 3px 0", fontWeight: 600, fontSize: "0.6875rem", color: "var(--color-text-muted)", textAlign: "left", whiteSpace: "nowrap" };
-const tdStyle: CSSProperties = { padding: "3px 8px 3px 0", fontSize: "0.8125rem", whiteSpace: "nowrap" };
+const thStyle: CSSProperties = { padding: "2px 6px 2px 0", fontWeight: 600, fontSize: "0.6875rem", color: "var(--color-text-muted)", textAlign: "left", whiteSpace: "nowrap" };
+const tdStyle: CSSProperties = { padding: "2px 6px 2px 0", fontSize: "0.75rem", whiteSpace: "nowrap" };
 
 function CandidateTable({ title, rows }: { title: string; rows: (TradeBlockCandidate | BroaderCandidate)[] }) {
   const isBlock = (r: TradeBlockCandidate | BroaderCandidate): r is TradeBlockCandidate => "note" in r;
   return (
-    <div style={{ marginTop: 10 }}>
-      <div style={{ fontSize: "0.75rem", fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.03em", color: "var(--color-text-muted)", marginBottom: 4 }}>
+    <div style={{ marginTop: 6 }}>
+      <div style={{ fontSize: "0.6875rem", fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.03em", color: "var(--color-text-muted)", marginBottom: 2 }}>
         {title} ({rows.length})
       </div>
       {rows.length === 0 ? (
-        <p style={{ margin: "2px 0", fontSize: "0.8125rem", color: "var(--color-text-muted)" }}>None clear the bar right now.</p>
+        <p style={{ margin: "0 0 2px", fontSize: "0.75rem", color: "var(--color-text-muted)" }}>None clear the bar right now.</p>
       ) : (
         <div style={{ overflowX: "auto" }}>
           <table style={{ borderCollapse: "collapse" }}>
@@ -80,22 +80,18 @@ function CandidateTable({ title, rows }: { title: string; rows: (TradeBlockCandi
 function NeedCard({ need, block, broader }: { need: RoleRankNeed; block: TradeBlockCandidate[]; broader: BroaderCandidate[] }) {
   const isInjuryDriven = need.excludedInjuredPlayers.length > 0 && need.unadjustedRankPct !== null && need.unadjustedRankPct > need.rankPct;
   return (
-    <div style={{ border: "1px solid var(--color-border)", borderRadius: 8, padding: "12px 14px", background: "var(--color-surface)" }}>
-      <h3 style={{ margin: "0 0 8px", fontSize: "1rem" }}>{need.role}</h3>
-      <div style={{ display: "flex", gap: 16, alignItems: "baseline", flexWrap: "wrap" }}>
-        <div>
-          <span style={{ fontSize: "1.375rem", fontWeight: 700, ...percentileStyle(need.rankPct) }}>{fmt1(need.rating)}</span>
-          <span style={{ fontSize: "0.6875rem", color: "var(--color-text-muted)", marginLeft: 6 }}>
-            {need.leagueAvg !== null ? `Lg ${fmt1(need.leagueAvg)}` : "Lg —"}
-          </span>
-        </div>
-        <div>
-          <span style={{ fontSize: "1.375rem", fontWeight: 700, ...percentileStyle(need.rankPct) }}>{rankLabel(need.rank, need.totalTeams)}</span>
-          <span style={{ fontSize: "0.6875rem", color: "var(--color-text-muted)", marginLeft: 6 }}>rank ({need.rankPct.toFixed(0)}th pct)</span>
-        </div>
+    <div style={{ border: "1px solid var(--color-border)", borderRadius: 8, padding: "8px 12px", background: "var(--color-surface)" }}>
+      <div style={{ display: "flex", alignItems: "baseline", gap: 10, flexWrap: "wrap" }}>
+        <h3 style={{ margin: 0, fontSize: "0.9375rem" }}>{need.role}</h3>
+        <span style={{ fontSize: "0.8125rem", ...percentileStyle(need.rankPct) }}>
+          {fmt1(need.rating)} <span style={{ color: "var(--color-text-muted)", fontWeight: 400 }}>(Lg {fmt1(need.leagueAvg)})</span>
+        </span>
+        <span style={{ fontSize: "0.8125rem", ...percentileStyle(need.rankPct) }}>
+          {rankLabel(need.rank, need.totalTeams)} <span style={{ color: "var(--color-text-muted)", fontWeight: 400 }}>({need.rankPct.toFixed(0)}th pct)</span>
+        </span>
         {isInjuryDriven && (
           <span style={{ fontSize: "0.75rem", color: "rgb(220,38,38)" }}>
-            Injury-driven -- would rank {need.unadjustedRankPct?.toFixed(0)}th pct healthy: {need.excludedInjuredPlayers.map((p) => `${p.name} (${p.daysLeft}d)`).join(", ")}
+            ⚠ injury-driven -- {need.unadjustedRankPct?.toFixed(0)}th pct healthy ({need.excludedInjuredPlayers.map((p) => `${p.name}, ${p.daysLeft}d`).join("; ")})
           </span>
         )}
       </div>
@@ -113,7 +109,7 @@ export default function NeedCards({
   broaderMatches: NeedWithBroaderCandidates[];
 }) {
   return (
-    <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
+    <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
       {needs.map((need) => (
         <NeedCard
           key={need.role}
