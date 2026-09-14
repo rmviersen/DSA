@@ -221,6 +221,14 @@ interface RatingsSlice {
   // isBustRisk check already reads (`r.prone === "Fragile" || "Wrecked"`),
   // just not previously surfaced to any page.
   prone: string | null;
+  // Makeup traits (2026-09-14, Rees's ask, for /draft's Work Ethic column
+  // and Draft Value formula) -- real, already-categorical "H"/"N"/"L"
+  // values confirmed directly against the schema, no mapping needed.
+  // `int_` (not `int` -- avoids colliding with the SQL type name) is
+  // Intelligence, consumed only by the Draft Value formula below, not shown
+  // as its own column (Rees asked for a Work Ethic column specifically).
+  wrkethic: string | null;
+  int_: string | null;
 }
 
 export interface PlayerRow extends RatingsSlice {
@@ -332,6 +340,12 @@ export interface PlayerRow extends RatingsSlice {
   tradeBlockNote: string | null;
   contractAav: number | null;
   controlYears: number | null;
+  // Draft-specific metrics (2026-09-14, Rees's ask) -- both null for every
+  // consumer except /draft, computed in getTopDraftees. See that function's
+  // own comment for the exact Draft Value formula and Hypothetical Prospect
+  // Rank derivation.
+  draftValue: number | null;
+  hypotheticalProspectRank: number | null;
 }
 
 // PERFORMANCE FIX (2026-08-25): this function used to fetch `players` FIRST
@@ -491,7 +505,7 @@ export async function fetchComputedPlayers(opts: { leagueId: number; orgId?: num
   const ratingsData = await fetchByIdsChunked<{ player_id: number } & RatingsSlice>(relevantIds, (chunk) =>
     supabase
       .from("player_ratings_snapshots")
-      .select("player_id,cntct,pow,eye,speed,stf,mov,ctrl,stm,pos,prone,pot_cntct,pot_pow,pot_eye,pot_stf,pot_mov,pot_ctrl")
+      .select("player_id,cntct,pow,eye,speed,stf,mov,ctrl,stm,pos,prone,pot_cntct,pot_pow,pot_eye,pot_stf,pot_mov,pot_ctrl,wrkethic,int_")
       .eq("refresh_run_id", refreshRunId)
       .in("player_id", chunk) as never
   );
@@ -603,6 +617,7 @@ export async function fetchComputedPlayers(opts: { leagueId: number; orgId?: num
         draftedByTeam: null as string | null,
         eligiblePositions: [] as string[],
         tradeBlockNote: null as string | null, contractAav: null as number | null, controlYears: null as number | null,
+        draftValue: null as number | null, hypotheticalProspectRank: null as number | null,
         ...rt,
       };
     })
@@ -1513,5 +1528,76 @@ export async function getTopDraftees(leagueId: number): Promise<{ draftYear: num
     .from("draft_picks").select("player_id,team_name").eq("dsa_league_id", leagueId).eq("draft_year", latest.draft_year);
   const draftedByPlayerId = new Map<number, string>((pickRows as { player_id: number; team_name: string }[] | null ?? []).map((r) => [r.player_id, r.team_name]));
 
-  return { draftYear: latest.draft_year, rows: rows.map((r) => ({ ...r, draftedByTeam: draftedByPlayerId.get(r.player_id) ?? null })) };
+  // Draft Value (2026-09-14, Rees's ask) -- a SEPARATE metric from
+  // prospect_potential, built the same shape but tuned differently for
+  // amateurs specifically. prospect_potential (rating-engine.ts) is:
+  //   riskAdjusted + overall*0.25 - 12.5
+  // where riskAdjusted is potential (minus 5 for a Fragile/Wrecked bust-risk
+  // prone), and "-12.5" exists purely to net out overall*0.25's contribution
+  // at a LEAGUE-AVERAGE overall of 50 (50*0.25=12.5) -- so a dead-average
+  // player's prospectPotential reduces to just his risk-adjusted potential,
+  // and only deviates based on whether his current overall sits above or
+  // below that 50 baseline. Draft Value reuses that exact shape with:
+  //   - A smaller overall-weight (0.15, not 0.25 -- Rees's "similar... boost
+  //     for fully developed players... but to a slightly smaller degree"),
+  //     re-deriving the offset the same way (50*0.15=7.5) so the same
+  //     "nets to zero at a league-average overall" property holds.
+  //   - Two makeup adjustments prospect_potential doesn't have at all: Work
+  //     Ethic (+3 High / 0 Normal / -3 Low) and Intelligence at HALF that
+  //     swing (+1.5/0/-1.5), per Rees's exact spec ("boost for high, penalty
+  //     for low... Intelligence to 1/2 the degree of work ethic"). Both
+  //     values are a reasoned first cut, easy to retune -- flagged plainly
+  //     rather than treated as a fitted constant the way the rating engine's
+  //     own weights are.
+  const DRAFT_VALUE_OVERALL_WEIGHT = 0.15;
+  const DRAFT_VALUE_OVERALL_BASELINE = 50;
+  const WORK_ETHIC_ADJ: Record<string, number> = { H: 3, N: 0, L: -3 };
+  const INTELLIGENCE_ADJ: Record<string, number> = { H: 1.5, N: 0, L: -1.5 };
+  function computeDraftValue(r: PlayerRow): number | null {
+    if (r.potential === null || r.overall === null) return null;
+    const isBustRisk = r.prone === "Fragile" || r.prone === "Wrecked";
+    const riskAdjusted = isBustRisk ? r.potential - 5 : r.potential;
+    const workEthicAdj = WORK_ETHIC_ADJ[r.wrkethic ?? "N"] ?? 0;
+    const intelligenceAdj = INTELLIGENCE_ADJ[r.int_ ?? "N"] ?? 0;
+    return riskAdjusted + r.overall * DRAFT_VALUE_OVERALL_WEIGHT - DRAFT_VALUE_OVERALL_BASELINE * DRAFT_VALUE_OVERALL_WEIGHT + workEthicAdj + intelligenceAdj;
+  }
+
+  // Hypothetical Prospect Rank (2026-09-14, Rees's ask) -- "based on the
+  // same prospect potential that is used for prospect ranking, not the
+  // draft value." Where would this player's REAL prospect_potential land if
+  // dropped into the actual current prospect rankings? Confirmed directly
+  // against real data that prospect_rank is exactly prospect_potential
+  // sorted descending (rank 1 = highest) -- so this is just "how many real,
+  // currently-ranked prospects have a strictly higher prospect_potential,
+  // plus 1," not a re-derivation of the ranking rule itself. Draft-pool
+  // amateurs are never part of the real prospect pool themselves (no team,
+  // excluded by the prospect-pool gate elsewhere), so there's no double-
+  // counting risk inserting them into this distribution.
+  const refreshRunId = await latestRefreshRunId(leagueId);
+  const realProspectPotentials = await fetchAll<{ prospect_potential: number }>((from, to) =>
+    supabase.from("player_computed").select("prospect_potential").eq("dsa_league_id", leagueId).eq("refresh_run_id", refreshRunId)
+      .not("prospect_rank", "is", null).range(from, to) as never
+  );
+  const sortedRealPotentials = realProspectPotentials.map((r) => r.prospect_potential).sort((a, b) => b - a);
+  function hypotheticalProspectRank(prospectPotential: number | null): number | null {
+    if (prospectPotential === null) return null;
+    // First index where a real prospect's value is NOT strictly greater --
+    // i.e. how many real prospects rank ahead, then +1 for this player's own slot.
+    let count = 0;
+    for (const v of sortedRealPotentials) {
+      if (v > prospectPotential) count++;
+      else break; // sorted descending -- safe to stop early
+    }
+    return count + 1;
+  }
+
+  return {
+    draftYear: latest.draft_year,
+    rows: rows.map((r) => ({
+      ...r,
+      draftedByTeam: draftedByPlayerId.get(r.player_id) ?? null,
+      draftValue: computeDraftValue(r),
+      hypotheticalProspectRank: hypotheticalProspectRank(r.prospect_potential),
+    })),
+  };
 }

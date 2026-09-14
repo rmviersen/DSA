@@ -58,14 +58,15 @@ type SortKey =
   // loses no information.
   | "contactStuff" | "powerMovement" | "eyeControl" | "speedStamina"
   | "overall" | "potential" | "ab" | "ip" | "war" | "prospect_potential" | "prospect_rank"
-  | "demand" | "fairValue" | "valueGap" | "sign" | "prone" | "drafted";
+  | "demand" | "fairValue" | "valueGap" | "sign" | "prone" | "drafted"
+  | "workEthic" | "draftValue" | "hypProspectRank";
 
 // r.ph is "H" for a hitter, "P" for a pitcher (null is not expected in
 // practice but falls back to the hitter side, matching every other
 // nullable-ph default in this component).
 const combined = (r: PlayerRow, hitterVal: number | null, pitcherVal: number | null) => (r.ph === "P" ? pitcherVal : hitterVal);
 
-export function PlayerTable({ rows, showTeam, showProspectCols, showStatLevel, showValueVsDemand, showSign, showDraftStatus, showPotentialTools, showEligiblePositions, showTradeBlockInfo, renderLimit }: { rows: PlayerRow[]; showTeam: boolean; showProspectCols: boolean; showStatLevel?: boolean; showValueVsDemand?: boolean; showSign?: boolean; showDraftStatus?: boolean; showPotentialTools?: boolean; showEligiblePositions?: boolean; showTradeBlockInfo?: boolean; renderLimit?: number }) {
+export function PlayerTable({ rows, showTeam, showProspectCols, showStatLevel, showValueVsDemand, showSign, showDraftStatus, showPotentialTools, showEligiblePositions, showTradeBlockInfo, showDraftMetrics, hideStatColumns, renderLimit }: { rows: PlayerRow[]; showTeam: boolean; showProspectCols: boolean; showStatLevel?: boolean; showValueVsDemand?: boolean; showSign?: boolean; showDraftStatus?: boolean; showPotentialTools?: boolean; showEligiblePositions?: boolean; showTradeBlockInfo?: boolean; showDraftMetrics?: boolean; hideStatColumns?: boolean; renderLimit?: number }) {
   // Multi-league routing (2026-09-10) -- this table is only ever rendered
   // under a page inside app/[league]/..., so the league slug is always in
   // the URL.
@@ -243,6 +244,14 @@ export function PlayerTable({ rows, showTeam, showProspectCols, showStatLevel, s
         // Available (no team) sorts first on "desc" -- reads as "best
         // available first," the natural way to scan a draft board.
         case "drafted": av = a.draftedByTeam === null ? 0 : 1; bv = b.draftedByTeam === null ? 0 : 1; break;
+        // H > N > L, matching this table's existing "higher sorts first on
+        // desc" convention (same idea as prone above).
+        case "workEthic": av = a.wrkethic === "H" ? 2 : a.wrkethic === "N" ? 1 : a.wrkethic === "L" ? 0 : -1; bv = b.wrkethic === "H" ? 2 : b.wrkethic === "N" ? 1 : b.wrkethic === "L" ? 0 : -1; break;
+        case "draftValue": av = a.draftValue ?? -999; bv = b.draftValue ?? -999; break;
+        // Missing (no real prospect pool to compare against) sorts to the
+        // bottom regardless of direction, same reasoning as prospect_rank's
+        // own 999999 sentinel above -- a smaller rank is "better."
+        case "hypProspectRank": av = a.hypotheticalProspectRank ?? 999999; bv = b.hypotheticalProspectRank ?? 999999; break;
       }
       if (av < bv) return -1 * dir;
       if (av > bv) return 1 * dir;
@@ -285,7 +294,7 @@ export function PlayerTable({ rows, showTeam, showProspectCols, showStatLevel, s
   // match" message just wouldn't span the real table width in those
   // cases). Bumped 13->14 on 2026-09-09 for the new always-shown
   // Durability column.
-  const colCount = 14 + (showTeam ? 1 : 0) + (showStatLevel ? 1 : 0) + (showValueVsDemand ? 3 : 0) + (showProspectCols ? 2 : 0) + (showSign ? 1 : 0) + (showDraftStatus ? 1 : 0) + (showEligiblePositions ? 1 : 0) + (showTradeBlockInfo ? 3 : 0);
+  const colCount = 14 + (showTeam ? 1 : 0) + (showStatLevel ? 1 : 0) + (showValueVsDemand ? 3 : 0) + (showProspectCols ? 2 : 0) + (showSign ? 1 : 0) + (showDraftStatus ? 1 : 0) + (showEligiblePositions ? 1 : 0) + (showTradeBlockInfo ? 3 : 0) + (showDraftMetrics ? 3 : 0) - (hideStatColumns ? 3 : 0);
 
   return (
     // player-table-page marker (2026-09-04, Rees's ask) -- widens .site-main
@@ -528,6 +537,10 @@ export function PlayerTable({ rows, showTeam, showProspectCols, showStatLevel, s
                   with Age rather than off in the ratings columns. Gives the
                   new Injury Proneness filter something visible to look at. */}
               {th("Durability", "prone")}
+              {/* Work Ethic (2026-09-14, Rees's ask, for /draft) -- narrow
+                  H/N/L column, kept next to Durability/Age as more bio-ish
+                  makeup info than a performance rating. */}
+              {showDraftMetrics && th("Work Ethic", "workEthic")}
               {/* Our analysis (computed output) first, then the underlying
                   raw ratings at the end (2026-09-04, Rees's ask) -- the
                   engine's own conclusions are what you scan first, the
@@ -536,9 +549,9 @@ export function PlayerTable({ rows, showTeam, showProspectCols, showStatLevel, s
               {th("Potential", "potential")}
               {showStatLevel && <th style={{ whiteSpace: "normal", lineHeight: 1.2, maxWidth: "4.5rem" }} title="The level this AB/IP/WAR line was earned at -- two players can show the same WAR from very different levels">Level</th>}
               {showSign && th("Sign", "sign")}
-              {th("AB", "ab")}
-              {th("IP", "ip")}
-              {th("WAR", "war")}
+              {!hideStatColumns && th("AB", "ab")}
+              {!hideStatColumns && th("IP", "ip")}
+              {!hideStatColumns && th("WAR", "war")}
               {showValueVsDemand && (
                 <>
                   {th("Demand (AAV)", "demand")}
@@ -550,6 +563,24 @@ export function PlayerTable({ rows, showTeam, showProspectCols, showStatLevel, s
                 <>
                   {th("Prospect Pot.", "prospect_potential")}
                   {th("Prospect Rank", "prospect_rank")}
+                </>
+              )}
+              {showDraftMetrics && (
+                <>
+                  {/* Draft Value (2026-09-14, Rees's ask) -- a separate
+                      metric from Prospect Potential, tuned for amateurs:
+                      same shape (risk-adjusted potential + a smaller boost
+                      for a fully-developed current Overall), plus Work
+                      Ethic/Intelligence makeup adjustments prospect
+                      potential doesn't have. See getTopDraftees in
+                      lib/queries.ts for the exact formula. */}
+                  {th("Draft Value", "draftValue")}
+                  {/* Hypothetical Prospect Rank (2026-09-14, Rees's ask) --
+                      "based on the same prospect potential that is used for
+                      prospect ranking, not the draft value": where this
+                      player's REAL prospect_potential would land if dropped
+                      into the actual current leaguewide prospect rankings. */}
+                  {th("Hyp. Rank", "hypProspectRank")}
                 </>
               )}
               {th(showPotentialTools ? "Pot. Con/Stf" : "Con/Stf", "contactStuff")}
@@ -608,6 +639,11 @@ export function PlayerTable({ rows, showTeam, showProspectCols, showStatLevel, s
                 {showTeam && <td>{r.team_abbr ?? r.team_nickname ?? "—"}</td>}
                 <td>{r.age ?? "—"}</td>
                 <td style={r.prone ? { color: PRONE_COLORS[r.prone] } : undefined}>{r.prone ?? "—"}</td>
+                {showDraftMetrics && (
+                  <td style={r.wrkethic === "H" ? { color: "rgb(34,197,94)", fontWeight: 700 } : r.wrkethic === "L" ? { color: "rgb(220,38,38)" } : undefined}>
+                    {r.wrkethic ?? "—"}
+                  </td>
+                )}
                 <td style={gradeStyle(r.overall)}>{fmt1(r.overall)}</td>
                 <td style={gradeStyle(r.potential)}>{fmt1(r.potential)}</td>
                 {showStatLevel && <td>{r.statLevel ?? "—"}</td>}
@@ -616,9 +652,9 @@ export function PlayerTable({ rows, showTeam, showProspectCols, showStatLevel, s
                     {r.signFlag === true ? "✓ " : ""}{r.suggestedSignLevel ?? "—"}
                   </td>
                 )}
-                <td>{fmtInt(r.ab)}</td>
-                <td>{fmt1(r.ip)}</td>
-                <td>{fmt1(r.war)}</td>
+                {!hideStatColumns && <td>{fmtInt(r.ab)}</td>}
+                {!hideStatColumns && <td>{fmt1(r.ip)}</td>}
+                {!hideStatColumns && <td>{fmt1(r.war)}</td>}
                 {showValueVsDemand && (
                   <>
                     <td>{fmtMoney(r.demandSalary)}</td>
@@ -630,6 +666,12 @@ export function PlayerTable({ rows, showTeam, showProspectCols, showStatLevel, s
                   <>
                     <td style={gradeStyle(r.prospect_potential)}>{fmt1(r.prospect_potential)}</td>
                     <td>{r.prospect_rank ?? "—"}</td>
+                  </>
+                )}
+                {showDraftMetrics && (
+                  <>
+                    <td style={gradeStyle(r.draftValue)}>{fmt1(r.draftValue)}</td>
+                    <td>{r.hypotheticalProspectRank ?? "—"}</td>
                   </>
                 )}
                 <td style={gradeStyle(conStfVal(r))}>{fmtInt(conStfVal(r))}</td>
