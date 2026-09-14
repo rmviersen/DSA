@@ -50,21 +50,47 @@ interface RatingsRow {
   pow_l: number | null; pow_r: number | null;
   eye_l: number | null; eye_r: number | null;
   speed: number | null;
-  pos_c: number | null; pos_1b: number | null; pos_2b: number | null; pos_3b: number | null;
-  pos_ss: number | null; pos_lf: number | null; pos_cf: number | null; pos_rf: number | null;
+  // pos_c/pos_1b/etc. (the per-position CURRENT grade) removed 2026-09-14 --
+  // no longer used anywhere in this file, replaced by the rating engine's
+  // c_rating/inf_rating/of_rating composites (see POS_FAMILY_RATING).
+  // pot_c/pot_1b/etc. stay -- eligibility still gates on POTENTIAL position
+  // grade, unchanged.
   pot_c: number | null; pot_1b: number | null; pot_2b: number | null; pot_3b: number | null;
   pot_ss: number | null; pot_lf: number | null; pot_cf: number | null; pot_rf: number | null;
 }
 
-const POS_KEYS: Record<FieldPosition, { pot: keyof RatingsRow; pos: keyof RatingsRow }> = {
-  C: { pot: "pot_c", pos: "pos_c" },
-  "1B": { pot: "pot_1b", pos: "pos_1b" },
-  "2B": { pot: "pot_2b", pos: "pos_2b" },
-  "3B": { pot: "pot_3b", pos: "pos_3b" },
-  SS: { pot: "pot_ss", pos: "pos_ss" },
-  LF: { pot: "pot_lf", pos: "pos_lf" },
-  CF: { pot: "pot_cf", pos: "pos_cf" },
-  RF: { pot: "pot_rf", pos: "pos_rf" },
+// pot_X only now (2026-09-14) -- eligibility still checks the POTENTIAL
+// position grade per Rees's explicit "still using the filters we have laid
+// out for each position," but the CURRENT per-position grade (pos_c/pos_1b/
+// etc.) is no longer used for scoring -- see POS_FAMILY_RATING below for
+// what replaced it.
+const POS_KEYS: Record<FieldPosition, { pot: keyof RatingsRow }> = {
+  C: { pot: "pot_c" },
+  "1B": { pot: "pot_1b" },
+  "2B": { pot: "pot_2b" },
+  "3B": { pot: "pot_3b" },
+  SS: { pot: "pot_ss" },
+  LF: { pot: "pot_lf" },
+  CF: { pot: "pot_cf" },
+  RF: { pot: "pot_rf" },
+};
+
+// Which of the rating engine's three composite CURRENT-ability fielding
+// ratings (c_rating/inf_rating/of_rating, computed in rating-engine.ts from
+// the real per-tool fielding grades -- catcher blocking/framing/arm for
+// c_rating, infield range/error/arm/double-play for inf_rating, outfield
+// range/error/arm for of_rating) applies to each position (2026-09-14,
+// Rees's ask). Deliberately coarser than the old pos_c/pos_1b/etc. grades --
+// every infielder shares inf_rating regardless of which infield spot he's
+// in, same for outfielders and of_rating -- that's the actual ask, not an
+// approximation of it: "use the calculated fielding rating in our rating
+// engine... using the appropriate metric," i.e. the real position-FAMILY
+// composite this engine already computes elsewhere, not a per-position
+// number specific to this page.
+const POS_FAMILY_RATING: Record<FieldPosition, "c_rating" | "inf_rating" | "of_rating"> = {
+  C: "c_rating",
+  "1B": "inf_rating", "2B": "inf_rating", "3B": "inf_rating", SS: "inf_rating",
+  LF: "of_rating", CF: "of_rating", RF: "of_rating",
 };
 
 // OOTP's own numeric position codes (1=P, confirmed and reused elsewhere
@@ -85,12 +111,14 @@ const ELIGIBILITY_MIN: Record<FieldPosition, number> = {
 
 // Composite lineup-selection score = battingVsHand * OFFENSE_WEIGHT +
 // positionGrade * DEFENSE_WEIGHT (DH skips the defense term entirely -- no
-// glove requirement to weigh). Both operands are already on the same ~0-80
-// scale (confirmed against the active weight set: contact+gap+power+eye+
-// speed sum to exactly 1.0, so battingVsHand is a weighted AVERAGE of ~0-80
-// tool grades, not a rescaled sum -- pos_c/pos_1b/etc. are also 0-80), so a
-// plain weighted blend of the two raw numbers is valid without any
-// percentile normalization step.
+// glove requirement to weigh). Both operands are already on the same ~20-80
+// scouting-grade scale (confirmed against the active weight set: contact+
+// gap+power+eye+speed sum to exactly 1.0, so battingVsHand is a weighted
+// AVERAGE of ~20-80 tool grades, not a rescaled sum -- c_rating/inf_rating/
+// of_rating, positionGrade's source since 2026-09-14 below, are built the
+// same way, a weighted average of ~20-80 fielding tool grades plus a small
+// flat bonus), so a plain weighted blend of the two raw numbers is valid
+// without any percentile normalization step.
 //
 // Retuned 70/30 -> 80/20 (2026-09-14, Rees's ask, same investigation as the
 // Porten/Silver/Estevez case): the ELIGIBILITY_MIN bar above (55, 50 for C)
@@ -100,11 +128,16 @@ const ELIGIBILITY_MIN: Record<FieldPosition, number> = {
 // tipping close calls toward defense-first rather than bat-first once two
 // candidates both clear the position bar. Confirmed with the real case that
 // prompted this: at 70/30, Silver's 80-grade 1B defense over Porten's 60
-// outweighed Porten's real batting edge; recompute the same two candidates'
-// scores by hand at 80/20 to confirm the tip point before trusting a bare
-// "it changed" run. Deliberately still real, not zero -- defense keeps
-// breaking genuinely close bat-only calls, just no longer able to override
-// as large a batting gap as before.
+// outweighed Porten's real batting edge.
+//
+// Same day, one more retune: the DEFENSE_WEIGHT term itself switched from
+// the per-position pos_c/pos_1b/etc. grade to the rating engine's coarser
+// c_rating/inf_rating/of_rating position-FAMILY composites (Rees's explicit
+// ask -- "we should be using the calculated fielding rating in our rating
+// engine... using the appropriate metric," staying at 80/20). Eligibility
+// (ELIGIBILITY_MIN, above) is UNCHANGED -- still gates on the POTENTIAL
+// per-position grade, per Rees's own "still using the filters we have laid
+// out." See POS_FAMILY_RATING for which composite maps to which position.
 const OFFENSE_WEIGHT = 0.8;
 const DEFENSE_WEIGHT = 0.2;
 
@@ -415,13 +448,15 @@ export async function getOptimalLineups(leagueId: number, orgId: number): Promis
   // FULL roster, not just the available ones -- injuredOut below has to
   // know which excluded players were even hitters in the first place.
   const [{ data: computedRaw, error: compErr }, { data: weightRow, error: wErr }] = await Promise.all([
-    supabase.from("player_computed").select("player_id,ph,overall").eq("refresh_run_id", refreshRunId).in("player_id", allIds),
+    // c_rating/inf_rating/of_rating added 2026-09-14 (Rees's ask) -- see
+    // POS_FAMILY_RATING below for why these, not pos_c/pos_1b/etc.
+    supabase.from("player_computed").select("player_id,ph,overall,c_rating,inf_rating,of_rating").eq("refresh_run_id", refreshRunId).in("player_id", allIds),
     supabase.from("rating_weights").select("contact,gap,power,eye,speed").eq("dsa_league_id", leagueId).eq("is_active", true).single(),
   ]);
   if (compErr) throw compErr;
   if (wErr || !weightRow) throw new Error(`No active weight set found: ${wErr?.message}`);
   const computedById = new Map(
-    (computedRaw as { player_id: number; ph: "H" | "P" | null; overall: number | null }[]).map((c) => [c.player_id, c])
+    (computedRaw as { player_id: number; ph: "H" | "P" | null; overall: number | null; c_rating: number | null; inf_rating: number | null; of_rating: number | null }[]).map((c) => [c.player_id, c])
   );
   const weights = weightRow as { contact: number; gap: number; power: number; eye: number; speed: number };
 
@@ -443,7 +478,7 @@ export async function getOptimalLineups(leagueId: number, orgId: number): Promis
 
   const { data: ratingsRaw, error: ratErr } = await supabase
     .from("player_ratings_snapshots")
-    .select("player_id,cntct_l,cntct_r,gap_l,gap_r,pow_l,pow_r,eye_l,eye_r,speed,pos_c,pos_1b,pos_2b,pos_3b,pos_ss,pos_lf,pos_cf,pos_rf,pot_c,pot_1b,pot_2b,pot_3b,pot_ss,pot_lf,pot_cf,pot_rf")
+    .select("player_id,cntct_l,cntct_r,gap_l,gap_r,pow_l,pow_r,eye_l,eye_r,speed,pot_c,pot_1b,pot_2b,pot_3b,pot_ss,pot_lf,pot_cf,pot_rf")
     .eq("refresh_run_id", refreshRunId).in("player_id", ids);
   if (ratErr) throw ratErr;
   const ratingsById = new Map((ratingsRaw as RatingsRow[]).map((r) => [r.player_id, r]));
@@ -459,11 +494,16 @@ export async function getOptimalLineups(leagueId: number, orgId: number): Promis
     const posGrade: Partial<Record<FieldPosition, number>> = {};
     const eligible = {} as Record<FieldPosition, boolean>;
     for (const pos of FIELD_POSITIONS) {
-      const { pot, pos: posKey } = POS_KEYS[pos];
+      const { pot } = POS_KEYS[pos];
       const potVal = r[pot];
-      const curVal = r[posKey];
       eligible[pos] = potVal !== null && potVal >= ELIGIBILITY_MIN[pos];
-      if (curVal !== null) posGrade[pos] = curVal;
+      // Position-FAMILY composite (2026-09-14, Rees's ask), not the old
+      // per-position pos_c/pos_1b/etc. grade -- e.g. every infielder's
+      // "defense" score at any infield slot is the SAME inf_rating, since
+      // that's the real ask ("use the appropriate metric," the engine's
+      // existing family-level composite, not a position-specific number).
+      const familyVal = c[POS_FAMILY_RATING[pos]];
+      if (familyVal !== null) posGrade[pos] = familyVal;
     }
     candidates.push({ playerId: p.id, name: `${p.first_name} ${p.last_name}`, overall: c.overall, vsL, vsR, posGrade, eligible });
   }
