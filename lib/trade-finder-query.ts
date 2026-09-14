@@ -494,3 +494,128 @@ export async function getTradeBlockMatches(leagueId: number, orgId: number, need
     return { need, candidates };
   });
 }
+
+// --- Step 3 (2026-09-14): broader leaguewide "plausibly available" scan ---
+// "I want to include broader leaguewide targets, but will need to work on
+// logic for which players may be available like guys with one or two years
+// left on their contract, or players on weak, rebuilding teams." Two real,
+// existing-data-only signals -- no new ingestion, no invented metric:
+//
+// 1. Short remaining control (yearsOfControl <= 2, Rees's own "one or two
+//    years" wording) -- reuses trade-value.ts's yearsOfControl(), already
+//    the site's one real "how much control is left" answer.
+// 2. A "weak/rebuilding" seller team -- team_computed.roster_rank (ranks
+//    every team by team_ovr, its current MLB roster talent) in the bottom
+//    third leaguewide, the SAME bottom-third bar as every other need in
+//    this file. team_computed.w_rank/team_rank/power_ranking are confirmed
+//    entirely unpopulated (no script writes them -- real win/loss standings
+//    aren't in this pipeline at all), so roster_rank is the real, available
+//    proxy, not a literal read of a team's record.
+//
+// A candidate qualifies if EITHER signal holds (not both) -- Rees listed
+// them as two separate, independent reasons a player might be gettable, not
+// a joint requirement. Anyone already surfaced via the trade block (Step 2)
+// is excluded here, so a listed player isn't shown twice under two
+// different framings.
+const BROADER_SCAN_MAX_CONTROL_YEARS = 2;
+
+// team_computed's own latest refresh_run_id -- NOT assumed to match player_
+// computed's (compute-team-ratings.ts runs as its own step, same "can lag
+// one run behind" pattern already documented for fielding_role_weights
+// elsewhere in this codebase).
+async function fetchSellerOrgIds(leagueId: number): Promise<Set<number>> {
+  const { data: latestRow, error: latestErr } = await supabase
+    .from("team_computed").select("refresh_run_id").eq("dsa_league_id", leagueId).order("refresh_run_id", { ascending: false }).limit(1).maybeSingle();
+  if (latestErr) throw latestErr;
+  const refreshRunId = (latestRow as { refresh_run_id: number } | null)?.refresh_run_id;
+  if (refreshRunId === undefined) return new Set();
+
+  const { data, error } = await supabase
+    .from("team_computed").select("team_id,roster_rank").eq("dsa_league_id", leagueId).eq("refresh_run_id", refreshRunId).not("roster_rank", "is", null);
+  if (error) throw error;
+  const rows = data as { team_id: number; roster_rank: number }[];
+  const totalTeams = rows.length;
+  const sellers = new Set<number>();
+  for (const r of rows) {
+    const rankPct = totalTeams > 1 ? ((totalTeams - r.roster_rank) / (totalTeams - 1)) * 100 : 50;
+    if (rankPct <= NEEDS_RANK_PCT_MAX) sellers.add(r.team_id);
+  }
+  return sellers;
+}
+
+async function fetchControlYearsById(leagueId: number, ids: number[]): Promise<Map<number, number | null>> {
+  const controlById = new Map<number, number | null>();
+  const CHUNK = 500;
+  for (let i = 0; i < ids.length; i += CHUNK) {
+    const chunk = ids.slice(i, i + CHUNK);
+    const [{ data: contracts, error: contractErr }, { data: service, error: serviceErr }] = await Promise.all([
+      supabase.from("contracts").select("player_id,years,current_year").eq("dsa_league_id", leagueId).in("player_id", chunk),
+      supabase.from("players").select("id,mlb_service_years").eq("dsa_league_id", leagueId).in("id", chunk),
+    ]);
+    if (contractErr) throw contractErr;
+    if (serviceErr) throw serviceErr;
+    const contractById = new Map((contracts as { player_id: number; years: number | null; current_year: number | null }[]).map((c) => [c.player_id, c]));
+    const serviceById = new Map((service as { id: number; mlb_service_years: number | null }[]).map((s) => [s.id, s.mlb_service_years]));
+    for (const id of chunk) {
+      const contract = contractById.get(id) ?? null;
+      controlById.set(id, yearsOfControl({
+        contractYears: contract?.years ?? null, contractCurrentYear: contract?.current_year ?? null, mlbServiceYears: serviceById.get(id) ?? null,
+      }));
+    }
+  }
+  return controlById;
+}
+
+export interface BroaderCandidate {
+  playerId: number;
+  name: string;
+  teamName: string | null;
+  score: number;
+  currentFloor: number;
+  upgradeSize: number;
+  yearsOfControl: number | null;
+  availabilitySignal: "short-control" | "weak-team" | "both";
+}
+
+export interface NeedWithBroaderCandidates {
+  need: RoleRankNeed;
+  candidates: BroaderCandidate[]; // sorted biggest upgrade first
+}
+
+export async function getBroaderTargets(leagueId: number, orgId: number, needs: RoleRankNeed[]): Promise<NeedWithBroaderCandidates[]> {
+  const [rows, sellerOrgIds, block] = await Promise.all([
+    fetchLeagueRoster(leagueId),
+    fetchSellerOrgIds(leagueId),
+    fetchTradeBlockRows(leagueId),
+  ]);
+  const onBlockIds = new Set(block.map((b) => b.row.id));
+  const candidateRows = rows.filter((r) => r.organization_id !== orgId && !onBlockIds.has(r.id));
+
+  const controlById = await fetchControlYearsById(leagueId, candidateRows.map((r) => r.id));
+
+  const teamIds = [...new Set(candidateRows.map((r) => r.organization_id))];
+  const { data: teamsRaw, error: teamsErr } = await supabase.from("teams").select("id,name").eq("dsa_league_id", leagueId).in("id", teamIds);
+  if (teamsErr) throw teamsErr;
+  const teamNameById = new Map((teamsRaw as { id: number; name: string }[]).map((t) => [t.id, t.name]));
+
+  return needs.map((need) => {
+    const floor = currentFloorForNeed(rows, orgId, need);
+    const candidates: BroaderCandidate[] = candidateRows
+      .map((c) => {
+        const score = candidateScoreForNeed(c, need);
+        if (score === null || score <= floor) return null;
+        const control = controlById.get(c.id) ?? null;
+        const shortControl = control !== null && control <= BROADER_SCAN_MAX_CONTROL_YEARS;
+        const weakTeam = sellerOrgIds.has(c.organization_id);
+        if (!shortControl && !weakTeam) return null;
+        return {
+          playerId: c.id, name: c.name, teamName: teamNameById.get(c.organization_id) ?? null,
+          score, currentFloor: floor, upgradeSize: score - floor, yearsOfControl: control,
+          availabilitySignal: (shortControl && weakTeam ? "both" : shortControl ? "short-control" : "weak-team") as BroaderCandidate["availabilitySignal"],
+        };
+      })
+      .filter((c): c is BroaderCandidate => c !== null)
+      .sort((a, b) => b.upgradeSize - a.upgradeSize);
+    return { need, candidates };
+  });
+}
