@@ -1,6 +1,7 @@
 import { makeSupabaseClient } from "./supabase-client";
 import { latestRefreshRunId } from "./queries";
-import { getMyRosterAnalysis } from "./my-roster-query";
+import { ROLE_HEALTH_ROWS, topNAvg } from "./org-minors-query";
+import { PITCHER_ROLES } from "./contract-classification";
 
 const supabase = makeSupabaseClient();
 
@@ -12,19 +13,20 @@ const supabase = makeSupabaseClient();
 // against the trade block and a broader leaguewide scan are separate,
 // later steps).
 
-// Bottom-third leaguewide, Rees's exact spec (2026-09-14) -- reuses My
-// Roster's own already-calibrated CURRENT rankPct (rankPercentile: 100 =
-// best team at that role, 0 = worst -- see org-minors-query.ts), not a new
-// metric. Applied identically to the "weak/rebuilding seller team" heuristic
-// in the later candidate-matching step, per the plan.
+// Bottom-third leaguewide, Rees's exact spec (2026-09-14) -- reuses the same
+// rankPercentile shape as org-minors-query.ts (100 = best team, 0 = worst).
+// Applied identically to the "weak/rebuilding seller team" heuristic planned
+// for the later candidate-matching step.
 const NEEDS_RANK_PCT_MAX = 33;
 
 // 30+ days out, Rees's exact spec (2026-09-14) -- deliberately NOT the
 // Lineup page's own 5-day threshold (isAvailableForLineup in lineup-
 // optimizer-query.ts), which answers a different question ("exclude from
-// THIS sim's lineup"). A trade is worth making for an absence long enough
-// that a rental target would actually see meaningful time before the
-// injured player is back.
+// THIS sim's lineup"). Used both to exclude a player from a role's rating
+// pool (this file's own injury-adjustment, added same day per Rees's
+// follow-up below) and, previously, to flag him standalone -- see that
+// follow-up's comment for why the standalone flag was retired in favor of
+// folding injuries into the rating itself.
 const INJURY_DAYS_MIN = 30;
 
 export interface RoleRankNeed {
@@ -32,203 +34,251 @@ export interface RoleRankNeed {
   // My Roster's own role taxonomy (ROLE_HEALTH_ROWS: SP/RP/C/1B/SS/CF/COF/
   // DH) for most rows, EXCEPT "INF" -- split into "2B"/"3B" (2026-09-14,
   // Rees's ask) using the Lineup optimizer's own exact-position eligibility
-  // and scoring instead of My Roster's coarser 2B+3B+SS family bucket. See
-  // getExactPositionNeeds below.
+  // and scoring instead of My Roster's coarser 2B+3B+SS family bucket.
   role: string;
+  // Injury-adjusted (2026-09-14, Rees's follow-up: "evaluate positional
+  // strength factoring injuries where appropriate... a single injury does
+  // not mean we need a replacement, but if that injury impacts our rating
+  // strongly enough to be in the bottom third... we should look to
+  // replace"). Computed with any 30+-day-injured player excluded from the
+  // topN pool, for EVERY org (not just ours) -- an apples-to-apples
+  // comparison, not just us being penalized while everyone else's injuries
+  // go uncounted.
   rankPct: number;
   rank: number | null;
   totalTeams: number | null;
   rating: number | null;
   leagueAvg: number | null;
+  // Transparency: what this same role's rank looked like WITHOUT excluding
+  // any injured player (the site's usual "injury doesn't change a player's
+  // talent grade" convention, e.g. My Roster/org-minors) -- lets a need be
+  // labeled "this is only a need because of the injury below" (unadjusted
+  // was fine, adjusted isn't) vs. "this role was already weak regardless"
+  // (both sides agree). Null only if the unadjusted computation genuinely
+  // had no one to rank (shouldn't happen if the adjusted side did).
+  unadjustedRankPct: number | null;
+  // Which of OUR players got excluded from the pool to produce the
+  // adjusted numbers above -- empty if this role's own rating wasn't
+  // affected by any of our injuries at all.
+  excludedInjuredPlayers: { playerId: number; name: string; daysLeft: number | null }[];
 }
 
-export interface InjuryNeed {
-  kind: "injury";
-  // Resolved from the injured player's own player_computed.role -- same
-  // taxonomy as RoleRankNeed.role, so the two need kinds line up for a
-  // shared "needs at this role" view even though they're detected two
-  // different ways. Null only if player_computed genuinely has no role for
-  // this player (shouldn't happen for a real active-roster hitter, but not
-  // assumed away).
-  role: string | null;
-  playerId: number;
-  playerName: string;
-  daysLeft: number | null;
-}
+export type Need = RoleRankNeed;
 
-export type Need = RoleRankNeed | InjuryNeed;
-
-// Exact-position eligibility/scoring for 2B and 3B (2026-09-14, Rees's ask:
-// "using the position requirements we laid out in the lineup"). Restated
-// from lib/lineup-optimizer-query.ts's own module-private constants rather
-// than exported/imported -- same "duplicate a small stable rule" convention
-// already used repeatedly in this codebase (see HANDOFF.md); that file's own
-// values are the single source of truth if these two ever need to move
-// together. Deliberately only 2B/3B here, not the full 8-position sweep --
-// this is specifically about un-lumping My Roster's "INF" family bucket,
-// which is the ONLY role bucket combining more than one real position that
-// Rees flagged; SS/C/1B/CF/DH are already single positions in ROLE_HEALTH_
-// ROWS, and COF (LF+RF) wasn't part of this ask.
-const EXACT_POS_ELIGIBILITY_MIN: Record<"2B" | "3B", number> = { "2B": 55, "3B": 55 };
-const EXACT_POS_ARM_MIN: Partial<Record<"2B" | "3B", number>> = { "3B": 50 };
-const EXACT_POS_OFFENSE_WEIGHT = 0.8;
-const EXACT_POS_DEFENSE_WEIGHT = 0.2;
-
-interface LeagueHitterRow {
+interface LeaguePlayerRow {
   id: number;
-  organization_id: number | null;
+  name: string;
+  organization_id: number;
+  role: string | null;
+  ph: "H" | "P" | null;
+  overall: number | null;
+  batting: number | null;
   pot_2b: number | null;
   pot_3b: number | null;
   ifa: number | null;
-  batting: number | null;
   inf_rating: number | null;
-  ph: "H" | "P" | null;
+  isLongInjured: boolean;
+  daysLeft: number | null;
 }
 
-// One RoleRankNeed-shaped card per exact position, built the same way
-// getMyRosterAnalysis builds "INF" -- just scoped to ONE real position
-// (top-1, "one real everyday guy," matching SS/C/CF/DH's own convention)
-// instead of the top-3-across-any-infield-spot family blend. Score =
-// batting * 0.8 + inf_rating * 0.2 -- the SAME composite shape and weights
-// as the Lineup optimizer's own scoring (battingVsHand there is hand-split;
-// this uses the flat, already handedness-blended `batting` from player_
-// computed instead, since a season-long "how strong is this position"
-// question isn't matchup-specific the way a single lineup card is).
-async function getExactPositionNeeds(leagueId: number, orgId: number): Promise<RoleRankNeed[]> {
+// Every org's active-MLB roster leaguewide, with everything both the
+// ROLE_HEALTH_ROWS sweep and the exact-2B/3B sweep need in one pass (one
+// round trip instead of two near-identical ones). Same "real active roster,
+// plus healed-but-still-on-IL" definition as lineup-optimizer-query.ts's
+// rosterPlayers (organization_id+team_id+level=1+positive league_id,
+// is_active OR is_on_dl-and-healed) -- restated here rather than exported,
+// matching this codebase's established "duplicate a small stable rule"
+// convention (see HANDOFF.md).
+async function fetchLeagueRoster(leagueId: number): Promise<LeaguePlayerRow[]> {
   const refreshRunId = await latestRefreshRunId(leagueId);
 
-  // Every org's active-MLB-roster hitters leaguewide -- same "real active
-  // roster, plus healed-but-still-on-IL" definition as lineup-optimizer-
-  // query.ts's rosterPlayers, just leaguewide (grouped by organization_id)
-  // instead of scoped to one org.
   const { data: playersRaw, error: playersErr } = await supabase
     .from("players")
-    .select("id,organization_id,team_id,is_active,is_on_dl,injury_is_injured")
+    .select("id,first_name,last_name,organization_id,team_id,is_active,is_on_dl,injury_is_injured,injury_left")
     .eq("dsa_league_id", leagueId).eq("level", 1).gt("league_id", 0)
     .not("organization_id", "is", null);
   if (playersErr) throw playersErr;
-  const activeRoster = (playersRaw as { id: number; organization_id: number | null; team_id: number | null; is_active: boolean | null; is_on_dl: boolean | null; injury_is_injured: boolean | null }[])
+  const activeRoster = (playersRaw as {
+    id: number; first_name: string; last_name: string; organization_id: number | null; team_id: number | null;
+    is_active: boolean | null; is_on_dl: boolean | null; injury_is_injured: boolean | null; injury_left: number | null;
+  }[])
     .filter((p) => p.organization_id !== null && p.organization_id === p.team_id)
     .filter((p) => p.is_active === true || (p.is_active === false && p.is_on_dl === true && p.injury_is_injured === false));
-  const ids = activeRoster.map((p) => p.id);
-  const orgById = new Map(activeRoster.map((p) => [p.id, p.organization_id as number]));
 
+  const ids = activeRoster.map((p) => p.id);
   const ratingsById = new Map<number, { pot_2b: number | null; pot_3b: number | null; ifa: number | null }>();
-  const computedById = new Map<number, { batting: number | null; inf_rating: number | null; ph: "H" | "P" | null }>();
+  const computedById = new Map<number, { role: string | null; overall: number | null; batting: number | null; inf_rating: number | null; ph: "H" | "P" | null }>();
   const CHUNK = 500;
   for (let i = 0; i < ids.length; i += CHUNK) {
     const chunk = ids.slice(i, i + CHUNK);
     const [{ data: ratings, error: ratErr }, { data: computed, error: compErr }] = await Promise.all([
       supabase.from("player_ratings_snapshots").select("player_id,pot_2b,pot_3b,ifa").eq("refresh_run_id", refreshRunId).in("player_id", chunk),
-      supabase.from("player_computed").select("player_id,batting,inf_rating,ph").eq("refresh_run_id", refreshRunId).in("player_id", chunk),
+      supabase.from("player_computed").select("player_id,role,overall,batting,inf_rating,ph").eq("refresh_run_id", refreshRunId).in("player_id", chunk),
     ]);
     if (ratErr) throw ratErr;
     if (compErr) throw compErr;
     (ratings as { player_id: number; pot_2b: number | null; pot_3b: number | null; ifa: number | null }[]).forEach((r) => ratingsById.set(r.player_id, r));
-    (computed as { player_id: number; batting: number | null; inf_rating: number | null; ph: "H" | "P" | null }[]).forEach((c) => computedById.set(c.player_id, c));
+    (computed as { player_id: number; role: string | null; overall: number | null; batting: number | null; inf_rating: number | null; ph: "H" | "P" | null }[]).forEach((c) => computedById.set(c.player_id, c));
   }
 
-  const rows: LeagueHitterRow[] = activeRoster.map((p) => ({
-    id: p.id,
-    organization_id: orgById.get(p.id) ?? null,
-    pot_2b: ratingsById.get(p.id)?.pot_2b ?? null,
-    pot_3b: ratingsById.get(p.id)?.pot_3b ?? null,
-    ifa: ratingsById.get(p.id)?.ifa ?? null,
-    batting: computedById.get(p.id)?.batting ?? null,
-    inf_rating: computedById.get(p.id)?.inf_rating ?? null,
-    ph: computedById.get(p.id)?.ph ?? null,
-  }));
+  return activeRoster.map((p) => {
+    const r = ratingsById.get(p.id);
+    const c = computedById.get(p.id);
+    return {
+      id: p.id,
+      name: `${p.first_name} ${p.last_name}`,
+      organization_id: p.organization_id as number,
+      role: c?.role ?? null,
+      ph: c?.ph ?? null,
+      overall: c?.overall ?? null,
+      batting: c?.batting ?? null,
+      pot_2b: r?.pot_2b ?? null,
+      pot_3b: r?.pot_3b ?? null,
+      ifa: r?.ifa ?? null,
+      inf_rating: c?.inf_rating ?? null,
+      isLongInjured: p.injury_is_injured === true && (p.injury_left ?? 0) >= INJURY_DAYS_MIN,
+      daysLeft: p.injury_left,
+    };
+  });
+}
 
+// Same 2B/3B eligibility/scoring as before -- "using the position
+// requirements we laid out in the lineup" (2026-09-14). Restated from
+// lib/lineup-optimizer-query.ts's own module-private constants; that file's
+// own values are the source of truth if these two ever need to move
+// together.
+const EXACT_POS_ELIGIBILITY_MIN: Record<"2B" | "3B", number> = { "2B": 55, "3B": 55 };
+const EXACT_POS_ARM_MIN: Partial<Record<"2B" | "3B", number>> = { "3B": 50 };
+const EXACT_POS_OFFENSE_WEIGHT = 0.8;
+const EXACT_POS_DEFENSE_WEIGHT = 0.2;
+
+function bestExactPositionScore(rows: LeaguePlayerRow[], orgId: number, pos: "2B" | "3B", excludeInjured: boolean): { score: number; playerId: number; name: string } | null {
+  const potKey = pos === "2B" ? "pot_2b" : "pot_3b";
+  const armMin = EXACT_POS_ARM_MIN[pos];
+  let best: { score: number; playerId: number; name: string } | null = null;
+  for (const r of rows) {
+    if (r.organization_id !== orgId || r.ph !== "H") continue;
+    if (excludeInjured && r.isLongInjured) continue;
+    const potVal = r[potKey];
+    if (potVal === null || potVal < EXACT_POS_ELIGIBILITY_MIN[pos]) continue;
+    if (armMin !== undefined && (r.ifa === null || r.ifa < armMin)) continue;
+    if (r.batting === null || r.inf_rating === null) continue;
+    const score = r.batting * EXACT_POS_OFFENSE_WEIGHT + r.inf_rating * EXACT_POS_DEFENSE_WEIGHT;
+    if (!best || score > best.score) best = { score, playerId: r.id, name: r.name };
+  }
+  return best;
+}
+
+function getExactPositionNeeds(rows: LeaguePlayerRow[], orgId: number): RoleRankNeed[] {
+  const orgIds = [...new Set(rows.map((r) => r.organization_id))];
   const needs: RoleRankNeed[] = [];
   for (const pos of ["2B", "3B"] as const) {
-    const potKey = pos === "2B" ? "pot_2b" : "pot_3b";
-    const armMin = EXACT_POS_ARM_MIN[pos];
-    const eligible = rows.filter((r) =>
-      r.ph === "H" &&
-      r[potKey] !== null && (r[potKey] as number) >= EXACT_POS_ELIGIBILITY_MIN[pos] &&
-      (armMin === undefined || (r.ifa !== null && r.ifa >= armMin)) &&
-      r.batting !== null && r.inf_rating !== null
-    );
-    const scoreByOrg = new Map<number, number>();
-    for (const r of eligible) {
-      const score = (r.batting as number) * EXACT_POS_OFFENSE_WEIGHT + (r.inf_rating as number) * EXACT_POS_DEFENSE_WEIGHT;
-      const orgId2 = r.organization_id as number;
-      if (score > (scoreByOrg.get(orgId2) ?? -Infinity)) scoreByOrg.set(orgId2, score);
-    }
-    const scores = [...scoreByOrg.values()].sort((a, b) => b - a);
-    const totalTeams = scores.length;
-    const ourScore = scoreByOrg.get(orgId) ?? null;
-    const leagueAvg = totalTeams > 0 ? scores.reduce((a, b) => a + b, 0) / totalTeams : null;
-    const rank = ourScore !== null ? scores.indexOf(ourScore) + 1 : null;
+    const adjustedByOrg = new Map(orgIds.map((oid) => [oid, bestExactPositionScore(rows, oid, pos, true)]));
+    const adjustedScores = [...adjustedByOrg.values()].filter((v): v is NonNullable<typeof v> => v !== null).map((v) => v.score).sort((a, b) => b - a);
+    const ourAdjusted = adjustedByOrg.get(orgId) ?? null;
+    const totalTeams = adjustedScores.length;
+    const leagueAvg = totalTeams > 0 ? adjustedScores.reduce((a, b) => a + b, 0) / totalTeams : null;
+    const rank = ourAdjusted !== null ? adjustedScores.indexOf(ourAdjusted.score) + 1 : null;
     const rankPct = rank !== null && totalTeams > 1 ? ((totalTeams - rank) / (totalTeams - 1)) * 100 : (rank !== null ? 50 : null);
-    if (rankPct !== null && rankPct <= NEEDS_RANK_PCT_MAX) {
-      needs.push({ kind: "role-rank", role: pos, rankPct, rank, totalTeams, rating: ourScore, leagueAvg });
-    }
+    if (rankPct === null || rankPct > NEEDS_RANK_PCT_MAX) continue;
+
+    // Unadjusted side, for transparency, and to find which of our players
+    // (if any) the exclusion actually removed.
+    const unadjustedByOrg = new Map(orgIds.map((oid) => [oid, bestExactPositionScore(rows, oid, pos, false)]));
+    const unadjustedScores = [...unadjustedByOrg.values()].filter((v): v is NonNullable<typeof v> => v !== null).map((v) => v.score).sort((a, b) => b - a);
+    const ourUnadjusted = unadjustedByOrg.get(orgId) ?? null;
+    const unadjustedTotal = unadjustedScores.length;
+    const unadjustedRank = ourUnadjusted !== null ? unadjustedScores.indexOf(ourUnadjusted.score) + 1 : null;
+    const unadjustedRankPct = unadjustedRank !== null && unadjustedTotal > 1 ? ((unadjustedTotal - unadjustedRank) / (unadjustedTotal - 1)) * 100 : (unadjustedRank !== null ? 50 : null);
+
+    const excluded = ourUnadjusted !== null && ourAdjusted !== null && ourUnadjusted.playerId !== ourAdjusted.playerId
+      ? rows.find((r) => r.id === ourUnadjusted.playerId)
+      : (ourUnadjusted !== null && ourAdjusted === null ? rows.find((r) => r.id === ourUnadjusted.playerId) : undefined);
+
+    needs.push({
+      kind: "role-rank", role: pos, rankPct, rank, totalTeams,
+      rating: ourAdjusted?.score ?? null, leagueAvg, unadjustedRankPct,
+      excludedInjuredPlayers: excluded ? [{ playerId: excluded.id, name: excluded.name, daysLeft: excluded.daysLeft }] : [],
+    });
+  }
+  return needs;
+}
+
+// SP/RP/C/1B/SS/CF/COF/DH -- ROLE_HEALTH_ROWS minus "INF" (replaced by the
+// exact-position sweep above), "P Tot"/"H Tot" (aggregates, not real
+// positions).
+const SINGLE_POSITION_ROWS = ROLE_HEALTH_ROWS.filter((r) => r.label !== "INF" && r.label !== "P Tot" && r.label !== "H Tot");
+const SP_TOP_N = ROLE_HEALTH_ROWS.find((r) => r.label === "SP")!.topN;
+
+// Same RP-borrows-SP-overflow rule as my-roster-query.ts's pickRoleDepth
+// (CURRENT side, allowRpOverflow: true) -- a team's SP depth beyond its own
+// top-5 rotation is real bullpen-quality pitching, credited to RP too.
+// Restated here (values only, not full candidate identity) since this file
+// needs org-grouped, injury-excludable arrays, not pickRoleDepth's
+// display-oriented shape.
+function roleValuesForOrg(rows: LeaguePlayerRow[], orgId: number, rowLabel: string, rowRoles: string[], excludeInjured: boolean): { value: number; playerId: number; name: string; daysLeft: number | null }[] {
+  const isPitcherRow = PITCHER_ROLES.has(rowRoles[0]);
+  const metricOf = (r: LeaguePlayerRow) => (isPitcherRow || rowLabel === "P Tot" ? r.overall : r.batting);
+  const pool = rows.filter((r) => r.organization_id === orgId && (!excludeInjured || !r.isLongInjured));
+  if (rowLabel !== "RP") {
+    return pool
+      .filter((r) => r.role !== null && rowRoles.includes(r.role) && metricOf(r) !== null)
+      .map((r) => ({ value: metricOf(r) as number, playerId: r.id, name: r.name, daysLeft: r.daysLeft }));
+  }
+  const sp = pool
+    .filter((r) => r.role === "SP" && r.overall !== null)
+    .map((r) => ({ value: r.overall as number, playerId: r.id, name: r.name, daysLeft: r.daysLeft }))
+    .sort((a, b) => b.value - a.value);
+  const spSurplus = sp.slice(SP_TOP_N);
+  const rp = pool
+    .filter((r) => r.role === "RP" && r.overall !== null)
+    .map((r) => ({ value: r.overall as number, playerId: r.id, name: r.name, daysLeft: r.daysLeft }));
+  return [...spSurplus, ...rp];
+}
+
+function getRoleHealthNeeds(rows: LeaguePlayerRow[], orgId: number): RoleRankNeed[] {
+  const orgIds = [...new Set(rows.map((r) => r.organization_id))];
+  const needs: RoleRankNeed[] = [];
+
+  for (const row of SINGLE_POSITION_ROWS) {
+    const adjustedByOrg = new Map(
+      orgIds.map((oid) => [oid, topNAvg(roleValuesForOrg(rows, oid, row.label, row.roles, true).map((v) => v.value), row.topN)])
+    );
+    const adjustedScores = [...adjustedByOrg.values()].filter((v): v is number => v !== null).sort((a, b) => b - a);
+    const ourAdjusted = adjustedByOrg.get(orgId) ?? null;
+    const totalTeams = adjustedScores.length;
+    const leagueAvg = totalTeams > 0 ? adjustedScores.reduce((a, b) => a + b, 0) / totalTeams : null;
+    const rank = ourAdjusted !== null ? adjustedScores.indexOf(ourAdjusted) + 1 : null;
+    const rankPct = rank !== null && totalTeams > 1 ? ((totalTeams - rank) / (totalTeams - 1)) * 100 : (rank !== null ? 50 : null);
+    if (rankPct === null || rankPct > NEEDS_RANK_PCT_MAX) continue;
+
+    const unadjustedByOrg = new Map(
+      orgIds.map((oid) => [oid, topNAvg(roleValuesForOrg(rows, oid, row.label, row.roles, false).map((v) => v.value), row.topN)])
+    );
+    const unadjustedScores = [...unadjustedByOrg.values()].filter((v): v is number => v !== null).sort((a, b) => b - a);
+    const ourUnadjusted = unadjustedByOrg.get(orgId) ?? null;
+    const unadjustedTotal = unadjustedScores.length;
+    const unadjustedRank = ourUnadjusted !== null ? unadjustedScores.indexOf(ourUnadjusted) + 1 : null;
+    const unadjustedRankPct = unadjustedRank !== null && unadjustedTotal > 1 ? ((unadjustedTotal - unadjustedRank) / (unadjustedTotal - 1)) * 100 : (unadjustedRank !== null ? 50 : null);
+
+    // Which of our OWN long-injured players actually fed this role's pool
+    // (whether or not excluding them changed whether we clear the topN --
+    // e.g. a deep role might absorb the loss with its own overflow; still
+    // worth showing which real injuries are involved).
+    const ourLongInjuredHere = roleValuesForOrg(rows, orgId, row.label, row.roles, false)
+      .filter((v) => rows.find((r) => r.id === v.playerId)?.isLongInjured === true)
+      .map((v) => ({ playerId: v.playerId, name: v.name, daysLeft: v.daysLeft }));
+
+    needs.push({
+      kind: "role-rank", role: row.label, rankPct, rank, totalTeams,
+      rating: ourAdjusted, leagueAvg, unadjustedRankPct,
+      excludedInjuredPlayers: ourLongInjuredHere,
+    });
   }
   return needs;
 }
 
 export async function getPositionalNeeds(leagueId: number, orgId: number): Promise<Need[]> {
-  const [roleCards, exactPosNeeds] = await Promise.all([
-    getMyRosterAnalysis(leagueId, orgId),
-    getExactPositionNeeds(leagueId, orgId),
-  ]);
-
-  // "INF" excluded here entirely -- replaced by getExactPositionNeeds' own
-  // 2B/3B breakdown above, per Rees's explicit ask.
-  const roleRankNeeds: RoleRankNeed[] = roleCards
-    .filter((card) => card.label !== "INF" && card.current.rankPct !== null && card.current.rankPct <= NEEDS_RANK_PCT_MAX)
-    .map((card) => ({
-      kind: "role-rank",
-      role: card.label,
-      rankPct: card.current.rankPct as number,
-      rank: card.current.rank,
-      totalTeams: card.current.totalTeams,
-      rating: card.current.rating,
-      leagueAvg: card.current.leagueAvg,
-    }));
-  roleRankNeeds.push(...exactPosNeeds);
-
-  // Injury needs -- BOTH hitters and pitchers (2026-09-14 correction, caught
-  // during this step's own verification: getOptimalLineups().injuredOut is
-  // hitters-only BY DESIGN there -- pitchers never enter the Lineup page's
-  // world at all -- but Rees explicitly asked Trade Finder to cover "the
-  // pitching staff... including covering for longer term injuries" too. A
-  // real, current case that would have been silently missed: Bill Roark,
-  // partially torn labrum, 96 days left, confirmed live on StatsPlus's own
-  // IL page the same session the Ramirez case was investigated. Built as its
-  // own direct roster+injury scan rather than reusing injuredOut, covering
-  // both ph. Same active-roster-plus-eligible-to-return definition as
-  // lineup-optimizer-query.ts's rosterPlayers (organization_id+team_id+
-  // level=1+positive league_id, is_active OR healed-but-still-on-IL) --
-  // restated here rather than exported, matching this codebase's own
-  // established "duplicate a small stable rule" convention (see HANDOFF.md).
-  const refreshRunId = await latestRefreshRunId(leagueId);
-  const rosterRaw = await supabase
-    .from("players")
-    .select("id,first_name,last_name,is_active,injury_is_injured,injury_left")
-    .eq("dsa_league_id", leagueId)
-    .eq("organization_id", orgId).eq("team_id", orgId).eq("level", 1)
-    .gt("league_id", 0);
-  if (rosterRaw.error) throw rosterRaw.error;
-  const longInjured = (rosterRaw.data as { id: number; first_name: string; last_name: string; is_active: boolean | null; injury_is_injured: boolean | null; injury_left: number | null }[])
-    .filter((p) => p.injury_is_injured === true && (p.injury_left ?? 0) >= INJURY_DAYS_MIN);
-
-  let injuryNeeds: InjuryNeed[] = [];
-  if (longInjured.length > 0) {
-    const { data, error } = await supabase
-      .from("player_computed").select("player_id,role")
-      .eq("refresh_run_id", refreshRunId).in("player_id", longInjured.map((p) => p.id));
-    if (error) throw error;
-    const roleById = new Map((data as { player_id: number; role: string | null }[]).map((r) => [r.player_id, r.role]));
-    injuryNeeds = longInjured.map((p) => ({
-      kind: "injury",
-      role: roleById.get(p.id) ?? null,
-      playerId: p.id,
-      playerName: `${p.first_name} ${p.last_name}`,
-      daysLeft: p.injury_left,
-    }));
-  }
-
-  return [...roleRankNeeds, ...injuryNeeds];
+  const rows = await fetchLeagueRoster(leagueId);
+  return [...getRoleHealthNeeds(rows, orgId), ...getExactPositionNeeds(rows, orgId)];
 }
