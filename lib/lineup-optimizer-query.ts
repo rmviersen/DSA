@@ -365,23 +365,34 @@ export async function getOptimalLineups(leagueId: number, orgId: number): Promis
     .from("refresh_runs").select("batting_pct_vs_l,batting_pct_vs_r,pitching_pct_vs_l,pitching_pct_vs_r").eq("id", refreshRunId).maybeSingle();
   const handedness = handednessRow as { batting_pct_vs_l: number | null; batting_pct_vs_r: number | null; pitching_pct_vs_l: number | null; pitching_pct_vs_r: number | null } | null;
 
-  // Real active MLB roster only -- same organization_id+team_id+level=1
-  // filter org-minors-query.ts already established for this exact "MLB and
-  // int'l" split, plus is_active (excludes DFA'd/mistagged level-1 rows,
-  // same gotcha documented there) and a positive league_id (excludes the
+  // Real active MLB roster, PLUS healed IL guys StatsPlus hasn't let Rees
+  // formally reactivate yet (2026-09-14, Rees's ask -- confirmed real: David
+  // Ramirez shows on StatsPlus's own IL page as "Healthy / Eligible to
+  // return," but StatsPlus won't let him action that roster move himself, so
+  // the tool needs to just treat a healed IL guy as available rather than
+  // waiting on a transaction that isn't happening). Same organization_id+
+  // team_id+level=1 filter org-minors-query.ts already established for this
+  // exact "MLB and int'l" split, and a positive league_id (excludes the
   // international academy, which hides under the same team_id at level=1
-  // with a NEGATIVE league_id -- see that file's gotcha comment).
-  const rosterPlayers = await fetchAll<{
-    id: number; first_name: string; last_name: string;
+  // with a NEGATIVE league_id -- see that file's gotcha comment). is_active
+  // is no longer filtered AT the query -- fetched instead and combined with
+  // is_on_dl/injury_is_injured in JS below, so a real DFA'd player (is_active
+  // false, is_on_dl false -- genuinely off the roster, not just unactivated)
+  // still gets excluded, while a healed-but-parked-on-the-IL one doesn't.
+  const rosterFetch = await fetchAll<{
+    id: number; first_name: string; last_name: string; is_active: boolean | null;
     injury_is_injured: boolean | null; is_on_dl: boolean | null; is_on_dl60: boolean | null; injury_left: number | null;
   }>((from, to) =>
     supabase
       .from("players")
-      .select("id,first_name,last_name,injury_is_injured,is_on_dl,is_on_dl60,injury_left")
+      .select("id,first_name,last_name,is_active,injury_is_injured,is_on_dl,is_on_dl60,injury_left")
       .eq("dsa_league_id", leagueId)
-      .eq("organization_id", orgId).eq("team_id", orgId).eq("level", 1).eq("is_active", true)
+      .eq("organization_id", orgId).eq("team_id", orgId).eq("level", 1)
       .gt("league_id", 0)
       .range(from, to) as never
+  );
+  const rosterPlayers = rosterFetch.filter(
+    (p) => p.is_active === true || (p.is_active === false && p.is_on_dl === true && p.injury_is_injured === false)
   );
   const allIds = rosterPlayers.map((p) => p.id);
   if (allIds.length === 0) return {
