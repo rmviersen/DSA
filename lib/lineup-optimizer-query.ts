@@ -90,13 +90,23 @@ const ELIGIBILITY_MIN: Record<FieldPosition, number> = {
 // speed sum to exactly 1.0, so battingVsHand is a weighted AVERAGE of ~0-80
 // tool grades, not a rescaled sum -- pos_c/pos_1b/etc. are also 0-80), so a
 // plain weighted blend of the two raw numbers is valid without any
-// percentile normalization step. The 70/30 split is a judgment call --
-// Rees asked to optimize on both factors but didn't specify a ratio; this
-// leans offense-first (bat matters most, defense breaks close calls),
-// matching how lineup construction actually works in practice. Easy to
-// retune if it picks something that looks wrong in practice.
-const OFFENSE_WEIGHT = 0.7;
-const DEFENSE_WEIGHT = 0.3;
+// percentile normalization step.
+//
+// Retuned 70/30 -> 80/20 (2026-09-14, Rees's ask, same investigation as the
+// Porten/Silver/Estevez case): the ELIGIBILITY_MIN bar above (55, 50 for C)
+// already filters every candidate down to "can really play this position"
+// before scoring ever runs -- Rees's point is that a second, heavy 30%
+// defense weight on TOP of that gate was double-counting glove quality, and
+// tipping close calls toward defense-first rather than bat-first once two
+// candidates both clear the position bar. Confirmed with the real case that
+// prompted this: at 70/30, Silver's 80-grade 1B defense over Porten's 60
+// outweighed Porten's real batting edge; recompute the same two candidates'
+// scores by hand at 80/20 to confirm the tip point before trusting a bare
+// "it changed" run. Deliberately still real, not zero -- defense keeps
+// breaking genuinely close bat-only calls, just no longer able to override
+// as large a batting gap as before.
+const OFFENSE_WEIGHT = 0.8;
+const DEFENSE_WEIGHT = 0.2;
 
 // Injury exclusion (2026-09-13, Rees's ask): a sim in this league covers
 // roughly two weeks, so a player projected to miss 5+ days of that window
