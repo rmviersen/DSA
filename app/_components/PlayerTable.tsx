@@ -118,6 +118,11 @@ export function PlayerTable({ rows, showTeam, showProspectCols, showStatLevel, s
   // only, per the actual ask, not a range like Age; easy to add a max later
   // if that's ever wanted too.
   const [overallMin, setOverallMin] = useState("");
+  // Draft Value filter (2026-09-15, Rees's ask, for /draft) -- min only,
+  // same reasoning/pattern as Min Overall above. Only meaningful where
+  // Draft Value itself is shown (showDraftMetrics), same gating as that
+  // column.
+  const [draftValueMin, setDraftValueMin] = useState("");
   // Sign-only filter (2026-09-06, Rees's ask) -- only meaningful where the
   // Sign column itself is shown (showSign), same gating as the column.
   const [signOnly, setSignOnly] = useState(false);
@@ -220,6 +225,8 @@ export function PlayerTable({ rows, showTeam, showProspectCols, showStatLevel, s
     if (max !== null && !Number.isNaN(max)) out = out.filter((r) => r.age !== null && r.age <= max);
     const minOverall = overallMin.trim() === "" ? null : Number(overallMin);
     if (minOverall !== null && !Number.isNaN(minOverall)) out = out.filter((r) => r.overall >= minOverall);
+    const minDraftValue = draftValueMin.trim() === "" ? null : Number(draftValueMin);
+    if (minDraftValue !== null && !Number.isNaN(minDraftValue)) out = out.filter((r) => r.draftValue !== null && r.draftValue >= minDraftValue);
     const demandMin = demandMinM.trim() === "" ? null : Number(demandMinM) * 1_000_000;
     const demandMax = demandMaxM.trim() === "" ? null : Number(demandMaxM) * 1_000_000;
     if (demandMin !== null && !Number.isNaN(demandMin)) out = out.filter((r) => r.demandSalary !== null && r.demandSalary >= demandMin);
@@ -234,7 +241,7 @@ export function PlayerTable({ rows, showTeam, showProspectCols, showStatLevel, s
     if (signOnly) out = out.filter((r) => r.signFlag === true);
     if (showDraftStatus && availableOnly) out = out.filter((r) => r.draftedByTeam === null);
     return out;
-  }, [phFiltered, roleFilter, proneFilter, ageMin, ageMax, overallMin, demandMinM, demandMaxM, signOnly, showDraftStatus, availableOnly]);
+  }, [phFiltered, roleFilter, proneFilter, ageMin, ageMax, overallMin, draftValueMin, demandMinM, demandMaxM, signOnly, showDraftStatus, availableOnly]);
 
   const sortedRows = useMemo(() => {
     const dir = sortDir === "desc" ? -1 : 1;
@@ -488,6 +495,30 @@ export function PlayerTable({ rows, showTeam, showProspectCols, showStatLevel, s
           >
             Clear min Overall
           </button>
+        )}
+        {/* Draft Value filter (2026-09-15, Rees's ask) -- only where Draft
+            Value itself is shown (showDraftMetrics); same min-only pattern
+            as Min Overall above. */}
+        {showDraftMetrics && (
+          <>
+            <span style={{ fontSize: 12 }}>Min Draft Value</span>
+            <input
+              type="number"
+              inputMode="numeric"
+              placeholder="min"
+              value={draftValueMin}
+              onChange={(e) => setDraftValueMin(e.target.value)}
+              style={{ width: 52, padding: "3px 6px", fontSize: 12, border: "1px solid var(--color-border-strong)", borderRadius: 4, background: "transparent", color: "inherit" }}
+            />
+            {draftValueMin !== "" && (
+              <button
+                onClick={() => setDraftValueMin("")}
+                style={{ padding: "3px 10px", fontSize: 12, border: "1px solid var(--color-border-strong)", borderRadius: 4, background: "transparent", cursor: "pointer" }}
+              >
+                Clear min Draft Value
+              </button>
+            )}
+          </>
         )}
         {/* Demand filter (2026-09-09, Rees's ask) -- only where Demand
             itself is shown (showValueVsDemand); not a meaningful concept
