@@ -23,11 +23,12 @@ export default async function DraftPage({ params }: { params: Promise<{ league: 
             Con/Stf, Pow/Mov, and Eye/Ctrl show each player's POTENTIAL grade here, not current -- an amateur's current tools are close to meaningless next to a rostered player's.
             Draft Value differs from Prospect Potential -- same shape, but a smaller boost for a fully-developed current Overall, plus Work Ethic/Intelligence
             makeup adjustments. Hyp. Rank is where a player's real Prospect Potential would land in the actual current prospect rankings.
+            "Export CSV" downloads whatever's currently sorted/filtered below, Player ID first -- ready to upload straight into StatsPlus's own draft list Upload feature.
           </p>
         )}
       </header>
       {draftYear && <DraftAutoRefresh league={league} />}
-      <PlayerTable rows={rows} showTeam={false} showProspectCols={true} showDraftStatus={true} showPotentialTools={true} showDraftMetrics={true} hideStatColumns={true} />
+      <PlayerTable rows={rows} showTeam={false} showProspectCols={true} showDraftStatus={true} showPotentialTools={true} showDraftMetrics={true} hideStatColumns={true} showExport={true} exportFilename={`draft-list${draftYear ? `-${draftYear}` : ""}.csv`} />
     </>
   );
 }

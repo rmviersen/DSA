@@ -66,7 +66,41 @@ type SortKey =
 // nullable-ph default in this component).
 const combined = (r: PlayerRow, hitterVal: number | null, pitcherVal: number | null) => (r.ph === "P" ? pitcherVal : hitterVal);
 
-export function PlayerTable({ rows, showTeam, showProspectCols, showStatLevel, showValueVsDemand, showSign, showDraftStatus, showPotentialTools, showEligiblePositions, showTradeBlockInfo, showDraftMetrics, hideStatColumns, renderLimit }: { rows: PlayerRow[]; showTeam: boolean; showProspectCols: boolean; showStatLevel?: boolean; showValueVsDemand?: boolean; showSign?: boolean; showDraftStatus?: boolean; showPotentialTools?: boolean; showEligiblePositions?: boolean; showTradeBlockInfo?: boolean; showDraftMetrics?: boolean; hideStatColumns?: boolean; renderLimit?: number }) {
+// Draft-list export (2026-09-15, Rees's ask -- "export the table, sorted by
+// draft rank, to a csv... to upload to statsplus and set our list").
+// Confirmed with Rees exactly what StatsPlus's own Upload feature requires:
+// a text/CSV file, one player per line, Player ID as the FIRST column (max
+// 3000 rows, well above any real draft pool here) -- extra columns after
+// that are tolerated, so this adds a few human-readable ones (rank, name,
+// pos, Draft Value) purely so the file is also easy for Rees to eyeball
+// before uploading, not because StatsPlus needs them.
+function escapeCsvField(v: string | number): string {
+  const s = String(v);
+  return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
+}
+
+function downloadDraftListCsv(rows: PlayerRow[], filename: string) {
+  const header = ["Player ID", "Rank", "Name", "Pos", "Draft Value"];
+  const lines = rows.map((r, i) => [
+    r.player_id,
+    i + 1,
+    `${r.first_name} ${r.last_name}`,
+    r.pos ?? "",
+    r.draftValue === null || r.draftValue === undefined ? "" : r.draftValue.toFixed(1),
+  ].map(escapeCsvField).join(","));
+  const csv = [header.join(","), ...lines].join("\n");
+  const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+}
+
+export function PlayerTable({ rows, showTeam, showProspectCols, showStatLevel, showValueVsDemand, showSign, showDraftStatus, showPotentialTools, showEligiblePositions, showTradeBlockInfo, showDraftMetrics, hideStatColumns, renderLimit, showExport, exportFilename }: { rows: PlayerRow[]; showTeam: boolean; showProspectCols: boolean; showStatLevel?: boolean; showValueVsDemand?: boolean; showSign?: boolean; showDraftStatus?: boolean; showPotentialTools?: boolean; showEligiblePositions?: boolean; showTradeBlockInfo?: boolean; showDraftMetrics?: boolean; hideStatColumns?: boolean; renderLimit?: number; showExport?: boolean; exportFilename?: string }) {
   // Multi-league routing (2026-09-10) -- this table is only ever rendered
   // under a page inside app/[league]/..., so the league slug is always in
   // the URL.
@@ -506,6 +540,22 @@ export function PlayerTable({ rows, showTeam, showProspectCols, showStatLevel, s
             }}
           >
             ✓ Sign only
+          </button>
+        )}
+        {/* Export (2026-09-15, Rees's ask) -- exports sortedRows, i.e. the
+            CURRENT filtered/sort order (Rees's explicit call: "whatever's
+            currently visible on screen"), not the full unfiltered pool and
+            not capped by renderLimit (that cap is a display/perf
+            convenience, not part of "what you're looking at" -- same
+            reasoning renderLimit's own comment already gives for why
+            filters apply before the cap, not after). */}
+        {showExport && (
+          <button
+            onClick={() => downloadDraftListCsv(sortedRows, exportFilename ?? "player-export.csv")}
+            style={{ padding: "3px 10px", fontSize: 12, border: "1px solid var(--color-border-strong)", borderRadius: 4, background: "transparent", cursor: "pointer" }}
+            title="Downloads a CSV with Player ID as the first column, in the order shown below -- ready to upload to StatsPlus's draft list Upload feature."
+          >
+            ⬇ Export CSV
           </button>
         )}
         <span style={{ fontSize: 11, color: "var(--color-text-muted, #888)", marginLeft: "auto" }}>
