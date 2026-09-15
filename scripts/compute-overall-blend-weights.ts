@@ -2,11 +2,14 @@ import "dotenv/config";
 import { makeSupabaseClient } from "../lib/supabase-client.js";
 import { fitMultipleLinear } from "../lib/regression.js";
 import { persistWeightTuningRun } from "../lib/weight-tuning-persist.js";
+import { applyRatingWeightUpdate } from "../lib/rating-weights-apply.js";
 import { getLeagueId, leagueSlugFromArgv, getCurrentSeasonYear, getMlbLeagueId, getWeightTuningSeasons } from "../lib/league.js";
 
 // Step 3 of the decomposed offense/defense redesign, finally buildable now
 // that Batting, Fielding, and Baserunning have each been individually tuned
-// (2026-09-02, Rees's ask -- "start that work on Batter's Overall").
+// (2026-09-02, Rees's ask -- "start that work on Batter's Overall"). SELF-
+// TRAINS the live rating_weights every run as of 2026-09-15 -- see the
+// apply step near the bottom of main().
 //
 // Unlike the other three weight-tuning scripts, this one does NOT regress
 // raw tool grades -- it regresses the three already-computed COMPOSITES
@@ -199,7 +202,25 @@ async function main() {
     })),
   });
 
-  console.log("\nDone -- rating_weights itself is untouched; this only saved the diagnostic history.");
+  // Self-train the live weights (2026-09-15, Rees's ask -- see
+  // compute-hitting-weights.ts's identical apply step for the full
+  // reasoning). Trains against player_computed's batting/fielding/
+  // baserunning composites as of THIS run's refresh, which themselves
+  // reflect whatever hitting/baserunning weights were active as of the
+  // compute-ratings.ts step earlier in the SAME refresh -- so if this
+  // script runs after compute-hitting-weights.ts/compute-baserunning-
+  // weights.ts already applied their own updates this run (see
+  // refresh.ts's ordering), those composites are still one refresh behind
+  // (same lag already accepted for fielding_role_weights). Self-correcting
+  // over successive refreshes, not a same-run circular dependency.
+  const changeSummary = labels.map((label, i) => `${label} ${(currentByLabel[label] ?? 0).toFixed(3)}->${normalized[i].toFixed(3)}`).join(", ");
+  const newId = await applyRatingWeightUpdate(
+    supabase, leagueId,
+    { batting: normalized[0], fielding: normalized[1], baserunning: normalized[2] },
+    `Self-trained Batting/Fielding/Baserunning blend (auto, ${new Date().toISOString().slice(0, 10)})`,
+    `Auto-applied by scripts/compute-overall-blend-weights.ts. Regression: WAR/100PA ~ Batting+Fielding+Baserunning, n=${rows.length}, R²=${fit.rSquared.toFixed(3)}, seasons: ${seasonLabel}. ${changeSummary}. Every other field carried forward unchanged from the previous active row.`
+  );
+  console.log(`\nApplied to rating_weights as new active row id=${newId}.`);
 }
 
 main().catch((err) => {

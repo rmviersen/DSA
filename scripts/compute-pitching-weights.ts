@@ -2,6 +2,7 @@ import "dotenv/config";
 import { makeSupabaseClient } from "../lib/supabase-client.js";
 import { fitMultipleLinear } from "../lib/regression.js";
 import { persistWeightTuningRun } from "../lib/weight-tuning-persist.js";
+import { applyRatingWeightUpdate } from "../lib/rating-weights-apply.js";
 import { getLeagueId, leagueSlugFromArgv, getCurrentSeasonYear, getMlbLeagueId, getWeightTuningSeasons } from "../lib/league.js";
 
 // Pitching weight-tuning (rebuilt 2026-09-02, Rees's corrections to the
@@ -59,6 +60,12 @@ import { getLeagueId, leagueSlugFromArgv, getCurrentSeasonYear, getMlbLeagueId, 
 // getWeightTuningSeasons), each season's own grades/role/park factors read
 // from its own refresh run, weighted by real season progress -- applied
 // identically to all four SP/RP x FIP-/WAR combinations below.
+//
+// SELF-TRAINING (2026-09-15, same ask): the WAR/100 IP runs (only -- Rees's
+// call, matching the reasoning already used for the current live pitching
+// weights) now auto-apply to rating_weights' sp_*/rp_* columns every run.
+// The FIP--target runs stay diagnostic-only, same side-by-side comparison
+// as before.
 
 const PAGE_SIZE = 1000;
 async function fetchAll<T>(query: (from: number, to: number) => Promise<{ data: T[] | null; error: unknown }>): Promise<T[]> {
@@ -214,7 +221,7 @@ async function main() {
   // reduces to plain OLS when only one season is pooled.
   async function runOne(
     roleLabel: "SP" | "RP", rows: Row[], stream: "pitching_sp" | "pitching_rp" | "pitching_sp_war" | "pitching_rp_war",
-    targetLabel: string, getY: (r: Row) => number
+    targetLabel: string, getY: (r: Row) => number, applyToLiveWeights: boolean
   ) {
     if (rows.length < 30) {
       console.log(`\n${roleLabel} / ${targetLabel}: only ${rows.length} qualifying pitcher-seasons -- too small to trust a 4-variable regression. Skipping.`);
@@ -236,10 +243,20 @@ async function main() {
     const sum = clamped.reduce((s, c) => s + c, 0);
     const normalized = sum > 0 ? clamped.map((c) => c / sum) : clamped.map(() => 0);
 
-    const { data: weightRow } = await supabase.from("rating_weights").select("stuff, movement, control, stamina").eq("dsa_league_id", leagueId).eq("is_active", true).maybeSingle();
-    const current = weightRow as { stuff: number; movement: number; control: number; stamina: number } | null;
+    // Role-specific columns (sp_*/rp_*), not the flat stuff/movement/
+    // control/stamina ones -- those are historical-only, no longer read by
+    // the formula (see rating_weights row id=5's own notes) since the
+    // engine switched to reading sp_*/rp_* directly (lib/rating-engine.ts).
+    // Reading the flat columns here would have shown a stale, wrong
+    // "current" comparison.
+    const liveCols = roleLabel === "SP"
+      ? { stuff: "sp_stuff", movement: "sp_movement", control: "sp_control", stamina: "sp_stamina" }
+      : { stuff: "rp_stuff", movement: "rp_movement", control: "rp_control", stamina: "rp_stamina" };
+    const { data: weightRow } = await supabase.from("rating_weights").select(Object.values(liveCols).join(", ")).eq("dsa_league_id", leagueId).eq("is_active", true).maybeSingle();
+    const current = weightRow as Record<string, number> | null;
     const currentByLabel: Record<string, number | null> = {
-      Stuff: current?.stuff ?? null, Movement: current?.movement ?? null, Control: current?.control ?? null, Stamina: current?.stamina ?? null,
+      Stuff: current?.[liveCols.stuff] ?? null, Movement: current?.[liveCols.movement] ?? null,
+      Control: current?.[liveCols.control] ?? null, Stamina: current?.[liveCols.stamina] ?? null,
     };
     console.log(`  Implied weight vector (sums to 1): ${labels.map((l, i) => `${l}=${normalized[i].toFixed(3)}`).join(", ")}`);
 
@@ -269,17 +286,42 @@ async function main() {
         currentWeight: currentByLabel[label],
       })),
     });
+
+    // Self-train the live weights (2026-09-15, Rees's ask -- see
+    // compute-hitting-weights.ts's identical apply step for the full
+    // reasoning). Only the WAR/100 IP target actually applies -- Rees's
+    // call (2026-09-15), matching the reasoning already used for the
+    // current live pitching weights (rating_weights row id=5): WAR fits
+    // better than park-adjusted FIP- in both roles with real data, and
+    // this engine's `war` field is believed to already be FIP-flavored
+    // (there's a separate `ra9war` column for the non-FIP-flavored
+    // version), so FIP- stays a side-by-side comparison only, same as
+    // before, never applied.
+    if (applyToLiveWeights) {
+      const updates = roleLabel === "SP"
+        ? { sp_stuff: normalized[0], sp_movement: normalized[1], sp_control: normalized[2], sp_stamina: normalized[3] }
+        : { rp_stuff: normalized[0], rp_movement: normalized[1], rp_control: normalized[2], rp_stamina: normalized[3] };
+      const changeSummary = labels.map((label, i) => `${label} ${(currentByLabel[label] ?? 0).toFixed(3)}->${normalized[i].toFixed(3)}`).join(", ");
+      const newId = await applyRatingWeightUpdate(
+        supabase, leagueId, updates,
+        `Self-trained ${roleLabel} pitching weights (auto, ${new Date().toISOString().slice(0, 10)})`,
+        `Auto-applied by scripts/compute-pitching-weights.ts (${roleLabel}, WAR/100 IP target). Regression: WAR/100IP ~ Stuff+Movement+Control+Stamina, n=${rows.length}, R²=${fit.rSquared.toFixed(3)}, seasons: ${seasonLabel}. ${changeSummary}. Every other field carried forward unchanged from the previous active row.`
+      );
+      console.log(`  Applied to rating_weights as new active row id=${newId}.`);
+    }
   }
 
   // Both targets, both roles -- Rees's ask, to compare side by side on
   // /admin/weight-tuning how much the target metric itself moves the
-  // implied weights, not just take FIP-'s word for it.
-  await runOne("SP", spRows, "pitching_sp", "FIP- (park-adjusted)", (r) => -r.fipMinus);
-  await runOne("RP", rpRows, "pitching_rp", "FIP- (park-adjusted)", (r) => -r.fipMinus);
-  await runOne("SP", spRows, "pitching_sp_war", "WAR / 100 IP", (r) => r.warRate);
-  await runOne("RP", rpRows, "pitching_rp_war", "WAR / 100 IP", (r) => r.warRate);
+  // implied weights, not just take FIP-'s word for it. Only the WAR-target
+  // calls apply to the live engine (applyToLiveWeights=true) -- see the
+  // comment inside runOne for why.
+  await runOne("SP", spRows, "pitching_sp", "FIP- (park-adjusted)", (r) => -r.fipMinus, false);
+  await runOne("RP", rpRows, "pitching_rp", "FIP- (park-adjusted)", (r) => -r.fipMinus, false);
+  await runOne("SP", spRows, "pitching_sp_war", "WAR / 100 IP", (r) => r.warRate, true);
+  await runOne("RP", rpRows, "pitching_rp_war", "WAR / 100 IP", (r) => r.warRate, true);
 
-  console.log("\nDone -- rating_weights itself is untouched; this only saved the diagnostic history.");
+  console.log("\nDone -- WAR-target SP/RP weights applied to rating_weights (see above); FIP--target runs stay diagnostic-only.");
 }
 
 main().catch((err) => {

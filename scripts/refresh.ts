@@ -347,6 +347,20 @@ async function main() {
     // weight_tuning_runs/weight_tuning_coefficients row tagged to THIS
     // refresh_run_id, independent try/catch per script so one failing
     // doesn't block the others or the rest of the refresh.
+    //
+    // SELF-TRAINING (2026-09-15, Rees's ask -- "the weights and model are
+    // self-training on every sim"). Hitting/baserunning/overall-blend (all
+    // 3) and pitching's WAR/100 IP target (only) now also auto-apply their
+    // freshly-tuned weights to the live rating_weights row every time they
+    // run here -- see lib/rating-weights-apply.ts. compute-ratings.ts (just
+    // above) already ran THIS refresh using whatever was active BEFORE this
+    // block -- so a weight tuned here takes effect starting the NEXT
+    // refresh, same one-refresh lag already accepted for
+    // compute-fielding-weights.ts's fielding_role_weights. Fielding-
+    // defensive stays diagnostic-only (near-zero R² historically, Rees's
+    // own prior call that it shouldn't set a weight); pitching's FIP-
+    // target stays diagnostic-only too (WAR/100 IP fits better in both
+    // roles with real data -- Rees's call, 2026-09-15).
     console.log("Computing hitting weight-tuning regression for this run...");
     try {
       execFileSync("npx", ["tsx", "scripts/compute-hitting-weights.ts"], { stdio: "inherit", shell: true });

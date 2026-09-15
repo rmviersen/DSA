@@ -2,12 +2,14 @@ import "dotenv/config";
 import { makeSupabaseClient } from "../lib/supabase-client.js";
 import { fitMultipleLinear } from "../lib/regression.js";
 import { persistWeightTuningRun } from "../lib/weight-tuning-persist.js";
+import { applyRatingWeightUpdate } from "../lib/rating-weights-apply.js";
 import { getLeagueId, leagueSlugFromArgv, getCurrentSeasonYear, getMlbLeagueId, getWeightTuningSeasons } from "../lib/league.js";
 
 // Baserunning analysis (2026-09-01, Rees's ask), same shape as
 // compute-hitting-weights.ts: regress a real outcome against the grades
-// that plausibly drive it, pooled across every real MLB hitter, diagnostic
-// only -- nothing written to the database.
+// that plausibly drive it, pooled across every real MLB hitter. SELF-TRAINS
+// the live rating_weights every run as of 2026-09-15 -- see the apply step
+// near the bottom of main().
 //
 // Target is UBR ("Ultimate Base Running" -- StatsPlus/OOTP already
 // computes this as a real per-season baserunning-runs stat, confirmed
@@ -211,7 +213,17 @@ async function main() {
     })),
   });
 
-  console.log("\nDone -- rating_weights itself is untouched; this only saved the diagnostic history.");
+  // Self-train the live weights (2026-09-15, Rees's ask -- see
+  // compute-hitting-weights.ts's identical apply step for the full
+  // reasoning). Keys match the baserunning_{key}_weight column suffixes.
+  const changeSummary = labels.map((label, i) => `${label} ${(currentByLabel[label] ?? 0).toFixed(3)}->${normalized[i].toFixed(3)}`).join(", ");
+  const newId = await applyRatingWeightUpdate(
+    supabase, leagueId,
+    { baserunning_speed_weight: normalized[0], baserunning_run_weight: normalized[1], baserunning_steal_weight: normalized[2], baserunning_stlrt_weight: normalized[3] },
+    `Self-trained baserunning weights (auto, ${new Date().toISOString().slice(0, 10)})`,
+    `Auto-applied by scripts/compute-baserunning-weights.ts. Regression: UBR/100PA ~ Speed+Run+Steal+StealTendency, n=${rows.length}, R²=${fit.rSquared.toFixed(3)}, seasons: ${seasonLabel}. ${changeSummary}. Every other field carried forward unchanged from the previous active row.`
+  );
+  console.log(`\nApplied to rating_weights as new active row id=${newId}.`);
 }
 
 main().catch((err) => {

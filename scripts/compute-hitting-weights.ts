@@ -2,6 +2,7 @@ import "dotenv/config";
 import { makeSupabaseClient } from "../lib/supabase-client.js";
 import { fitMultipleLinear } from "../lib/regression.js";
 import { persistWeightTuningRun } from "../lib/weight-tuning-persist.js";
+import { applyRatingWeightUpdate } from "../lib/rating-weights-apply.js";
 import { getLeagueId, leagueSlugFromArgv, getCurrentSeasonYear, getMlbLeagueId, getWeightTuningSeasons } from "../lib/league.js";
 
 // Step 1 of the decomposed offense/defense redesign (2026-09-01, Rees's
@@ -60,10 +61,12 @@ import { getLeagueId, leagueSlugFromArgv, getCurrentSeasonYear, getMlbLeagueId, 
 // snapshots), not "whatever's current now," so a player's 2031 OPS+ is
 // matched against his real 2031 grades, not his 2032 ones.
 //
-// This is diagnostic only -- prints results, writes nothing to
-// rating_weights or any other table. A weight change only ships after
-// Rees reviews the actual numbers, same discipline as every other
-// engine-affecting analysis this session.
+// SELF-TRAINING (2026-09-15, Rees's ask -- see the apply step near the
+// bottom of main() for the full reasoning): this now auto-applies its own
+// implied weight vector to the live rating_weights row every time it runs
+// (every refresh), instead of only being diagnostic. Still writes the same
+// weight_tuning_runs/weight_tuning_coefficients history row as before, for
+// the /admin/weight-tuning page and for auditability.
 
 const PAGE_SIZE = 1000;
 async function fetchAll<T>(query: (from: number, to: number) => Promise<{ data: T[] | null; error: unknown }>): Promise<T[]> {
@@ -341,7 +344,23 @@ async function main() {
     })),
   });
 
-  console.log("\nDone -- rating_weights itself is untouched; this only saved the diagnostic history.");
+  // Self-train the LIVE weights (2026-09-15, Rees's ask -- "the weights and
+  // model are self-training on every sim... current seasons being diluted
+  // by incompleteness"). Every prior rating_weights change was a manual,
+  // hand-reviewed row -- this is the first stream wired to apply itself
+  // automatically, via the atomic clone-patch-swap RPC (see its migration
+  // comment for why this can't be two separate calls). Runs every refresh
+  // (scripts/refresh.ts), so this season's own weight in the blend above
+  // keeps growing each time this is re-run, same self-correcting cadence as
+  // the season-progress fraction itself.
+  const changeSummary = labels.map((label, i) => `${label} ${(currentByKey[label] ?? 0).toFixed(3)}->${normalized[i].toFixed(3)}`).join(", ");
+  const newId = await applyRatingWeightUpdate(
+    supabase, leagueId,
+    { contact: normalized[0], gap: normalized[1], power: normalized[2], eye: normalized[3], avoid_ks: normalized[4], speed: normalized[5] },
+    `Self-trained hitting weights (auto, ${new Date().toISOString().slice(0, 10)})`,
+    `Auto-applied by scripts/compute-hitting-weights.ts. Regression: OPS+ (park-adjusted) ~ Contact+Gap+Power+Eye+AvoidKs+Speed, n=${rows.length}, R²=${fit.rSquared.toFixed(3)}, seasons: ${seasonLabel}. ${changeSummary}. Every other field carried forward unchanged from the previous active row.`
+  );
+  console.log(`\nApplied to rating_weights as new active row id=${newId}.`);
 }
 
 main().catch((err) => {

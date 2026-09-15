@@ -1895,22 +1895,28 @@ export type Database = {
       leagues: {
         Row: {
           created_at: string
+          default_org_id: number | null
           display_name: string
           id: number
+          mlb_league_id: number | null
           slug: string
           source_type: string
         }
         Insert: {
           created_at?: string
+          default_org_id?: number | null
           display_name: string
           id?: never
+          mlb_league_id?: number | null
           slug: string
           source_type: string
         }
         Update: {
           created_at?: string
+          default_org_id?: number | null
           display_name?: string
           id?: never
+          mlb_league_id?: number | null
           slug?: string
           source_type?: string
         }
@@ -3997,6 +4003,8 @@ export type Database = {
       }
       refresh_runs: {
         Row: {
+          batting_pct_vs_l: number | null
+          batting_pct_vs_r: number | null
           completed_at: string | null
           draft_pool_count: number | null
           dsa_league_id: number
@@ -4011,12 +4019,16 @@ export type Database = {
           notes: string | null
           pitcher_overall_mean: number | null
           pitcher_overall_sd: number | null
+          pitching_pct_vs_l: number | null
+          pitching_pct_vs_r: number | null
           ratings_included: boolean
           retired_count: number | null
           started_at: string
           status: string
         }
         Insert: {
+          batting_pct_vs_l?: number | null
+          batting_pct_vs_r?: number | null
           completed_at?: string | null
           draft_pool_count?: number | null
           dsa_league_id: number
@@ -4031,12 +4043,16 @@ export type Database = {
           notes?: string | null
           pitcher_overall_mean?: number | null
           pitcher_overall_sd?: number | null
+          pitching_pct_vs_l?: number | null
+          pitching_pct_vs_r?: number | null
           ratings_included?: boolean
           retired_count?: number | null
           started_at?: string
           status: string
         }
         Update: {
+          batting_pct_vs_l?: number | null
+          batting_pct_vs_r?: number | null
           completed_at?: string | null
           draft_pool_count?: number | null
           dsa_league_id?: number
@@ -4051,6 +4067,8 @@ export type Database = {
           notes?: string | null
           pitcher_overall_mean?: number | null
           pitcher_overall_sd?: number | null
+          pitching_pct_vs_l?: number | null
+          pitching_pct_vs_r?: number | null
           ratings_included?: boolean
           retired_count?: number | null
           started_at?: string
@@ -4928,7 +4946,15 @@ export type Database = {
       [_ in never]: never
     }
     Functions: {
-      [_ in never]: never
+      apply_rating_weight_update: {
+        Args: {
+          p_label: string
+          p_league_id: number
+          p_notes: string
+          p_updates: Json
+        }
+        Returns: number
+      }
     }
     Enums: {
       [_ in never]: never
