@@ -134,3 +134,102 @@ export async function resolveLeagueId(slug: string): Promise<number> {
     throw new Error("unreachable");
   }
 }
+
+export interface WeightTuningSeason {
+  year: number;
+  // The refresh_run_id whose player_batting/pitching_stats_snapshots,
+  // player_ratings_snapshots, and player_computed rows all represent THIS
+  // season -- ratings/grades have no `year` column of their own (they're a
+  // point-in-time snapshot, tagged only by refresh_run_id/captured_at), so a
+  // season's own grades have to be read from its own run, not "whatever's
+  // newest now."
+  statsRefreshRunId: number;
+  // This season's target share of the pooled regression's total weight mass
+  // (0-1, every season's weight sums to 1) -- NOT a per-row weight. Each
+  // caller still has to spread this across however many rows actually
+  // qualify for THIS season's own regression (rowWeight = season.weight /
+  // thatSeason'sRowCount), since qualifying-row counts differ per regression
+  // (hitting vs. pitching SP vs. RP, etc.) and even per predictor set within
+  // one script.
+  weight: number;
+}
+
+// Multi-season weighting for every weight-tuning regression (2026-09-15,
+// Rees: "the weights are being tuned off of just [the current] season...
+// training data should run off any full or partial season we have rating
+// data for... weighting current season less, gradually increasing... until
+// [it and the prior full season] are equally important once the season
+// ends"). Before this, every compute-*-weights.ts script regressed against
+// getCurrentSeasonYear() alone -- fine while that was the only season with
+// real ratings history, but wrong now: once the new season starts, its
+// early, thin sample was the ENTIRE training set, discarding a full prior
+// season's worth of real signal for no reason.
+//
+// Finds the current (possibly partial) season and the most recent earlier
+// season with any real MLB batting stats, then derives how much weight each
+// should carry from a real, data-driven season-progress signal: total real
+// MLB plate appearances accumulated so far this year, divided by the prior
+// season's own FINAL total PA. That needs no hardcoded season-length
+// assumption (a season's real schedule length is never hardcoded anywhere
+// else in this codebase either -- see getCurrentSeasonYear's own comment)
+// and keeps working the same way every future season, not just 2031/2032.
+//
+// currentYear's weight ramps LINEARLY from 0 (no games played yet) to 0.5
+// (this season fully played out, PA fraction reaches 1) as that fraction
+// goes 0 -> 1; the prior season gets whatever's left (1 -> 0.5) -- so the
+// two seasons become equally weighted only once the current one is
+// genuinely complete, exactly per Rees's spec, never before. PA fraction is
+// clamped to 1 (rather than let a longer/expanded current season push
+// currentYear's weight past 0.5) since "equally important" is the stated
+// ceiling, not a crossover point.
+//
+// Returns just the current season at weight 1 if there's no earlier season
+// with any real data at all (the first season this platform ever tracked) --
+// identical behavior to every regression script before this change existed.
+// Returns an empty array if the current season itself has no stats yet
+// (brand-new season, zero games played) -- callers already have their own
+// "log and return cleanly" handling for that exact case; this just gives
+// them one shared place to detect it instead of each repeating the same
+// query.
+export async function getWeightTuningSeasons(supabase: SupabaseClient, leagueId: number, currentYear: number): Promise<WeightTuningSeason[]> {
+  async function latestRunForYear(year: number): Promise<number | null> {
+    const { data, error } = await supabase
+      .from("player_batting_stats_snapshots").select("refresh_run_id")
+      .eq("dsa_league_id", leagueId).eq("year", year).eq("level_id", 1).eq("split_id", 1)
+      .order("refresh_run_id", { ascending: false }).limit(1).maybeSingle();
+    if (error) throw new Error(`Could not resolve latest refresh run for year ${year}: ${error.message}`);
+    return (data as { refresh_run_id: number } | null)?.refresh_run_id ?? null;
+  }
+  async function totalPa(year: number, refreshRunId: number): Promise<number> {
+    const { data, error } = await supabase
+      .from("player_batting_stats_snapshots").select("pa")
+      .eq("dsa_league_id", leagueId).eq("year", year).eq("level_id", 1).eq("split_id", 1).eq("refresh_run_id", refreshRunId);
+    if (error) throw new Error(`Could not sum league PA for year ${year}: ${error.message}`);
+    return ((data ?? []) as { pa: number | null }[]).reduce((s, r) => s + (r.pa ?? 0), 0);
+  }
+
+  const currentRunId = await latestRunForYear(currentYear);
+  if (currentRunId === null) return [];
+
+  // Nearest earlier year that actually has data -- normally currentYear - 1,
+  // computed rather than assumed so this stays correct even if a season
+  // were ever missing from the data.
+  let priorYear = currentYear - 1;
+  let priorRunId: number | null = null;
+  while (priorYear > 1900) {
+    priorRunId = await latestRunForYear(priorYear);
+    if (priorRunId !== null) break;
+    priorYear--;
+  }
+  if (priorRunId === null) return [{ year: currentYear, statsRefreshRunId: currentRunId, weight: 1 }];
+
+  const [currentPa, priorPa] = await Promise.all([totalPa(currentYear, currentRunId), totalPa(priorYear, priorRunId)]);
+  const fraction = priorPa > 0 ? Math.min(1, currentPa / priorPa) : 1;
+  const currentWeight = 0.5 * fraction;
+  const priorWeight = 1 - currentWeight;
+
+  return [
+    { year: priorYear, statsRefreshRunId: priorRunId, weight: priorWeight },
+    { year: currentYear, statsRefreshRunId: currentRunId, weight: currentWeight },
+  ];
+}

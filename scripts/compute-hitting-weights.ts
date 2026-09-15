@@ -2,7 +2,7 @@ import "dotenv/config";
 import { makeSupabaseClient } from "../lib/supabase-client.js";
 import { fitMultipleLinear } from "../lib/regression.js";
 import { persistWeightTuningRun } from "../lib/weight-tuning-persist.js";
-import { getLeagueId, leagueSlugFromArgv, getCurrentSeasonYear, getMlbLeagueId } from "../lib/league.js";
+import { getLeagueId, leagueSlugFromArgv, getCurrentSeasonYear, getMlbLeagueId, getWeightTuningSeasons } from "../lib/league.js";
 
 // Step 1 of the decomposed offense/defense redesign (2026-09-01, Rees's
 // ask, replacing the retired role-calibrated fielding weight -- see the
@@ -36,14 +36,29 @@ import { getLeagueId, leagueSlugFromArgv, getCurrentSeasonYear, getMlbLeagueId }
 // OPS+ doesn't exist anywhere in this schema yet (confirmed 2026-09-01 --
 // player_batting_stats_snapshots has only raw counting stats, no OBP/SLG/
 // OPS+ columns). This script computes the minimum real version needed
-// here: league-wide OBP/SLG from every real 2031 MLB plate appearance
-// (not just the 100+ PA qualifiers below -- restricting the LEAGUE
-// baseline to only qualified regulars would bias it upward), then each
-// qualifying player's OPS+ relative to that baseline. This is the same
-// league-average-by-level-and-year normalization HANDOFF.md already flags
-// as an open item for the real OPS+/FIP- work -- scoped here to exactly
-// what this one regression needs (2031, MLB level only), not the general
-// system.
+// here: league-wide OBP/SLG from every real qualifying season's MLB plate
+// appearance (not just the 100+ PA qualifiers below -- restricting the
+// LEAGUE baseline to only qualified regulars would bias it upward), then
+// each qualifying player's OPS+ relative to that season's own baseline.
+// This is the same league-average-by-level-and-year normalization
+// HANDOFF.md already flags as an open item for the real OPS+/FIP- work --
+// scoped here to exactly what this one regression needs (MLB level only),
+// not the general system.
+//
+// MULTI-SEASON BLEND (2026-09-15, Rees's ask -- "the weights are being
+// tuned off of just [the current] season... training data should run off
+// any full or partial season we have rating data for"). Previously this
+// only ever regressed against getCurrentSeasonYear() -- right while that
+// was the only season with ratings history, wrong the moment a new season
+// starts with a thin early sample. Now pools the current season with the
+// most recent earlier season (see lib/league.ts's getWeightTuningSeasons),
+// weighting each by a real, PA-based season-progress signal: the current
+// season starts near-irrelevant and ramps up to being equally weighted
+// with the prior FULL season only once it's genuinely complete itself --
+// never beyond that. Each season's grades are read from THAT season's own
+// refresh run (ratings/roles have no `year` column -- they're point-in-time
+// snapshots), not "whatever's current now," so a player's 2031 OPS+ is
+// matched against his real 2031 grades, not his 2032 ones.
 //
 // This is diagnostic only -- prints results, writes nothing to
 // rating_weights or any other table. A weight change only ships after
@@ -122,58 +137,25 @@ function addCategories(a: HitCategories, b: HitCategories): HitCategories {
 }
 const emptyCategories = (): HitCategories => ({ ab: 0, bb: 0, hp: 0, sf: 0, singles: 0, doubles: 0, triples: 0, hr: 0 });
 
+interface Row { playerId: number; year: number; seasonWeight: number; opsPlus: number; opsPlusRaw: number; cntct: number; gap: number; pow: number; eye: number; ks: number; speed: number; pa: number }
+
 async function main() {
   const supabase = makeSupabaseClient();
   const leagueId = await getLeagueId(supabase, leagueSlugFromArgv());
   const currentYear = await getCurrentSeasonYear(supabase, leagueId);
   const mlbLeagueId = await getMlbLeagueId(supabase, leagueId);
 
-  console.log("Finding latest refresh run with player_computed (for grades/role)...");
-  const { data: computedRunRow } = await supabase
-    .from("player_computed").select("refresh_run_id").eq("dsa_league_id", leagueId).order("refresh_run_id", { ascending: false }).limit(1).maybeSingle();
-  if (!computedRunRow) throw new Error("No player_computed rows found.");
-  const computedRunId = (computedRunRow as { refresh_run_id: number }).refresh_run_id;
-
-  console.log(`Finding latest refresh run with ${currentYear} MLB batting stats...`);
-  const { data: statsRunRow } = await supabase
-    .from("player_batting_stats_snapshots").select("refresh_run_id").eq("dsa_league_id", leagueId).eq("year", currentYear).eq("level_id", 1).eq("split_id", 1)
-    .order("refresh_run_id", { ascending: false }).limit(1).maybeSingle();
-  if (!statsRunRow) {
+  console.log("Resolving which seasons to pool and how heavily to weight each...");
+  const seasons = await getWeightTuningSeasons(supabase, leagueId, currentYear);
+  if (seasons.length === 0) {
     // Not an error -- a brand-new season with zero games played yet looks
-    // exactly like this (confirmed 2026-09-11: TBL's own game date had just
-    // rolled to 2032 with no 2032 batting rows anywhere). Throwing here
-    // would make the automated GitHub Actions workflow show a hard failure
-    // every ~30 min for as long as the new season has no games -- same
-    // "log and return cleanly" pattern already used in
-    // scan-market-contracts.ts for its own "nothing to work with yet" case.
-    // This will resume producing real numbers on its own once the new
-    // season has enough games; nothing to fix when that happens.
+    // exactly like this. See the historical version of this comment (now
+    // folded into getWeightTuningSeasons' own doc comment) for the full
+    // reasoning on why this logs and returns cleanly instead of throwing.
     console.log(`No ${currentYear} MLB batting stats yet -- likely just the start of a new season. Skipping this regression until real games have been played.`);
     return;
   }
-  const statsRunId = (statsRunRow as { refresh_run_id: number }).refresh_run_id;
-
-  console.log(`Loading every real ${currentYear} MLB batting stint (for the league OPS+ baseline)...`);
-  const allBatting = await fetchAll<BattingRow>((from, to) =>
-    supabase.from("player_batting_stats_snapshots")
-      .select("player_id, team_id, pa, ab, h, bb, hp, sf, d, t, hr")
-      .eq("year", currentYear).eq("level_id", 1).eq("split_id", 1).eq("refresh_run_id", statsRunId)
-      .range(from, to) as never
-  );
-
-  console.log("Loading ballpark factors (latest snapshot per team)...");
-  const parkRows = await fetchAll<{ team_id: number; refresh_run_id: number; average: number | null; doubles: number | null; triples: number | null; home_runs: number | null }>((from, to) =>
-    supabase.from("ballpark_factor_snapshots").select("team_id, refresh_run_id, average, doubles, triples, home_runs").eq("dsa_league_id", leagueId).range(from, to) as never
-  );
-  const parkByTeam = new Map<number, ParkFactors>();
-  const parkRunIdByTeam = new Map<number, number>(); // tracks which refresh_run_id each parkByTeam entry came from, so a later re-run always wins
-  for (const p of parkRows) {
-    if (p.average == null || p.doubles == null || p.triples == null || p.home_runs == null) continue;
-    if (p.refresh_run_id <= (parkRunIdByTeam.get(p.team_id) ?? -1)) continue;
-    parkByTeam.set(p.team_id, { average: p.average, doubles: p.doubles, triples: p.triples, homeRuns: p.home_runs });
-    parkRunIdByTeam.set(p.team_id, p.refresh_run_id);
-  }
-  console.log(`  ${parkByTeam.size} teams with park factors`);
+  for (const s of seasons) console.log(`  ${s.year}: refresh_run_id ${s.statsRefreshRunId}, season weight ${s.weight.toFixed(3)}`);
 
   console.log(`Loading players (for the real-MLB-roster filter: league_id=${mlbLeagueId}, mlb_service_days>0)...`);
   const players = await fetchAll<{ id: number; league_id: number | null; mlb_service_days: number | null }>((from, to) =>
@@ -185,76 +167,126 @@ async function main() {
     return !!meta && meta.league_id === mlbLeagueId && (meta.mlb_service_days ?? 0) > 0;
   };
 
-  // Sum multi-stint rows within this one refresh run (a real mid-season
-  // trade), same pattern as rating-validation-query.ts -- but each stint is
-  // park-adjusted FIRST, using that stint's own team_id, before being added
-  // into the player's season total. This is what correctly handles a
-  // traded player: each stint is weighted by its own PA automatically
-  // (adjustment happens on the stint's own raw counts) and attributed to
-  // the correct park, not the whole season blended under one team's factor.
-  // Filtered to real MLB roster players here too -- international/complex
-  // signees shouldn't be part of a "real MLB league average" baseline
-  // either.
-  const byPlayerRaw = new Map<number, HitCategories>();
-  const byPlayerAdjusted = new Map<number, HitCategories>();
-  const paByPlayer = new Map<number, number>();
-  for (const b of allBatting) {
-    if (!isRealMlbPlayer(b.player_id)) continue;
-    const stint = { ab: b.ab ?? 0, bb: b.bb ?? 0, hp: b.hp ?? 0, sf: b.sf ?? 0, h: b.h ?? 0, d: b.d ?? 0, t: b.t ?? 0, hr: b.hr ?? 0 };
-    const rawCats: HitCategories = { ab: stint.ab, bb: stint.bb, hp: stint.hp, sf: stint.sf, singles: stint.h - stint.d - stint.t - stint.hr, doubles: stint.d, triples: stint.t, hr: stint.hr };
-    const adjustedCats = applyParkFactor(stint, b.team_id != null ? parkByTeam.get(b.team_id) : undefined);
-    byPlayerRaw.set(b.player_id, addCategories(byPlayerRaw.get(b.player_id) ?? emptyCategories(), rawCats));
-    byPlayerAdjusted.set(b.player_id, addCategories(byPlayerAdjusted.get(b.player_id) ?? emptyCategories(), adjustedCats));
-    paByPlayer.set(b.player_id, (paByPlayer.get(b.player_id) ?? 0) + (b.pa ?? 0));
-  }
-  console.log(`  ${byPlayerRaw.size} real MLB hitters with any ${currentYear} PA`);
-
-  // League baseline stays RAW/unadjusted -- it's the empirical run-scoring
-  // environment as actually observed, exactly like a real MLB league
-  // average is never itself park-adjusted. Only individual players get
-  // adjusted, so their park-neutral rate can be compared fairly against
-  // this shared, real baseline.
-  let leagueTotals = emptyCategories();
-  for (const b of byPlayerRaw.values()) leagueTotals = addCategories(leagueTotals, b);
-  const league = obpSlg(leagueTotals);
-  console.log(`League baseline (real ${currentYear} MLB hitters, unadjusted): OBP=${league.obp.toFixed(3)} SLG=${league.slg.toFixed(3)}`);
-
-  console.log("Loading hit-tool grades...");
-  const ratings = await fetchAll<{ player_id: number; cntct: number | null; gap: number | null; pow: number | null; eye: number | null; ks: number | null; speed: number | null }>((from, to) =>
-    supabase.from("player_ratings_snapshots").select("player_id, cntct, gap, pow, eye, ks, speed").eq("refresh_run_id", computedRunId).range(from, to) as never
-  );
-  const ratingsByPlayer = new Map(ratings.map((r) => [r.player_id, r]));
-
-  console.log("Loading roles (hitters only, exclude SP/RP/CL from this offense-only regression)...");
-  const computed = await fetchAll<{ player_id: number; role: string | null }>((from, to) =>
-    supabase.from("player_computed").select("player_id, role").eq("refresh_run_id", computedRunId).range(from, to) as never
-  );
-  const roleByPlayer = new Map(computed.map((c) => [c.player_id, c.role]));
   const PITCHER_ROLES = new Set(["SP", "RP", "CL"]);
-
-  interface Row { playerId: number; opsPlus: number; opsPlusRaw: number; cntct: number; gap: number; pow: number; eye: number; ks: number; speed: number; pa: number }
   const rows: Row[] = [];
-  for (const [playerId, adjusted] of byPlayerAdjusted) {
-    const pa = paByPlayer.get(playerId) ?? 0;
-    if (pa < MIN_PA) continue;
-    const role = roleByPlayer.get(playerId);
-    if (!role || PITCHER_ROLES.has(role)) continue;
-    const r = ratingsByPlayer.get(playerId);
-    if (!r || r.cntct == null || r.gap == null || r.pow == null || r.eye == null || r.ks == null || r.speed == null) continue;
-    const { obp, slg } = obpSlg(adjusted);
-    const opsPlus = 100 * (obp / league.obp + slg / league.slg - 1);
-    const rawCats = byPlayerRaw.get(playerId)!;
-    const rawSplit = obpSlg(rawCats);
-    const opsPlusRaw = 100 * (rawSplit.obp / league.obp + rawSplit.slg / league.slg - 1);
-    rows.push({ playerId, opsPlus, opsPlusRaw, cntct: r.cntct, gap: r.gap, pow: r.pow, eye: r.eye, ks: r.ks, speed: r.speed, pa });
+
+  // Everything that used to happen once for "the current season" now runs
+  // once PER SEASON being pooled -- same logic, just parameterized by that
+  // season's own year + refresh_run_id, since ratings/roles/park factors
+  // all need to be read as of THAT point in time, not "now."
+  for (const season of seasons) {
+    const { year, statsRefreshRunId } = season;
+    console.log(`\n--- ${year} (refresh_run_id ${statsRefreshRunId}) ---`);
+
+    console.log(`Loading every real ${year} MLB batting stint (for the league OPS+ baseline)...`);
+    const allBatting = await fetchAll<BattingRow>((from, to) =>
+      supabase.from("player_batting_stats_snapshots")
+        .select("player_id, team_id, pa, ab, h, bb, hp, sf, d, t, hr")
+        .eq("year", year).eq("level_id", 1).eq("split_id", 1).eq("refresh_run_id", statsRefreshRunId)
+        .range(from, to) as never
+    );
+
+    console.log("Loading ballpark factors (latest snapshot at or before this run, per team)...");
+    const parkRows = await fetchAll<{ team_id: number; refresh_run_id: number; average: number | null; doubles: number | null; triples: number | null; home_runs: number | null }>((from, to) =>
+      supabase.from("ballpark_factor_snapshots").select("team_id, refresh_run_id, average, doubles, triples, home_runs")
+        .eq("dsa_league_id", leagueId).lte("refresh_run_id", statsRefreshRunId).range(from, to) as never
+    );
+    const parkByTeam = new Map<number, ParkFactors>();
+    const parkRunIdByTeam = new Map<number, number>(); // tracks which refresh_run_id each parkByTeam entry came from, so the latest-as-of-this-run always wins
+    for (const p of parkRows) {
+      if (p.average == null || p.doubles == null || p.triples == null || p.home_runs == null) continue;
+      if (p.refresh_run_id <= (parkRunIdByTeam.get(p.team_id) ?? -1)) continue;
+      parkByTeam.set(p.team_id, { average: p.average, doubles: p.doubles, triples: p.triples, homeRuns: p.home_runs });
+      parkRunIdByTeam.set(p.team_id, p.refresh_run_id);
+    }
+    console.log(`  ${parkByTeam.size} teams with park factors`);
+
+    // Sum multi-stint rows within this one refresh run (a real mid-season
+    // trade), same pattern as rating-validation-query.ts -- but each stint is
+    // park-adjusted FIRST, using that stint's own team_id, before being added
+    // into the player's season total. This is what correctly handles a
+    // traded player: each stint is weighted by its own PA automatically
+    // (adjustment happens on the stint's own raw counts) and attributed to
+    // the correct park, not the whole season blended under one team's factor.
+    // Filtered to real MLB roster players here too -- international/complex
+    // signees shouldn't be part of a "real MLB league average" baseline
+    // either.
+    const byPlayerRaw = new Map<number, HitCategories>();
+    const byPlayerAdjusted = new Map<number, HitCategories>();
+    const paByPlayer = new Map<number, number>();
+    for (const b of allBatting) {
+      if (!isRealMlbPlayer(b.player_id)) continue;
+      const stint = { ab: b.ab ?? 0, bb: b.bb ?? 0, hp: b.hp ?? 0, sf: b.sf ?? 0, h: b.h ?? 0, d: b.d ?? 0, t: b.t ?? 0, hr: b.hr ?? 0 };
+      const rawCats: HitCategories = { ab: stint.ab, bb: stint.bb, hp: stint.hp, sf: stint.sf, singles: stint.h - stint.d - stint.t - stint.hr, doubles: stint.d, triples: stint.t, hr: stint.hr };
+      const adjustedCats = applyParkFactor(stint, b.team_id != null ? parkByTeam.get(b.team_id) : undefined);
+      byPlayerRaw.set(b.player_id, addCategories(byPlayerRaw.get(b.player_id) ?? emptyCategories(), rawCats));
+      byPlayerAdjusted.set(b.player_id, addCategories(byPlayerAdjusted.get(b.player_id) ?? emptyCategories(), adjustedCats));
+      paByPlayer.set(b.player_id, (paByPlayer.get(b.player_id) ?? 0) + (b.pa ?? 0));
+    }
+    console.log(`  ${byPlayerRaw.size} real MLB hitters with any ${year} PA`);
+
+    // League baseline stays RAW/unadjusted -- it's the empirical run-scoring
+    // environment as actually observed, exactly like a real MLB league
+    // average is never itself park-adjusted. Only individual players get
+    // adjusted, so their park-neutral rate can be compared fairly against
+    // this shared, real baseline. Computed separately PER SEASON -- 2031's
+    // run environment isn't 2032's.
+    let leagueTotals = emptyCategories();
+    for (const b of byPlayerRaw.values()) leagueTotals = addCategories(leagueTotals, b);
+    const league = obpSlg(leagueTotals);
+    console.log(`League baseline (real ${year} MLB hitters, unadjusted): OBP=${league.obp.toFixed(3)} SLG=${league.slg.toFixed(3)}`);
+
+    console.log(`Loading ${year} hit-tool grades (as of this season's own refresh run)...`);
+    const ratings = await fetchAll<{ player_id: number; cntct: number | null; gap: number | null; pow: number | null; eye: number | null; ks: number | null; speed: number | null }>((from, to) =>
+      supabase.from("player_ratings_snapshots").select("player_id, cntct, gap, pow, eye, ks, speed").eq("refresh_run_id", statsRefreshRunId).range(from, to) as never
+    );
+    const ratingsByPlayer = new Map(ratings.map((r) => [r.player_id, r]));
+
+    console.log(`Loading ${year} roles (hitters only, exclude SP/RP/CL from this offense-only regression)...`);
+    const computed = await fetchAll<{ player_id: number; role: string | null }>((from, to) =>
+      supabase.from("player_computed").select("player_id, role").eq("refresh_run_id", statsRefreshRunId).range(from, to) as never
+    );
+    const roleByPlayer = new Map(computed.map((c) => [c.player_id, c.role]));
+
+    let seasonRowCount = 0;
+    for (const [playerId, adjusted] of byPlayerAdjusted) {
+      const pa = paByPlayer.get(playerId) ?? 0;
+      if (pa < MIN_PA) continue;
+      const role = roleByPlayer.get(playerId);
+      if (!role || PITCHER_ROLES.has(role)) continue;
+      const r = ratingsByPlayer.get(playerId);
+      if (!r || r.cntct == null || r.gap == null || r.pow == null || r.eye == null || r.ks == null || r.speed == null) continue;
+      const { obp, slg } = obpSlg(adjusted);
+      const opsPlus = 100 * (obp / league.obp + slg / league.slg - 1);
+      const rawCats = byPlayerRaw.get(playerId)!;
+      const rawSplit = obpSlg(rawCats);
+      const opsPlusRaw = 100 * (rawSplit.obp / league.obp + rawSplit.slg / league.slg - 1);
+      rows.push({ playerId, year, seasonWeight: season.weight, opsPlus, opsPlusRaw, cntct: r.cntct, gap: r.gap, pow: r.pow, eye: r.eye, ks: r.ks, speed: r.speed, pa });
+      seasonRowCount++;
+    }
+    console.log(`  ${seasonRowCount} qualifying ${year} hitters (>=${MIN_PA} PA, real grades)`);
   }
-  console.log(`  ${rows.length} qualifying hitters (>=${MIN_PA} PA, real grades) for the regression`);
+
+  console.log(`\n${rows.length} total qualifying hitter-seasons pooled across ${seasons.length} season(s) for the regression`);
   const avgAbsDelta = rows.reduce((s, r) => s + Math.abs(r.opsPlus - r.opsPlusRaw), 0) / rows.length;
   const maxDelta = rows.reduce((m, r) => Math.max(m, Math.abs(r.opsPlus - r.opsPlusRaw)), 0);
-  console.log(`  Park adjustment moved OPS+ by an average of ${avgAbsDelta.toFixed(2)} points per player (max ${maxDelta.toFixed(2)})`);
-  if (rows.length < 30) throw new Error(`Only ${rows.length} qualifying hitters -- too small to trust a 6-variable regression. Aborting.`);
+  console.log(`  Park adjustment moved OPS+ by an average of ${avgAbsDelta.toFixed(2)} points per player-season (max ${maxDelta.toFixed(2)})`);
+  if (rows.length < 30) throw new Error(`Only ${rows.length} qualifying hitter-seasons -- too small to trust a 6-variable regression. Aborting.`);
 
-  const fit = fitMultipleLinear(rows.map((r) => ({ x: [r.cntct, r.gap, r.pow, r.eye, r.ks, r.speed], y: r.opsPlus })));
+  // Per-row weight spreads each season's target weight (season.weight, 0-1)
+  // evenly across however many rows that season actually contributed --
+  // this is what makes "2031 and 2032 are equally important" mean equal
+  // TOTAL influence on the fit regardless of how many hitters happen to
+  // qualify in a still-partial 2032, not "each individual hitter-season
+  // counts the same." When only one season is pooled, every row gets the
+  // same weight (season.weight / n), which is mathematically identical to
+  // plain unweighted OLS (see fitMultipleLinear's own comment) -- so this
+  // is exactly backward compatible with single-season behavior.
+  const rowCountByYear = new Map<number, number>();
+  for (const r of rows) rowCountByYear.set(r.year, (rowCountByYear.get(r.year) ?? 0) + 1);
+  const weightedRows = rows.map((r) => ({ x: [r.cntct, r.gap, r.pow, r.eye, r.ks, r.speed], y: r.opsPlus, weight: r.seasonWeight / rowCountByYear.get(r.year)! }));
+
+  const fit = fitMultipleLinear(weightedRows);
   const labels = ["Contact", "Gap", "Power", "Eye", "Avoid Ks", "Speed"];
 
   console.log(`\nRegression: OPS+ ~ Contact + Gap + Power + Eye + AvoidKs  (n=${rows.length}, R²=${fit.rSquared.toFixed(3)})`);
@@ -288,12 +320,15 @@ async function main() {
     console.log(`  ${labels[i].padEnd(10)} implied=${normalized[i].toFixed(3)}   current=${(currentByKey[labels[i]] ?? NaN).toFixed(3)}`);
   }
 
+  const seasonLabel = seasons.length > 1
+    ? `${seasons.map((s) => `${s.year} (w=${s.weight.toFixed(2)})`).join(" + ")} blend`
+    : `${seasons[0].year}`;
   console.log("\nSaving this run to weight_tuning_runs/weight_tuning_coefficients (for /admin/weight-tuning)...");
   await persistWeightTuningRun(supabase, {
-    refreshRunId: computedRunId,
+    refreshRunId: seasons[seasons.length - 1].statsRefreshRunId, // the current season's own run -- "as of now" for the page's own refresh-run display
     leagueId,
     stream: "hitting",
-    targetMetric: "OPS+ (park-adjusted)",
+    targetMetric: `OPS+ (park-adjusted, ${seasonLabel})`,
     rSquared: fit.rSquared,
     sampleSize: rows.length,
     coefficients: labels.map((label, i) => ({

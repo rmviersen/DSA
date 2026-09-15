@@ -13,22 +13,31 @@ export interface RegressionResult {
 // y = intercept + slope * x, plus R² and the residual standard deviation
 // (both in whatever space the input points are already in -- callers doing
 // a log-linear fit should pass log-transformed y values themselves).
-export function fitLine(points: { x: number; y: number }[]): RegressionResult {
+//
+// `weight` (2026-09-15, added for the multi-season weight-tuning blend --
+// see lib/league.ts's getWeightTuningSeasons) defaults to 1 for every point,
+// which reduces every formula below to plain OLS -- confirmed algebraically:
+// uniformly weighting every point by the same constant never changes a
+// least-squares fit, so this is exactly backward compatible with every
+// existing caller that doesn't pass weights at all.
+export function fitLine(points: { x: number; y: number; weight?: number }[]): RegressionResult {
   const n = points.length;
-  const meanX = points.reduce((s, p) => s + p.x, 0) / n;
-  const meanY = points.reduce((s, p) => s + p.y, 0) / n;
+  const w = (p: { weight?: number }) => p.weight ?? 1;
+  const totalWeight = points.reduce((s, p) => s + w(p), 0);
+  const meanX = points.reduce((s, p) => s + w(p) * p.x, 0) / totalWeight;
+  const meanY = points.reduce((s, p) => s + w(p) * p.y, 0) / totalWeight;
   let num = 0, den = 0;
   for (const p of points) {
-    num += (p.x - meanX) * (p.y - meanY);
-    den += (p.x - meanX) ** 2;
+    num += w(p) * (p.x - meanX) * (p.y - meanY);
+    den += w(p) * (p.x - meanX) ** 2;
   }
   const slope = den === 0 ? 0 : num / den;
   const intercept = meanY - slope * meanX;
   let ssRes = 0, ssTot = 0;
   for (const p of points) {
     const predicted = intercept + slope * p.x;
-    ssRes += (p.y - predicted) ** 2;
-    ssTot += (p.y - meanY) ** 2;
+    ssRes += w(p) * (p.y - predicted) ** 2;
+    ssTot += w(p) * (p.y - meanY) ** 2;
   }
   const rSquared = ssTot === 0 ? 0 : 1 - ssRes / ssTot;
   const residualStdDev = n > 2 ? Math.sqrt(ssRes / (n - 2)) : 0;
@@ -42,25 +51,36 @@ export interface MultipleRegressionResult {
   rSquared: number;
 }
 
-// Ordinary least squares with 2+ predictors, solved via the normal equations
-// (X^T X) β = X^T y, using Gauss-Jordan elimination with partial pivoting.
-// No external stats library in this project's dependencies (2026-09-01
-// check, package.json) -- for a handful of predictors and a few hundred
-// rows this is exact and fast, no need to pull one in.
-export function fitMultipleLinear(rows: { x: number[]; y: number }[]): MultipleRegressionResult {
+// Ordinary least squares with 2+ predictors, solved via the (weighted) normal
+// equations (X^T W X) β = X^T W y, using Gauss-Jordan elimination with
+// partial pivoting. No external stats library in this project's dependencies
+// (2026-09-01 check, package.json) -- for a handful of predictors and a few
+// hundred rows this is exact and fast, no need to pull one in.
+//
+// `weight` (2026-09-15, added for the multi-season weight-tuning blend --
+// see lib/league.ts's getWeightTuningSeasons) defaults to 1 for every row,
+// which reduces every formula below to plain OLS -- confirmed algebraically:
+// uniformly weighting every row by the same constant never changes a
+// least-squares fit, so this is exactly backward compatible with every
+// existing caller that doesn't pass weights at all.
+export function fitMultipleLinear(rows: { x: number[]; y: number; weight?: number }[]): MultipleRegressionResult {
   const n = rows.length;
   const p = rows[0].x.length; // number of predictors
   const cols = p + 1; // + intercept column
+  const w = (row: { weight?: number }) => row.weight ?? 1;
+  const totalWeight = rows.reduce((s, r) => s + w(r), 0);
 
-  // Build X^T X (cols x cols) and X^T y (cols) directly, without materializing
-  // the full design matrix -- X's first column is always 1 (the intercept).
+  // Build X^T W X (cols x cols) and X^T W y (cols) directly, without
+  // materializing the full design matrix -- X's first column is always 1
+  // (the intercept).
   const xtx: number[][] = Array.from({ length: cols }, () => new Array(cols).fill(0));
   const xty: number[] = new Array(cols).fill(0);
   for (const row of rows) {
     const xi = [1, ...row.x];
+    const wi = w(row);
     for (let a = 0; a < cols; a++) {
-      xty[a] += xi[a] * row.y;
-      for (let b = 0; b < cols; b++) xtx[a][b] += xi[a] * xi[b];
+      xty[a] += wi * xi[a] * row.y;
+      for (let b = 0; b < cols; b++) xtx[a][b] += wi * xi[a] * xi[b];
     }
   }
 
@@ -85,19 +105,19 @@ export function fitMultipleLinear(rows: { x: number[]; y: number }[]): MultipleR
   const intercept = beta[0];
   const coefficients = beta.slice(1);
 
-  const meanY = rows.reduce((s, r) => s + r.y, 0) / n;
+  const meanY = rows.reduce((s, r) => s + w(r) * r.y, 0) / totalWeight;
   let ssRes = 0, ssTot = 0;
   for (const row of rows) {
     const predicted = intercept + coefficients.reduce((s, c, i) => s + c * row.x[i], 0);
-    ssRes += (row.y - predicted) ** 2;
-    ssTot += (row.y - meanY) ** 2;
+    ssRes += w(row) * (row.y - predicted) ** 2;
+    ssTot += w(row) * (row.y - meanY) ** 2;
   }
   const rSquared = ssTot === 0 ? 0 : 1 - ssRes / ssTot;
 
-  const sdY = Math.sqrt(rows.reduce((s, r) => s + (r.y - meanY) ** 2, 0) / n);
+  const sdY = Math.sqrt(rows.reduce((s, r) => s + w(r) * (r.y - meanY) ** 2, 0) / totalWeight);
   const standardizedCoefficients = coefficients.map((c, i) => {
-    const meanXi = rows.reduce((s, r) => s + r.x[i], 0) / n;
-    const sdXi = Math.sqrt(rows.reduce((s, r) => s + (r.x[i] - meanXi) ** 2, 0) / n);
+    const meanXi = rows.reduce((s, r) => s + w(r) * r.x[i], 0) / totalWeight;
+    const sdXi = Math.sqrt(rows.reduce((s, r) => s + w(r) * (r.x[i] - meanXi) ** 2, 0) / totalWeight);
     return sdY === 0 ? 0 : c * (sdXi / sdY);
   });
 

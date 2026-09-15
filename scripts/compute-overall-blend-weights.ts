@@ -2,7 +2,7 @@ import "dotenv/config";
 import { makeSupabaseClient } from "../lib/supabase-client.js";
 import { fitMultipleLinear } from "../lib/regression.js";
 import { persistWeightTuningRun } from "../lib/weight-tuning-persist.js";
-import { getLeagueId, leagueSlugFromArgv, getCurrentSeasonYear, getMlbLeagueId } from "../lib/league.js";
+import { getLeagueId, leagueSlugFromArgv, getCurrentSeasonYear, getMlbLeagueId, getWeightTuningSeasons } from "../lib/league.js";
 
 // Step 3 of the decomposed offense/defense redesign, finally buildable now
 // that Batting, Fielding, and Baserunning have each been individually tuned
@@ -27,6 +27,13 @@ import { getLeagueId, leagueSlugFromArgv, getCurrentSeasonYear, getMlbLeagueId }
 // decided). Today's "current" weights (1 / 0.25 / 0) sum to 1.25, not 1 --
 // exactly the same kind of mismatch Batting's and Pitching's own internal
 // weights had before being fixed.
+//
+// MULTI-SEASON BLEND (2026-09-15, Rees's ask -- see compute-hitting-
+// weights.ts's file comment for the full reasoning). Pools the current
+// season with the most recent earlier one (lib/league.ts's
+// getWeightTuningSeasons), each season's own composites read from its own
+// refresh run (player_computed has no `year` column -- it's a point-in-time
+// snapshot), weighted by real season progress.
 
 const PAGE_SIZE = 1000;
 async function fetchAll<T>(query: (from: number, to: number) => Promise<{ data: T[] | null; error: unknown }>): Promise<T[]> {
@@ -45,32 +52,21 @@ async function fetchAll<T>(query: (from: number, to: number) => Promise<{ data: 
 
 const MIN_PA = 100; // same threshold as every other hitter-side regression this session
 
+interface Row { playerId: number; year: number; seasonWeight: number; warRate: number; batting: number; fielding: number; baserunning: number }
+
 async function main() {
   const supabase = makeSupabaseClient();
   const leagueId = await getLeagueId(supabase, leagueSlugFromArgv());
   const currentYear = await getCurrentSeasonYear(supabase, leagueId);
   const mlbLeagueId = await getMlbLeagueId(supabase, leagueId);
 
-  console.log("Finding latest refresh run with player_computed...");
-  const { data: computedRunRow } = await supabase
-    .from("player_computed").select("refresh_run_id").eq("dsa_league_id", leagueId).order("refresh_run_id", { ascending: false }).limit(1).maybeSingle();
-  if (!computedRunRow) throw new Error("No player_computed rows found.");
-  const computedRunId = (computedRunRow as { refresh_run_id: number }).refresh_run_id;
-
-  console.log(`Finding latest refresh run with ${currentYear} MLB batting stats...`);
-  const { data: statsRunRow } = await supabase
-    .from("player_batting_stats_snapshots").select("refresh_run_id").eq("dsa_league_id", leagueId).eq("year", currentYear).eq("level_id", 1).eq("split_id", 1)
-    .order("refresh_run_id", { ascending: false }).limit(1).maybeSingle();
-  if (!statsRunRow) {
-    // Not an error -- a brand-new season with zero games yet looks exactly
-    // like this. See compute-hitting-weights.ts's identical check for the
-    // full reasoning on why this logs and returns cleanly instead of
-    // throwing (avoids a hard automated-workflow failure every ~30 min for
-    // as long as the new season has no games).
+  console.log("Resolving which seasons to pool and how heavily to weight each...");
+  const seasons = await getWeightTuningSeasons(supabase, leagueId, currentYear);
+  if (seasons.length === 0) {
     console.log(`No ${currentYear} MLB batting stats yet -- likely just the start of a new season. Skipping this regression until real games have been played.`);
     return;
   }
-  const statsRunId = (statsRunRow as { refresh_run_id: number }).refresh_run_id;
+  for (const s of seasons) console.log(`  ${s.year}: refresh_run_id ${s.statsRefreshRunId}, season weight ${s.weight.toFixed(3)}`);
 
   console.log(`Loading players (for the real-MLB-roster filter: league_id=${mlbLeagueId}, mlb_service_days>0)...`);
   const players = await fetchAll<{ id: number; league_id: number | null; mlb_service_days: number | null }>((from, to) =>
@@ -82,42 +78,58 @@ async function main() {
     return !!meta && meta.league_id === mlbLeagueId && (meta.mlb_service_days ?? 0) > 0;
   };
 
-  console.log(`Loading ${currentYear} MLB batting stats (pa, war)...`);
-  const battingRows = await fetchAll<{ player_id: number; pa: number | null; war: number | null }>((from, to) =>
-    supabase.from("player_batting_stats_snapshots").select("player_id, pa, war")
-      .eq("year", currentYear).eq("level_id", 1).eq("split_id", 1).eq("refresh_run_id", statsRunId)
-      .range(from, to) as never
-  );
-  const byPlayer = new Map<number, { pa: number; war: number }>();
-  for (const b of battingRows) {
-    if (!isRealMlbPlayer(b.player_id)) continue;
-    const cur = byPlayer.get(b.player_id) ?? { pa: 0, war: 0 };
-    cur.pa += b.pa ?? 0;
-    cur.war += b.war ?? 0;
-    byPlayer.set(b.player_id, cur);
-  }
-  console.log(`  ${byPlayer.size} real MLB hitters with any ${currentYear} PA`);
-
-  console.log("Loading Batting/Fielding/Baserunning composites + role...");
-  const computed = await fetchAll<{ player_id: number; role: string | null; batting: number | null; fielding: number | null; baserunning: number | null }>((from, to) =>
-    supabase.from("player_computed").select("player_id, role, batting, fielding, baserunning").eq("dsa_league_id", leagueId).eq("refresh_run_id", computedRunId).range(from, to) as never
-  );
-  const computedByPlayer = new Map(computed.map((c) => [c.player_id, c]));
   const PITCHER_ROLES = new Set(["SP", "RP", "CL"]);
-
-  interface Row { playerId: number; warRate: number; batting: number; fielding: number; baserunning: number }
   const rows: Row[] = [];
-  for (const [playerId, b] of byPlayer) {
-    if (b.pa < MIN_PA) continue;
-    const c = computedByPlayer.get(playerId);
-    if (!c || !c.role || PITCHER_ROLES.has(c.role)) continue;
-    if (c.batting == null || c.fielding == null || c.baserunning == null) continue;
-    rows.push({ playerId, warRate: (b.war / b.pa) * 100, batting: c.batting, fielding: c.fielding, baserunning: c.baserunning });
-  }
-  console.log(`  ${rows.length} qualifying hitters (>=${MIN_PA} PA, real composites) for the regression`);
-  if (rows.length < 30) throw new Error(`Only ${rows.length} qualifying hitters -- too small to trust a 3-variable regression. Aborting.`);
 
-  const fit = fitMultipleLinear(rows.map((r) => ({ x: [r.batting, r.fielding, r.baserunning], y: r.warRate })));
+  for (const season of seasons) {
+    const { year, statsRefreshRunId } = season;
+    console.log(`\n--- ${year} (refresh_run_id ${statsRefreshRunId}) ---`);
+
+    console.log(`Loading ${year} MLB batting stats (pa, war)...`);
+    const battingRows = await fetchAll<{ player_id: number; pa: number | null; war: number | null }>((from, to) =>
+      supabase.from("player_batting_stats_snapshots").select("player_id, pa, war")
+        .eq("year", year).eq("level_id", 1).eq("split_id", 1).eq("refresh_run_id", statsRefreshRunId)
+        .range(from, to) as never
+    );
+    const byPlayer = new Map<number, { pa: number; war: number }>();
+    for (const b of battingRows) {
+      if (!isRealMlbPlayer(b.player_id)) continue;
+      const cur = byPlayer.get(b.player_id) ?? { pa: 0, war: 0 };
+      cur.pa += b.pa ?? 0;
+      cur.war += b.war ?? 0;
+      byPlayer.set(b.player_id, cur);
+    }
+    console.log(`  ${byPlayer.size} real MLB hitters with any ${year} PA`);
+
+    console.log(`Loading ${year} Batting/Fielding/Baserunning composites + role...`);
+    const computed = await fetchAll<{ player_id: number; role: string | null; batting: number | null; fielding: number | null; baserunning: number | null }>((from, to) =>
+      supabase.from("player_computed").select("player_id, role, batting, fielding, baserunning").eq("dsa_league_id", leagueId).eq("refresh_run_id", statsRefreshRunId).range(from, to) as never
+    );
+    const computedByPlayer = new Map(computed.map((c) => [c.player_id, c]));
+
+    let seasonRowCount = 0;
+    for (const [playerId, b] of byPlayer) {
+      if (b.pa < MIN_PA) continue;
+      const c = computedByPlayer.get(playerId);
+      if (!c || !c.role || PITCHER_ROLES.has(c.role)) continue;
+      if (c.batting == null || c.fielding == null || c.baserunning == null) continue;
+      rows.push({ playerId, year, seasonWeight: season.weight, warRate: (b.war / b.pa) * 100, batting: c.batting, fielding: c.fielding, baserunning: c.baserunning });
+      seasonRowCount++;
+    }
+    console.log(`  ${seasonRowCount} qualifying ${year} hitters (>=${MIN_PA} PA, real composites)`);
+  }
+
+  console.log(`\n${rows.length} total qualifying hitter-seasons pooled across ${seasons.length} season(s) for the regression`);
+  if (rows.length < 30) throw new Error(`Only ${rows.length} qualifying hitter-seasons -- too small to trust a 3-variable regression. Aborting.`);
+
+  // See compute-hitting-weights.ts's comment on this exact normalization --
+  // spreads each season's target weight evenly across its own qualifying
+  // rows, reducing to plain OLS when only one season is pooled.
+  const rowCountByYear = new Map<number, number>();
+  for (const r of rows) rowCountByYear.set(r.year, (rowCountByYear.get(r.year) ?? 0) + 1);
+  const weightedRows = rows.map((r) => ({ x: [r.batting, r.fielding, r.baserunning], y: r.warRate, weight: r.seasonWeight / rowCountByYear.get(r.year)! }));
+
+  const fit = fitMultipleLinear(weightedRows);
   const labels = ["Batting", "Fielding", "Baserunning"];
 
   console.log(`\nRegression: WAR-per-100-PA ~ Batting + Fielding + Baserunning  (n=${rows.length}, R²=${fit.rSquared.toFixed(3)})`);
@@ -166,12 +178,15 @@ async function main() {
     console.log(`  ${labels[i].padEnd(12)} implied=${normalized[i].toFixed(3)}   current=${(currentByLabel[labels[i]] ?? NaN).toFixed(3)}`);
   }
 
+  const seasonLabel = seasons.length > 1
+    ? `${seasons.map((s) => `${s.year} (w=${s.weight.toFixed(2)})`).join(" + ")} blend`
+    : `${seasons[0].year}`;
   console.log("\nSaving this run to weight_tuning_runs/weight_tuning_coefficients (for /admin/weight-tuning)...");
   await persistWeightTuningRun(supabase, {
-    refreshRunId: computedRunId,
+    refreshRunId: seasons[seasons.length - 1].statsRefreshRunId,
     leagueId,
     stream: "overall_blend",
-    targetMetric: "WAR / 100 PA",
+    targetMetric: `WAR / 100 PA (${seasonLabel})`,
     rSquared: fit.rSquared,
     sampleSize: rows.length,
     coefficients: labels.map((label, i) => ({
