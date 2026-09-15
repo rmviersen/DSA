@@ -1197,3 +1197,29 @@ Four related fixes/additions, same session as the MLB season starting:
 **Org-view cap**: Rees: "when you filter by team it shows all prospects for that team... limit that to top 50." `TOP_PROSPECTS_LIMIT` (200) was applied regardless of `orgId`, but no single org's real prospect pool realistically reaches anywhere near 200, so the cap was never actually binding for an org-filtered view -- every real prospect an org has always passed straight through. New `TOP_PROSPECTS_ORG_LIMIT = 50`, applied only when `orgId` is given. Verified: OKC's org-filtered view is now exactly 50 rows.
 
 **"About the Rankings"**: a high-level, official-reading blurb added to the top of `FarmSystemReportBody.tsx` (shared by internal `/prospects` and public `/TBL/prospects`) describing the rating system's real inputs (real-production-calibrated composites, role/position weighting, development timeline, injury risk, work ethic/intelligence, real handedness-exposure blending, nearest-comp matching, continuous recalibration) without exposing exact formulas/coefficients, per Rees's own spec.
+
+## Top Prospects report: load-time investigation and fix (2026-09-14, Rees's ask)
+
+Rees: "There is significant load time when filtering by org or when selecting a change from date. Can we investigate if there is a way to speed up the load times when using those slicers." Investigated with real profiling (temporary `console.time`/`console.log` timers around every step in `getTopProspectsDetailed()`, run against real production data for all 4 filter combinations via a throwaway `scripts/_profile-prospects.ts`), not guessing.
+
+**What the data actually showed, contrary to Rees's own framing**: org-filtering and baseline (change-from) selection were NOT individually slow -- every one of the four scenarios (including the plain leaguewide view with no filters at all) was roughly equally slow, 3.3-4.4 seconds total. Org-filter and baseline just happen to be the interactions that trigger a fresh full page load, which is why they were the ones Rees noticed -- the real cost was universal.
+
+**First thing tried (real improvement, but not the fix)**: assumed the ~2-2.4s "stats fallback" step (added 2026-09-14 earlier the same day, see the per-player fallback entry above) was slow because its queries were awaited sequentially. Parallelized the batting/pitching/fielding queries within one season (`Promise.all`) and the current-season/fallback-season fetches across both seasons (also `Promise.all`, kept in `lib/queries.ts`). Re-profiled: barely moved the needle (~1.8-2.1s for that step, still).
+
+**Real root cause, found via finer-grained per-query timing + a direct `EXPLAIN ANALYZE`**: the six actual stat queries were all genuinely fast (parallel, 60-250ms). The slow part was a lookup query that runs BEFORE them -- "most recent COMPLETED season, leaguewide" (the `fallbackRow` query in `getTopProspectsDetailed()`) -- taking 600ms-1s on its own, every time, regardless of filters. It has no database index covering its exact filter+sort shape (`dsa_league_id` + `year < X` + `order by year desc, refresh_run_id desc`) against the 1M+-row `player_batting_stats_snapshots`/`player_pitching_stats_snapshots` tables, forcing Postgres into a real sort every page load. Confirmed the database itself isn't inherently slow (a comparable already-indexed query pattern ran in 1.4ms via direct `EXPLAIN ANALYZE`) -- only this specific unindexed lookup was the problem.
+
+**The fix**: added a real covering index via Supabase migration `add_league_year_run_index_for_season_fallback_lookups`:
+```sql
+create index if not exists player_batting_stats_snapshots_league_year_run_idx
+  on public.player_batting_stats_snapshots (dsa_league_id, year desc, refresh_run_id desc);
+create index if not exists player_pitching_stats_snapshots_league_year_run_idx
+  on public.player_pitching_stats_snapshots (dsa_league_id, year desc, refresh_run_id desc);
+```
+
+**Verified real, before/after, same profiling script against the same live data**: `fallbackRow` lookup dropped from 600ms-1s to 50-155ms. Total page-data-load time:
+- Leaguewide, no filters: ~4.4s -> ~1.9s
+- Org filter only: ~3.8s -> ~1.4s
+- Baseline (change-from) only: ~3.4s -> ~1.4s
+- Org filter + baseline: ~3.8s -> ~1.5s
+
+A genuine ~2-2.5x speedup across every combination, driven almost entirely by one missing index -- not by anything specific to the org-filter or baseline-selection code paths, which were never actually the bottleneck. All temporary profiling instrumentation removed from `lib/queries.ts` before commit; the two real parallelization improvements (secondary, but harmless and real) were kept. `scripts/_profile-prospects.ts` deleted (throwaway, matching this session's established verify-then-delete convention).

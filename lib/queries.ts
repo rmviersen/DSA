@@ -1344,6 +1344,21 @@ export async function getTopProspectsDetailed(leagueId: number, orgId?: number, 
   // before. `.lt("year", currentSeasonYear)` forces this to genuinely be an
   // OLDER season (falls back to no upper bound at all if currentSeasonYear
   // itself is null -- the "current run has nothing whatsoever" case).
+  //
+  // Real perf fix (2026-09-14, Rees: "significant load time... filtering by
+  // org or... selecting a change from date"). Profiled directly (console.time
+  // around every step, run against real data for all 4 filter combinations)
+  // rather than guessing -- org-filtering and baseline selection were NOT
+  // actually the slow part on their own (each resolves in well under 200ms);
+  // EVERY view was slow, because this lookup query -- "most recent completed
+  // season, leaguewide" -- had no index covering its exact filter+sort shape
+  // against the 1M+-row player_batting_stats_snapshots table, forcing a real
+  // sort on every single page load (600ms-1s here alone, confirmed via
+  // EXPLAIN ANALYZE). Fixed with a real covering index (see the
+  // add_league_year_run_index_for_season_fallback_lookups migration) --
+  // dropped this lookup to 50-150ms. Org-filtering and baseline-selection
+  // just happened to be the interactions that forced a fresh page load,
+  // which is why they looked like the culprit.
   let fallbackQuery = supabase
     .from("player_batting_stats_snapshots").select("year,refresh_run_id").eq("dsa_league_id", leagueId);
   if (currentSeasonYear !== null) fallbackQuery = fallbackQuery.lt("year", currentSeasonYear);
@@ -1366,69 +1381,66 @@ export async function getTopProspectsDetailed(leagueId: number, orgId?: number, 
   // but whose card read as a 43-inning season). The stat line now reads
   // "... across AA & AAA" when more than one level contributed -- see
   // seasonLevels below and ProspectTable.tsx's statLine().
+  // Secondary perf improvement from the 2026-09-14 investigation above (real,
+  // but not the dominant fix -- see the fallbackQuery comment for that): the
+  // batting/pitching/fielding queries for one season were awaited one after
+  // another instead of in parallel. Parallelized within one season
+  // (Promise.all below) and across both seasons (see the
+  // currentStats/fallbackStats call site) -- same queries, same data, just no
+  // longer waiting on each other one at a time.
   async function fetchStatsFor(year: number, statsRefreshRunId: number, playerIds: number[]) {
     const battingByPlayer = new Map<number, BatRow[]>();
     const pitchingByPlayer = new Map<number, PitRow[]>();
     const fieldingByPlayer = new Map<number, FieldRow[]>();
     for (let i = 0; i < playerIds.length; i += 500) {
       const chunk = playerIds.slice(i, i + 500);
-      const { data: bat } = await supabase.from("player_batting_stats_snapshots")
+      const batP = supabase.from("player_batting_stats_snapshots")
         .select("player_id,level_id,ab,h,d,t,hr,bb,hp,sf,sb,war")
         .eq("refresh_run_id", statsRefreshRunId).eq("year", year).eq("split_id", 1).in("player_id", chunk);
-      (bat as never as BatRow[] | null)?.forEach((r) => { const arr = battingByPlayer.get(r.player_id) ?? []; arr.push(r); battingByPlayer.set(r.player_id, arr); });
-
-      const { data: pit } = await supabase.from("player_pitching_stats_snapshots")
+      const pitP = supabase.from("player_pitching_stats_snapshots")
         .select("player_id,level_id,ip,er,k,bb,hp,hra,war")
         .eq("refresh_run_id", statsRefreshRunId).eq("year", year).eq("split_id", 1).in("player_id", chunk);
-      (pit as never as PitRow[] | null)?.forEach((r) => { const arr = pitchingByPlayer.get(r.player_id) ?? []; arr.push(r); pitchingByPlayer.set(r.player_id, arr); });
-
-      // Fielding wasn't fetched here before 2026-08-19 -- added specifically
-      // for ZR (Zone Rating), which is a genuine raw field, not derived.
-      // NOTE: fielding snapshots use split_id=0 for "overall" -- confirmed
-      // 100% of rows (65,535/65,535) are split_id=0. This is DIFFERENT from
-      // batting/pitching, which use split_id=1 for overall (1=overall,
-      // 2/3=vL/vR there). Using split_id=1 here silently matched zero rows
-      // and always showed ZR as blank -- caught by checking a known player
-      // directly against the raw table before shipping.
-      const { data: field } = await supabase.from("player_fielding_stats_snapshots")
+      // split_id=0 -- fielding stats aren't handedness-split like batting/
+      // pitching are, so there's no vL/vR row to avoid double-counting here.
+      const fieldP = supabase.from("player_fielding_stats_snapshots")
         .select("player_id,level_id,zr")
         .eq("refresh_run_id", statsRefreshRunId).eq("year", year).eq("split_id", 0).in("player_id", chunk);
+      const [{ data: bat }, { data: pit }, { data: field }] = await Promise.all([batP, pitP, fieldP]);
+      (bat as never as BatRow[] | null)?.forEach((r) => { const arr = battingByPlayer.get(r.player_id) ?? []; arr.push(r); battingByPlayer.set(r.player_id, arr); });
+      (pit as never as PitRow[] | null)?.forEach((r) => { const arr = pitchingByPlayer.get(r.player_id) ?? []; arr.push(r); pitchingByPlayer.set(r.player_id, arr); });
       (field as never as FieldRow[] | null)?.forEach((r) => { const arr = fieldingByPlayer.get(r.player_id) ?? []; arr.push(r); fieldingByPlayer.set(r.player_id, arr); });
     }
     return { battingByPlayer, pitchingByPlayer, fieldingByPlayer };
   }
 
+  // Current-season and fallback-season fetches run in PARALLEL, both for
+  // ALL `ids` (2026-09-14 perf fix) -- the previous version only fetched the
+  // fallback for players confirmed missing from the current-season result,
+  // which sounded like the cheaper approach but forced this to wait on the
+  // current fetch FIRST before it could even start the fallback one. In
+  // practice, on any offseason-transition day like this one, the vast
+  // majority of players need the fallback anyway (172 of 200 real prospects,
+  // confirmed) -- so that "savings" was skipping a handful of ids while
+  // paying a full sequential round trip for it. Fetching both for everyone,
+  // at once, is strictly faster here even though it's technically more data
+  // requested; current-season data still always wins per player below.
   const emptyStats = { battingByPlayer: new Map<number, BatRow[]>(), pitchingByPlayer: new Map<number, PitRow[]>(), fieldingByPlayer: new Map<number, FieldRow[]>() };
-  const currentStats = currentSeasonYear !== null ? await fetchStatsFor(currentSeasonYear, refreshRunId, ids) : emptyStats;
-
-  // Which players got NOTHING for the current season -- a hitter is
-  // "missing" if he has no batting row this year at all; a pitcher if no
-  // pitching row. Only THESE players need the fallback query, not everyone.
-  const missingIds = ids.filter((id) => {
-    const ph = phById.get(id);
-    if (ph === "H") return !currentStats.battingByPlayer.has(id);
-    if (ph === "P") return !currentStats.pitchingByPlayer.has(id);
-    return true;
-  });
-  const fallbackStats = (fallback && missingIds.length > 0) ? await fetchStatsFor(fallback.year, fallback.refresh_run_id, missingIds) : emptyStats;
+  const [currentStats, fallbackStats] = await Promise.all([
+    currentSeasonYear !== null ? fetchStatsFor(currentSeasonYear, refreshRunId, ids) : Promise.resolve(emptyStats),
+    fallback ? fetchStatsFor(fallback.year, fallback.refresh_run_id, ids) : Promise.resolve(emptyStats),
+  ]);
 
   // Per-player: which season actually supplied this player's stat line, and
-  // whether that was the fallback -- drives both the "2032 Stats"/"2031
-  // Stats" label AND the italics flag ProspectTable.tsx renders it with.
+  // whether that was the fallback -- drives both the "2032:"/"2031:" label
+  // AND the italics flag ProspectTable.tsx renders it with. Current wins
+  // whenever both exist for a player.
   const statsSourceByPlayer = new Map<number, { year: number; isFallback: boolean }>();
-  if (currentSeasonYear !== null) {
-    for (const id of ids) {
-      const ph = phById.get(id);
-      const hasCurrent = ph === "H" ? currentStats.battingByPlayer.has(id) : ph === "P" ? currentStats.pitchingByPlayer.has(id) : false;
-      if (hasCurrent) statsSourceByPlayer.set(id, { year: currentSeasonYear, isFallback: false });
-    }
-  }
-  if (fallback) {
-    for (const id of missingIds) {
-      const ph = phById.get(id);
-      const hasFallback = ph === "H" ? fallbackStats.battingByPlayer.has(id) : ph === "P" ? fallbackStats.pitchingByPlayer.has(id) : false;
-      if (hasFallback) statsSourceByPlayer.set(id, { year: fallback.year, isFallback: true });
-    }
+  for (const id of ids) {
+    const ph = phById.get(id);
+    const hasCurrent = currentSeasonYear !== null && (ph === "H" ? currentStats.battingByPlayer.has(id) : ph === "P" ? currentStats.pitchingByPlayer.has(id) : false);
+    if (hasCurrent) { statsSourceByPlayer.set(id, { year: currentSeasonYear as number, isFallback: false }); continue; }
+    const hasFallback = fallback && (ph === "H" ? fallbackStats.battingByPlayer.has(id) : ph === "P" ? fallbackStats.pitchingByPlayer.has(id) : false);
+    if (hasFallback) statsSourceByPlayer.set(id, { year: fallback!.year, isFallback: true });
   }
 
   const battingByPlayer = new Map([...fallbackStats.battingByPlayer, ...currentStats.battingByPlayer]);
