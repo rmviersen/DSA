@@ -3880,6 +3880,10 @@ export type Database = {
           ss_batting_multiplier: number
           stamina: number
           stuff: number
+          stuff_gate_low_multiplier: number
+          stuff_gate_low_threshold: number
+          stuff_gate_mid_multiplier: number
+          stuff_gate_mid_threshold: number
         }
         Insert: {
           avoid_ks: number
@@ -3935,6 +3939,10 @@ export type Database = {
           ss_batting_multiplier?: number
           stamina: number
           stuff: number
+          stuff_gate_low_multiplier?: number
+          stuff_gate_low_threshold?: number
+          stuff_gate_mid_multiplier?: number
+          stuff_gate_mid_threshold?: number
         }
         Update: {
           avoid_ks?: number
@@ -3990,6 +3998,10 @@ export type Database = {
           ss_batting_multiplier?: number
           stamina?: number
           stuff?: number
+          stuff_gate_low_multiplier?: number
+          stuff_gate_low_threshold?: number
+          stuff_gate_mid_multiplier?: number
+          stuff_gate_mid_threshold?: number
         }
         Relationships: [
           {

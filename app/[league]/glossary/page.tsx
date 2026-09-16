@@ -353,6 +353,8 @@ export default async function GlossaryPage({ params }: { params: Promise<{ leagu
                   <WeightRow label="Contact mid / low mult." value={`${weights.contact_gate_mid_multiplier} / ${weights.contact_gate_low_multiplier}`} />
                   <WeightRow label="Control mid / low threshold" value={`${weights.control_gate_mid_threshold} / ${weights.control_gate_low_threshold}`} />
                   <WeightRow label="Control mid / low mult." value={`${weights.control_gate_mid_multiplier} / ${weights.control_gate_low_multiplier}`} />
+                  <WeightRow label="Stuff mid / low threshold" value={`${weights.stuff_gate_mid_threshold} / ${weights.stuff_gate_low_threshold}`} />
+                  <WeightRow label="Stuff mid / low mult." value={`${weights.stuff_gate_mid_multiplier} / ${weights.stuff_gate_low_multiplier}`} />
                 </tbody>
               </table>
             </div>

@@ -117,6 +117,13 @@ export interface WeightSet {
   contact_gate_low_threshold: number; contact_gate_low_multiplier: number;
   control_gate_mid_threshold: number; control_gate_mid_multiplier: number;
   control_gate_low_threshold: number; control_gate_low_multiplier: number;
+  // Low-Stuff floor gate (2026-09-15, Rees's ask: "add a similar one for
+  // low stuff, at 35") -- same two-tier-capable mechanism as Control above,
+  // set up as a single effective tier today (mid and low both 35/0.95) the
+  // same way Control itself was simplified to one tier on 2026-08-28. See
+  // this gate's call sites in computeRatings for the full rationale.
+  stuff_gate_mid_threshold: number; stuff_gate_mid_multiplier: number;
+  stuff_gate_low_threshold: number; stuff_gate_low_multiplier: number;
   developed_age_threshold: number;
 }
 
@@ -564,6 +571,28 @@ export function computeRatings(
     ? gate(ctrlBlend, w.control_gate_mid_threshold, w.control_gate_mid_multiplier, w.control_gate_low_threshold, w.control_gate_low_multiplier, false)
     : controlGateP;
 
+  // Projected Stuff split computed up here (ahead of the rest of the
+  // pitching projections below), same reason as Control above -- the Stuff
+  // gate needs it for its potential-side check. `projStf`/`potStfBlend` are
+  // reused below for the raw Pitching Potential formula too, same pattern
+  // as `projCtrl`/`potCtrlBlend`.
+  const projStf = projectPotentialSplit(r.stf, r.stf_l, r.stf_r, r.pot_stf);
+  const potStfBlend = projStf.l * splits.pitchingPctVsL + projStf.r * splits.pitchingPctVsR;
+
+  // Stuff floor gate (2026-09-15, Rees's ask: "add a similar one for low
+  // stuff, at 35") -- identical mechanism/shape to the Control gate above,
+  // including the exclusive-at-threshold convention (false) and the same
+  // per-tool "fully developed" gating (actual grade once it's caught up to
+  // or passed the projected potential, the projected potential until then).
+  // Stuff is confirmed a standalone raw grade (like Control, unlike
+  // Movement's PBABIP+HRA composite), so it's gated directly with no
+  // blending beyond the handedness-exposure split already applied above.
+  const stuffGateP = gate(potStfBlend, w.stuff_gate_mid_threshold, w.stuff_gate_mid_multiplier, w.stuff_gate_low_threshold, w.stuff_gate_low_multiplier, false);
+  const isStuffDeveloped = stfBlend >= potStfBlend;
+  const stuffGate = isStuffDeveloped
+    ? gate(stfBlend, w.stuff_gate_mid_threshold, w.stuff_gate_mid_multiplier, w.stuff_gate_low_threshold, w.stuff_gate_low_multiplier, false)
+    : stuffGateP;
+
   // Role-value discount, 2026-09-03 (Rees's ask): the SP bonus/qp_multiplier
   // above already push SPs' Stuff and quality-pitches count above RPs' on
   // average (confirmed with real data -- SP mean Potential-Pitching 43.5 vs
@@ -582,25 +611,24 @@ export function computeRatings(
     (isSP ? stfBlend + 5 : stfBlend) * pStuff +
     movBlend * pMovement + pbabipBlend * w.pbabip + ctrlBlend * pControl +
     zero(r.stm) * pStamina + qp * w.qp_multiplier;
-  const pitching = pitchingRaw * controlGate * roleValueMultiplier;
+  const pitching = pitchingRaw * controlGate * stuffGate * roleValueMultiplier;
 
   // Same projected-split treatment as Batting above (2026-08-28). HRA is
   // computed too (for storage/inspection, per Rees's explicit ask) even
   // though it isn't a direct input to Pitching -- StatsPlus folds it into
   // Movement's own composite grade already (see mov's comment), so there's
-  // no separate hra-weighted term here to blend into.
-  const projStf = projectPotentialSplit(r.stf, r.stf_l, r.stf_r, r.pot_stf);
+  // no separate hra-weighted term here to blend into. (projStf/potStfBlend
+  // are computed earlier, alongside the Stuff gate -- see that comment.)
   const projMov = projectPotentialSplit(r.mov, r.mov_l, r.mov_r, r.pot_mov);
   const projPbabip = projectPotentialSplit(r.pbabip, r.pbabip_l, r.pbabip_r, r.pot_pbabip);
   const projHra = projectPotentialSplit(r.hra, r.hra_l, r.hra_r, r.pot_hra);
-  const potStfBlend = projStf.l * splits.pitchingPctVsL + projStf.r * splits.pitchingPctVsR;
   const potMovBlend = projMov.l * splits.pitchingPctVsL + projMov.r * splits.pitchingPctVsR;
   const potPbabipBlend = projPbabip.l * splits.pitchingPctVsL + projPbabip.r * splits.pitchingPctVsR;
 
   const pitchingPRaw =
     ((isSP ? potStfBlend + 5 : potStfBlend) * pStuff +
     potMovBlend * pMovement + potPbabipBlend * w.pbabip + potCtrlBlend * pControl +
-    zero(r.stm) * pStamina + qpp * w.qp_multiplier) * controlGateP * roleValueMultiplier;
+    zero(r.stm) * pStamina + qpp * w.qp_multiplier) * controlGateP * stuffGateP * roleValueMultiplier;
   const pitchingP = Math.max(pitching, pitchingPRaw - 3);
 
   // --- SP/RP: on-field role classification from stamina/pitch-mix, distinct

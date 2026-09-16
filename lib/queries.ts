@@ -807,6 +807,11 @@ export interface ActiveWeightSet {
   contact_gate_low_threshold: number; contact_gate_low_multiplier: number;
   control_gate_mid_threshold: number; control_gate_mid_multiplier: number;
   control_gate_low_threshold: number; control_gate_low_multiplier: number;
+  // Low-Stuff floor gate (2026-09-15, Rees's ask) -- same shape as the
+  // Control gate above. See lib/rating-engine.ts's WeightSet/gate() for the
+  // full mechanism.
+  stuff_gate_mid_threshold: number; stuff_gate_mid_multiplier: number;
+  stuff_gate_low_threshold: number; stuff_gate_low_multiplier: number;
   developed_age_threshold: number;
   notes: string | null;
 }
