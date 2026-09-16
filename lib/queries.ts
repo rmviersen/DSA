@@ -1631,17 +1631,43 @@ export async function getTopDraftees(leagueId: number): Promise<{ draftYear: num
   //     values are a reasoned first cut, easy to retune -- flagged plainly
   //     rather than treated as a fitted constant the way the rating engine's
   //     own weights are.
+  //   - The catcher fielding bonus's contribution backed OUT entirely
+  //     (2026-09-15, Rees's ask: "the defensive boost to catchers... limits
+  //     the floor for their ratings" in a draft class deep at the position).
+  //     `catcher_fielding_bonus` (rating_weights) is a flat, ungated add
+  //     inside cRating -- see rating-engine.ts's computeRatings -- that
+  //     reaches BOTH Overall and Potential identically via the Fielding
+  //     composite (fielding * w.fielding), the same for every catcher
+  //     regardless of how good their real framing/blocking/arm grades are.
+  //     That's exactly right for evaluating real MLB catching depth
+  //     (Top Prospects/My Roster/Trade Finder/Lineup all keep it, untouched)
+  //     but compresses a deep amateur catching class here -- it raises every
+  //     catcher's floor by the same flat amount, leaving less real
+  //     separation between a strong and a mediocre defensive prospect than
+  //     other positions get. Scoped to ONLY this formula, not the engine:
+  //     subtracts the bonus's exact live contribution (bonus * w.fielding,
+  //     read fresh from the active weight set, never a separately hardcoded
+  //     number) from both the Potential and Overall terms for catchers
+  //     before the rest of the formula runs -- so a catcher's Draft Value is
+  //     driven by his real bat/defense grades, not an automatic floor, and
+  //     this stays correct on its own if catcher_fielding_bonus or the
+  //     Fielding weight are ever retuned later.
   const DRAFT_VALUE_OVERALL_WEIGHT = 0.15;
   const DRAFT_VALUE_OVERALL_BASELINE = 50;
   const WORK_ETHIC_ADJ: Record<string, number> = { H: 3, N: 0, L: -3 };
   const INTELLIGENCE_ADJ: Record<string, number> = { H: 1.5, N: 0, L: -1.5 };
+  const activeWeights = await getActiveWeightSet(leagueId);
+  const catcherFieldingBonusContribution = activeWeights ? activeWeights.catcher_fielding_bonus * activeWeights.fielding : 0;
   function computeDraftValue(r: PlayerRow): number | null {
     if (r.potential === null || r.overall === null) return null;
+    const catcherAdj = r.role === "C" ? catcherFieldingBonusContribution : 0;
+    const adjustedPotential = r.potential - catcherAdj;
+    const adjustedOverall = r.overall - catcherAdj;
     const isBustRisk = r.prone === "Fragile" || r.prone === "Wrecked";
-    const riskAdjusted = isBustRisk ? r.potential - 5 : r.potential;
+    const riskAdjusted = isBustRisk ? adjustedPotential - 5 : adjustedPotential;
     const workEthicAdj = WORK_ETHIC_ADJ[r.wrkethic ?? "N"] ?? 0;
     const intelligenceAdj = INTELLIGENCE_ADJ[r.int_ ?? "N"] ?? 0;
-    return riskAdjusted + r.overall * DRAFT_VALUE_OVERALL_WEIGHT - DRAFT_VALUE_OVERALL_BASELINE * DRAFT_VALUE_OVERALL_WEIGHT + workEthicAdj + intelligenceAdj;
+    return riskAdjusted + adjustedOverall * DRAFT_VALUE_OVERALL_WEIGHT - DRAFT_VALUE_OVERALL_BASELINE * DRAFT_VALUE_OVERALL_WEIGHT + workEthicAdj + intelligenceAdj;
   }
 
   // Hypothetical Prospect Rank (2026-09-14, Rees's ask) -- "based on the

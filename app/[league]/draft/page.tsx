@@ -22,7 +22,7 @@ export default async function DraftPage({ params }: { params: Promise<{ league: 
             Full {rows.length}-player pool -- sort/filter freely (e.g. click "Potential" or set Age's max to see the high-school demographic).
             Con/Stf, Pow/Mov, and Eye/Ctrl show each player's POTENTIAL grade here, not current -- an amateur's current tools are close to meaningless next to a rostered player's.
             Draft Value differs from Prospect Potential -- same shape, but a smaller boost for a fully-developed current Overall, plus Work Ethic/Intelligence
-            makeup adjustments. Hyp. Rank is where a player's real Prospect Potential would land in the actual current prospect rankings.
+            makeup adjustments, and (catchers only) the flat defensive bonus backed out so it doesn't compress the catching class's real floor. Hyp. Rank is where a player's real Prospect Potential would land in the actual current prospect rankings.
             "Export CSV" downloads whatever's currently sorted/filtered below, Player ID first -- ready to upload straight into StatsPlus's own draft list Upload feature.
           </p>
         )}
