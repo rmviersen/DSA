@@ -370,6 +370,15 @@ async function main() {
       process.exitCode = 1;
     }
 
+    // MLB standings (2026-09-18) -- record + division position for Farm Rankings.
+    console.log("Capturing MLB standings for this run...");
+    try {
+      execFileSync("npx", ["tsx", "scripts/scrape-standings.ts"], { stdio: "inherit", shell: true });
+    } catch (err) {
+      console.error(`scrape-standings.ts failed after a successful refresh -- raw data is fine, but this run's team_standings_snapshots wasn't captured: ${err}`);
+      process.exitCode = 1;
+    }
+
     // Weight-tuning regressions (2026-09-02, "visualize and track our
     // regressions" -- /admin/weight-tuning). Each writes its own
     // weight_tuning_runs/weight_tuning_coefficients row tagged to THIS

@@ -123,7 +123,12 @@ export function SystemRankingsCards({ rows, showInternalLinks }: { rows: SystemR
                   // eslint-disable-next-line @next/next/no-img-element
                   <img src={r.logoUrl} alt="" className="system-card-logo" />
                 )}
-                <span className="system-card-name">{r.name} {r.nickname}</span>
+                <div className="system-card-title">
+                  <span className="system-card-name">{r.name} {r.nickname}</span>
+                  {r.record && (
+                    <span className="system-card-standing">{r.record}{r.standing ? `, ${r.standing}` : ""}</span>
+                  )}
+                </div>
               </div>
               <div className="system-card-ranks">
                 <span className="system-rank-item">
@@ -156,6 +161,8 @@ export function SystemRankingsCards({ rows, showInternalLinks }: { rows: SystemR
                 system-rank-methodology.md), this only drops the standalone
                 word-grade badge for it. Blue-Chip/Depth stay. */}
             <div className="system-grade-breakdown">
+              <span>Top 100 <b>{r.top100Count}</b></span>
+              <span>Top 200 <b>{r.top200Count}</b></span>
               <span>Blue-Chip <b style={r.blueChip ? percentileStyle(r.blueChip.percentile) : undefined}>{r.blueChip?.word ?? "—"}</b></span>
               <span>Depth <b style={r.depth ? percentileStyle(r.depth.percentile) : undefined}>{r.depth?.word ?? "—"}</b></span>
               {hasBio && (

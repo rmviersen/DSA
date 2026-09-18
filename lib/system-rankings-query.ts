@@ -96,6 +96,13 @@ export interface SystemRankingCardRow {
   pitchingRankPercentile: number | null;
   readinessRank: number | null;
   readinessRankPercentile: number | null;
+  // Current MLB record + division position (2026-09-18, Rees's ask), from the
+  // latest team_standings_snapshots run. Null if no standings captured yet.
+  record: string | null; // "27-21"
+  standing: string | null; // "4th in the FC Topaz"
+  // # of this org's players in the leaguewide top 100 / top 200 prospects.
+  top100Count: number;
+  top200Count: number;
   blueChip: SystemRankingGrade | null;
   depth: SystemRankingGrade | null;
   balance: SystemRankingGrade | null;
@@ -205,6 +212,36 @@ export async function getSystemRankingsDetailed(leagueId: number): Promise<Syste
     (data as { id: number; game_date: string | null }[]).forEach((r) => bioRunGameDateById.set(r.id, r.game_date));
   }
 
+  // MLB standings (2026-09-18) -- latest run that captured any (a failed/partial
+  // refresh may not have), scoped to this league.
+  const { data: latestStandingsRow } = await supabase.from("team_standings_snapshots")
+    .select("refresh_run_id").eq("dsa_league_id", leagueId).order("refresh_run_id", { ascending: false }).limit(1).maybeSingle();
+  const standingsByTeam = new Map<number, { wins: number; losses: number; division_name: string; division_rank: number }>();
+  if (latestStandingsRow) {
+    const { data: st, error: stErr } = await supabase.from("team_standings_snapshots")
+      .select("team_id,wins,losses,division_name,division_rank")
+      .eq("dsa_league_id", leagueId).eq("refresh_run_id", (latestStandingsRow as { refresh_run_id: number }).refresh_run_id);
+    if (stErr) throw stErr;
+    (st as { team_id: number; wins: number; losses: number; division_name: string; division_rank: number }[]).forEach((r) => standingsByTeam.set(r.team_id, r));
+  }
+  // "Fire Conference Topaz Division" -> "FC Topaz"; anything unexpected falls back to the raw name.
+  const shortDivision = (name: string) => {
+    const m = name.match(/^(\w+) Conference (.+) Division$/);
+    return m ? `${m[1][0]}C ${m[2]}` : name;
+  };
+  const ordinal = (n: number) => `${n}${n % 100 >= 11 && n % 100 <= 13 ? "th" : ["th", "st", "nd", "rd"][n % 10 < 4 ? n % 10 : 0]}`;
+
+  // Top 100 / top 200 prospect counts per org (prospectRows already covers every
+  // ranked prospect, and anyone in the top 200 has an org rank).
+  const top100ByOrg = new Map<number, number>();
+  const top200ByOrg = new Map<number, number>();
+  for (const r of prospectRows) {
+    const orgId = playersById.get(r.player_id)?.organization_id;
+    if (orgId == null || r.prospect_rank == null) continue;
+    if (r.prospect_rank <= 200) top200ByOrg.set(orgId, (top200ByOrg.get(orgId) ?? 0) + 1);
+    if (r.prospect_rank <= 100) top100ByOrg.set(orgId, (top100ByOrg.get(orgId) ?? 0) + 1);
+  }
+
   const grade = (percentile: number | undefined): SystemRankingGrade | null =>
     percentile === undefined ? null : { word: percentileToGrade(percentile), percentile };
 
@@ -225,6 +262,10 @@ export async function getSystemRankingsDetailed(leagueId: number): Promise<Syste
         pitchingRankPercentile: rankToPercentile(tc?.pitching_prospect_rank ?? null, teamsWithScore),
         readinessRank: tc?.tbl_readiness_rank ?? null,
         readinessRankPercentile: rankToPercentile(tc?.tbl_readiness_rank ?? null, teamsWithScore),
+        record: standingsByTeam.has(t.id) ? `${standingsByTeam.get(t.id)!.wins}-${standingsByTeam.get(t.id)!.losses}` : null,
+        standing: standingsByTeam.has(t.id) ? `${ordinal(standingsByTeam.get(t.id)!.division_rank)} in the ${shortDivision(standingsByTeam.get(t.id)!.division_name)}` : null,
+        top100Count: top100ByOrg.get(t.id) ?? 0,
+        top200Count: top200ByOrg.get(t.id) ?? 0,
         blueChip: grade(blueChipPercentileByTeam.get(t.id)),
         depth: grade(depthPercentileByTeam.get(t.id)),
         balance: grade(balancePercentileByTeam.get(t.id)),

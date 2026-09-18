@@ -1011,6 +1011,8 @@ tbody tr:last-child td {
   display: flex;
   flex-direction: column;
   gap: 0.875rem;
+  /* Narrower cards (2026-09-18, Rees's ask) -- was full page width. */
+  max-width: 44rem;
 }
 
 @media (prefers-reduced-motion: no-preference) {
@@ -1063,6 +1065,18 @@ tbody tr:last-child td {
   border-radius: 50%;
   flex-shrink: 0;
   display: block;
+}
+
+.system-card-title {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+/* Record + division position under the team name (2026-09-18, Rees's ask). */
+.system-card-standing {
+  font-size: 0.8125rem;
+  color: var(--color-text-muted);
 }
 
 .system-card-name {
