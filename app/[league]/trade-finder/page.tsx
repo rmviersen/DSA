@@ -82,7 +82,7 @@ export default async function TradeFinderPage({
         rule as the Lineup optimizer: potential grade, plus arm/range for SS/3B), not just his nominal Pos. "Trade Block
         Note" is the listing GM's own free-text asking price, when they gave one.
       </p>
-      <PlayerTable rows={fullBlockRows} showTeam={true} showProspectCols={false} showEligiblePositions={true} showTradeBlockInfo={true} />
+      <PlayerTable rows={fullBlockRows} showTeam={true} showProspectCols={false} showEligiblePositions={true} showTradeBlockInfo={true} showTeamFilter={true} />
     </>
   );
 }

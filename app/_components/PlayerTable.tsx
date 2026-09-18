@@ -100,7 +100,7 @@ function downloadDraftListCsv(rows: PlayerRow[], filename: string) {
   URL.revokeObjectURL(url);
 }
 
-export function PlayerTable({ rows, showTeam, showProspectCols, showStatLevel, showValueVsDemand, showSign, showDraftStatus, showPotentialTools, showEligiblePositions, showTradeBlockInfo, showDraftMetrics, hideStatColumns, renderLimit, showExport, exportFilename }: { rows: PlayerRow[]; showTeam: boolean; showProspectCols: boolean; showStatLevel?: boolean; showValueVsDemand?: boolean; showSign?: boolean; showDraftStatus?: boolean; showPotentialTools?: boolean; showEligiblePositions?: boolean; showTradeBlockInfo?: boolean; showDraftMetrics?: boolean; hideStatColumns?: boolean; renderLimit?: number; showExport?: boolean; exportFilename?: string }) {
+export function PlayerTable({ rows, showTeam, showProspectCols, showStatLevel, showValueVsDemand, showSign, showDraftStatus, showPotentialTools, showEligiblePositions, showTradeBlockInfo, showDraftMetrics, hideStatColumns, renderLimit, showExport, exportFilename, showTeamFilter }: { rows: PlayerRow[]; showTeam: boolean; showProspectCols: boolean; showStatLevel?: boolean; showValueVsDemand?: boolean; showSign?: boolean; showDraftStatus?: boolean; showPotentialTools?: boolean; showEligiblePositions?: boolean; showTradeBlockInfo?: boolean; showDraftMetrics?: boolean; hideStatColumns?: boolean; renderLimit?: number; showExport?: boolean; exportFilename?: string; showTeamFilter?: boolean }) {
   // Multi-league routing (2026-09-10) -- this table is only ever rendered
   // under a page inside app/[league]/..., so the league slug is always in
   // the URL.
@@ -123,6 +123,10 @@ export function PlayerTable({ rows, showTeam, showProspectCols, showStatLevel, s
   // Draft Value itself is shown (showDraftMetrics), same gating as that
   // column.
   const [draftValueMin, setDraftValueMin] = useState("");
+  // Team filter (2026-09-18, Rees's ask, for /trade-finder's trade block
+  // table: team abbreviation as a dropdown to minimize space). Single-select,
+  // "" = all teams.
+  const [teamFilter, setTeamFilter] = useState("");
   // Sign-only filter (2026-09-06, Rees's ask) -- only meaningful where the
   // Sign column itself is shown (showSign), same gating as the column.
   const [signOnly, setSignOnly] = useState(false);
@@ -190,6 +194,11 @@ export function PlayerTable({ rows, showTeam, showProspectCols, showStatLevel, s
     });
   }
 
+  const teamOptions = useMemo(
+    () => [...new Set(rows.map((r) => r.team_abbr ?? r.team_nickname).filter((t): t is string => !!t))].sort(),
+    [rows]
+  );
+
   const phFiltered = useMemo(
     () => (phFilter === "all" ? rows : rows.filter((r) => r.ph === phFilter)),
     [rows, phFilter]
@@ -238,10 +247,11 @@ export function PlayerTable({ rows, showTeam, showProspectCols, showStatLevel, s
     // with no demand... that is incorrect"). Min keeps excluding nulls --
     // "at least $X" is a real bar a no-demand player hasn't cleared.
     if (demandMax !== null && !Number.isNaN(demandMax)) out = out.filter((r) => r.demandSalary === null || r.demandSalary <= demandMax);
+    if (showTeamFilter && teamFilter !== "") out = out.filter((r) => (r.team_abbr ?? r.team_nickname ?? "") === teamFilter);
     if (signOnly) out = out.filter((r) => r.signFlag === true);
     if (showDraftStatus && availableOnly) out = out.filter((r) => r.draftedByTeam === null);
     return out;
-  }, [phFiltered, roleFilter, proneFilter, ageMin, ageMax, overallMin, draftValueMin, demandMinM, demandMaxM, signOnly, showDraftStatus, availableOnly]);
+  }, [phFiltered, roleFilter, proneFilter, ageMin, ageMax, overallMin, draftValueMin, teamFilter, showTeamFilter, demandMinM, demandMaxM, signOnly, showDraftStatus, availableOnly]);
 
   const sortedRows = useMemo(() => {
     const dir = sortDir === "desc" ? -1 : 1;
@@ -572,6 +582,19 @@ export function PlayerTable({ rows, showTeam, showProspectCols, showStatLevel, s
           >
             ✓ Sign only
           </button>
+        )}
+        {showTeamFilter && (
+          <>
+            <span style={{ fontSize: 12 }}>Team</span>
+            <select
+              value={teamFilter}
+              onChange={(e) => setTeamFilter(e.target.value)}
+              style={{ padding: "3px 6px", fontSize: 12, border: "1px solid var(--color-border-strong)", borderRadius: 4, background: "transparent", color: "inherit" }}
+            >
+              <option value="">All</option>
+              {teamOptions.map((t) => <option key={t} value={t}>{t}</option>)}
+            </select>
+          </>
         )}
         {/* Export (2026-09-15, Rees's ask) -- exports sortedRows, i.e. the
             CURRENT filtered/sort order (Rees's explicit call: "whatever's
