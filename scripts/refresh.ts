@@ -149,6 +149,34 @@ async function main() {
         : [2029, 2030, 2031]; // defensive fallback only if the game date couldn't be read at all
     console.log(`Pulling stats for year(s): ${years.join(", ")}`);
 
+    // Stale-stats guard (2026-09-18, Rees: "stats are not updated for any players"
+    // on every page). StatsPlus's current_date (used for the new-sim check) can
+    // advance BEFORE its stats endpoints do -- refresh runs 59 and 61 both landed
+    // a new game_date carrying the PREVIOUS sim's stats byte-for-byte (identical
+    // MLB AB totals to the prior run). If the date advanced but this year's MLB
+    // batting AB total still equals the previous succeeded run's, wait and re-pull
+    // (up to ~10 min) before writing anything, rather than snapshotting stale stats.
+    if (currentSeasonYear && !process.env.YEARS) {
+      const abTotal = (rows: { ab?: unknown; level_id?: unknown; split_id?: unknown }[]) => rows.filter((r) => Number(r.split_id) === 1 && Number(r.level_id) === 1).reduce((t, r) => t + (Number(r.ab) || 0), 0);
+      const { data: prevRun } = await supabase.from("refresh_runs").select("id,game_date").eq("dsa_league_id", leagueId).eq("status", "succeeded").lt("id", refreshRunId).order("id", { ascending: false }).limit(1).maybeSingle();
+      if (prevRun && (prevRun as { game_date: string | null }).game_date && gameDate && (prevRun as { game_date: string }).game_date < gameDate) {
+        const prevRows: { ab: number | null }[] = [];
+        for (let from = 0; ; from += 1000) {
+          const { data } = await supabase.from("player_batting_stats_snapshots").select("ab").eq("dsa_league_id", leagueId).eq("refresh_run_id", (prevRun as { id: number }).id).eq("year", currentSeasonYear).eq("level_id", 1).eq("split_id", 1).range(from, from + 999);
+          if (!data || data.length === 0) break;
+          prevRows.push(...(data as { ab: number | null }[]));
+          if (data.length < 1000) break;
+        }
+        const prevAb = prevRows.reduce((t, r) => t + (r.ab ?? 0), 0);
+        for (let attempt = 1; attempt <= 5; attempt++) {
+          const liveAb = abTotal((await sp.playerBatting(currentSeasonYear, 200)) as never);
+          if (liveAb !== prevAb) break;
+          console.warn(`Stats look stale (game date advanced to ${gameDate} but MLB AB total ${liveAb} equals run ${(prevRun as { id: number }).id}'s) -- waiting 2 min and re-checking (${attempt}/5)...`);
+          if (attempt < 5) await new Promise((r) => setTimeout(r, 120000));
+        }
+      }
+    }
+
     // dsa_league_id,<id> conflict targets below (2026-09-11 fix): Step 1 of
     // the multi-league migration (2026-09-10) widened players/teams/
     // contracts/contract_extensions/draft_picks to composite primary keys
