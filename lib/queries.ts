@@ -94,10 +94,15 @@ export async function getLatestGameDate(leagueId: number): Promise<string | null
   return (data as { game_date: string } | null)?.game_date ?? null;
 }
 
-// Status for the public header's data badge (2026-09-18). "current" = the newest
-// refresh succeeded; "refreshing" = one started in the last 30 minutes and hasn't
-// finished; "delayed" = the newest refresh FAILED (so the data shown is from an
-// earlier successful one) or nothing has succeeded in 72+ hours.
+// Status for the public header's data badge (2026-09-18, revised same day per Rees:
+// "the status should show as good if the data is updated... stats, ratings, player
+// info, contracts"). A refresh only ever becomes "succeeded" after ALL of those
+// landed (players, contracts, stats, ratings, computed grades), so "current" means the
+// latest succeeded refresh is the newest data we could have -- a FAILED attempt that
+// is not for a NEWER in-game date (e.g. a retry of a sim we already ingested, which
+// happened with run 62) does not downgrade the badge. "refreshing" = a run started
+// in the last 30 minutes and hasn't finished; "delayed" = a newer sim's refresh
+// failed (its game date is past the last success), or nothing has succeeded in 7 days.
 export async function getDataFreshness(leagueId: number): Promise<DataFreshness> {
   const { data, error } = await supabase
     .from("refresh_runs").select("id,status,started_at,completed_at,game_date")
@@ -110,9 +115,9 @@ export async function getDataFreshness(leagueId: number): Promise<DataFreshness>
   let state: DataFreshness["state"] = "current";
   if (latest && lastOk && latest.id > lastOk.id) {
     if (latest.status === "running" && now - new Date(latest.started_at).getTime() < 30 * 60 * 1000) state = "refreshing";
-    else if (latest.status === "failed") state = "delayed";
+    else if (latest.status === "failed" && latest.game_date !== null && latest.game_date > (lastOk.game_date as string)) state = "delayed";
   }
-  if (lastOk?.completed_at && now - new Date(lastOk.completed_at).getTime() > 72 * 3600 * 1000) state = "delayed";
+  if (lastOk?.completed_at && now - new Date(lastOk.completed_at).getTime() > 7 * 24 * 3600 * 1000) state = "delayed";
   return { gameDate: lastOk?.game_date ?? null, completedAt: lastOk?.completed_at ?? null, state };
 }
 
