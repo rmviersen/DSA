@@ -49,6 +49,17 @@ function ProspectColumn({ title, prospects, showInternalLinks }: { title: string
               <span className="system-prospect-rank">{rankLabel(p.rank)}</span>
               <span className="system-prospect-role">{p.role ?? "—"}</span>
               <ProspectLink p={p} showInternalLinks={showInternalLinks} />
+              {/* Age · level · WAR (2026-09-18, Rees's ask). WAR is this
+                  season's, or -- italic, with the year -- his most recent
+                  completed season's if he has no current-season line yet. */}
+              <span className="system-prospect-meta">
+                {p.age ?? "—"} · {p.level} ·{" "}
+                {p.war === null ? "— WAR" : (
+                  <span style={p.warIsFallback ? { fontStyle: "italic" } : undefined} title={p.warYear ? p.warYear + " season" + (p.warIsFallback ? " (no current-season stats yet)" : "") : undefined}>
+                    {p.war.toFixed(1)} WAR{p.warIsFallback && p.warYear ? " ('" + String(p.warYear).slice(-2) + ")" : ""}
+                  </span>
+                )}
+              </span>
             </li>
           ))}
         </ol>

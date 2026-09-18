@@ -1,6 +1,6 @@
 import { makeSupabaseClient } from "./supabase-client";
 import { getOrgTeams } from "./queries";
-import { teamLogoUrl } from "./display-helpers";
+import { teamLogoUrl, effectiveLevel, levelLabel } from "./display-helpers";
 
 const supabase = makeSupabaseClient();
 
@@ -76,6 +76,15 @@ export interface SystemRankingProspect {
   rank: number | null; // league-wide prospect_rank, not the org-relative slot
   role: string | null;
   name: string;
+  // Age, current level and WAR (2026-09-18, Rees's ask). WAR is this season's if
+  // the player has any stat row yet, otherwise his most recent completed
+  // season's (warYear says which; warIsFallback flags the older one) -- same
+  // per-player fallback rule as Top Prospects' stat line.
+  age: number | null;
+  level: string;
+  war: number | null;
+  warYear: number | null;
+  warIsFallback: boolean;
 }
 
 export interface SystemRankingGrade {
@@ -168,13 +177,61 @@ export async function getSystemRankingsDetailed(leagueId: number): Promise<Syste
       .range(from, to) as never
   );
   const prospectIds = prospectRows.map((r) => r.player_id);
-  const playersById = new Map<number, { first_name: string; last_name: string; organization_id: number | null }>();
+  const playersById = new Map<number, { first_name: string; last_name: string; organization_id: number | null; age: number | null; level: number | null; league_id: number | null }>();
   for (let i = 0; i < prospectIds.length; i += 500) {
     const chunk = prospectIds.slice(i, i + 500);
-    const { data, error } = await supabase.from("players").select("id,first_name,last_name,organization_id").eq("dsa_league_id", leagueId).in("id", chunk);
+    const { data, error } = await supabase.from("players").select("id,first_name,last_name,organization_id,age,level,league_id").eq("dsa_league_id", leagueId).in("id", chunk);
     if (error) throw error;
-    (data as { id: number; first_name: string; last_name: string; organization_id: number | null }[])
+    (data as { id: number; first_name: string; last_name: string; organization_id: number | null; age: number | null; level: number | null; league_id: number | null }[])
       .forEach((p) => playersById.set(p.id, p));
+  }
+
+  // WAR for the displayed players only (the top 5 hitters + 5 pitchers per org, decided
+  // by the same sort used below), current season if any row exists else the most
+  // recent completed season -- per player, so a minor leaguer whose season hasn't
+  // started falls back on his own while an MLB player doesn't. Summed across
+  // stints/levels (split_id 1), hitters from batting WAR, pitchers from pitching WAR.
+  const shownIds = new Map<number, "H" | "P">();
+  {
+    const tmp = new Map<string, typeof prospectRows>();
+    for (const r of prospectRows) {
+      const p = playersById.get(r.player_id);
+      if (!p || p.organization_id === null || !r.ph) continue;
+      const k = p.organization_id + "|" + r.ph;
+      tmp.set(k, [...(tmp.get(k) ?? []), r]);
+    }
+    for (const list of tmp.values()) list.sort((a, b) => b.prospect_potential - a.prospect_potential).slice(0, TOP_N_PER_SPLIT).forEach((r) => shownIds.set(r.player_id, r.ph as "H" | "P"));
+  }
+  const { data: curYearRow } = await supabase.from("player_batting_stats_snapshots").select("year").eq("refresh_run_id", refreshRunId).order("year", { ascending: false }).limit(1).maybeSingle();
+  const currentYear = (curYearRow as { year: number } | null)?.year ?? null;
+  let fbQuery = supabase.from("player_batting_stats_snapshots").select("year,refresh_run_id").eq("dsa_league_id", leagueId);
+  if (currentYear !== null) fbQuery = fbQuery.lt("year", currentYear);
+  const { data: fbRow } = await fbQuery.order("year", { ascending: false }).order("refresh_run_id", { ascending: false }).limit(1).maybeSingle();
+  const fallbackSeason = fbRow as { year: number; refresh_run_id: number } | null;
+  async function warFor(year: number, runId: number, ids: number[], table: "player_batting_stats_snapshots" | "player_pitching_stats_snapshots") {
+    const out = new Map<number, number>();
+    for (let i = 0; i < ids.length; i += 200) {
+      const { data, error } = await supabase.from(table).select("player_id,war").eq("refresh_run_id", runId).eq("year", year).eq("split_id", 1).in("player_id", ids.slice(i, i + 200));
+      if (error) throw error;
+      for (const r of data as { player_id: number; war: number | null }[]) if (r.war !== null) out.set(r.player_id, (out.get(r.player_id) ?? 0) + r.war);
+    }
+    return out;
+  }
+  const hIds = [...shownIds].filter(([, ph]) => ph === "H").map(([id]) => id);
+  const pIds = [...shownIds].filter(([, ph]) => ph === "P").map(([id]) => id);
+  const none = () => Promise.resolve(new Map<number, number>());
+  const [curH, curP, fbH, fbP] = await Promise.all([
+    currentYear !== null ? warFor(currentYear, refreshRunId, hIds, "player_batting_stats_snapshots") : none(),
+    currentYear !== null ? warFor(currentYear, refreshRunId, pIds, "player_pitching_stats_snapshots") : none(),
+    fallbackSeason ? warFor(fallbackSeason.year, fallbackSeason.refresh_run_id, hIds, "player_batting_stats_snapshots") : none(),
+    fallbackSeason ? warFor(fallbackSeason.year, fallbackSeason.refresh_run_id, pIds, "player_pitching_stats_snapshots") : none(),
+  ]);
+  const warByPlayer = new Map<number, { war: number; year: number; isFallback: boolean }>();
+  for (const [id, ph] of shownIds) {
+    const cur = (ph === "H" ? curH : curP).get(id);
+    if (cur !== undefined && currentYear !== null) { warByPlayer.set(id, { war: cur, year: currentYear, isFallback: false }); continue; }
+    const fb = (ph === "H" ? fbH : fbP).get(id);
+    if (fb !== undefined && fallbackSeason) warByPlayer.set(id, { war: fb, year: fallbackSeason.year, isFallback: true });
   }
 
   const hittersByOrg = new Map<number, SystemRankingProspect[]>();
@@ -191,8 +248,16 @@ export async function getSystemRankingsDetailed(leagueId: number): Promise<Syste
   for (const [key, list] of byOrgSplit) {
     const [orgIdStr, ph] = key.split("|");
     const orgId = Number(orgIdStr);
-    const top = list.sort((a, b) => b.prospect_potential - a.prospect_potential).slice(0, TOP_N_PER_SPLIT)
-      .map((r) => ({ player_id: r.player_id, rank: r.prospect_rank, role: r.role, name: r.name }));
+    const top: SystemRankingProspect[] = list.sort((a, b) => b.prospect_potential - a.prospect_potential).slice(0, TOP_N_PER_SPLIT)
+      .map((r) => {
+        const p = playersById.get(r.player_id)!;
+        const w = warByPlayer.get(r.player_id);
+        return {
+          player_id: r.player_id, rank: r.prospect_rank, role: r.role, name: r.name,
+          age: p.age, level: levelLabel(effectiveLevel(p.level, p.league_id, leagueId)),
+          war: w?.war ?? null, warYear: w?.year ?? null, warIsFallback: w?.isFallback ?? false,
+        };
+      });
     (ph === "H" ? hittersByOrg : pitchersByOrg).set(orgId, top);
   }
 

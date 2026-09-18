@@ -1012,7 +1012,7 @@ tbody tr:last-child td {
   flex-direction: column;
   gap: 0.875rem;
   /* Narrower cards (2026-09-18, Rees's ask) -- was full page width. */
-  max-width: 44rem;
+  max-width: 60rem;
 }
 
 @media (prefers-reduced-motion: no-preference) {
@@ -1177,6 +1177,15 @@ tbody tr:last-child td {
 
 .system-prospect-name:hover {
   text-decoration: underline;
+}
+
+.system-prospect-meta {
+  margin-left: auto;
+  flex-shrink: 0;
+  font-size: 0.75rem;
+  color: var(--color-text-muted);
+  white-space: nowrap;
+  align-self: center;
 }
 
 .system-prospect-empty {
