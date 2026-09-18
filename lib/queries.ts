@@ -1,5 +1,5 @@
 import { makeSupabaseClient } from "./supabase-client";
-import { roundGrade, levelLabel, teamLogoUrl, effectiveLevel, CANONICAL_LEVELS, injuryStatus } from "./display-helpers";
+import { roundGrade, levelLabel, teamLogoUrl, effectiveLevel, CANONICAL_LEVELS, injuryStatus, type DataFreshness } from "./display-helpers";
 import { getDefaultLeagueId } from "./league";
 
 const supabase = makeSupabaseClient();
@@ -92,6 +92,28 @@ export async function getLatestGameDate(leagueId: number): Promise<string | null
     .maybeSingle();
   if (error) throw error;
   return (data as { game_date: string } | null)?.game_date ?? null;
+}
+
+// Status for the public header's data badge (2026-09-18). "current" = the newest
+// refresh succeeded; "refreshing" = one started in the last 30 minutes and hasn't
+// finished; "delayed" = the newest refresh FAILED (so the data shown is from an
+// earlier successful one) or nothing has succeeded in 72+ hours.
+export async function getDataFreshness(leagueId: number): Promise<DataFreshness> {
+  const { data, error } = await supabase
+    .from("refresh_runs").select("id,status,started_at,completed_at,game_date")
+    .eq("dsa_league_id", leagueId).order("id", { ascending: false }).limit(15);
+  if (error) throw error;
+  const runs = (data ?? []) as { id: number; status: string; started_at: string; completed_at: string | null; game_date: string | null }[];
+  const lastOk = runs.find((r) => r.status === "succeeded" && r.game_date !== null) ?? null;
+  const latest = runs[0] ?? null;
+  const now = Date.now();
+  let state: DataFreshness["state"] = "current";
+  if (latest && lastOk && latest.id > lastOk.id) {
+    if (latest.status === "running" && now - new Date(latest.started_at).getTime() < 30 * 60 * 1000) state = "refreshing";
+    else if (latest.status === "failed") state = "delayed";
+  }
+  if (lastOk?.completed_at && now - new Date(lastOk.completed_at).getTime() > 72 * 3600 * 1000) state = "delayed";
+  return { gameDate: lastOk?.game_date ?? null, completedAt: lastOk?.completed_at ?? null, state };
 }
 
 export interface TeamRankingRow {

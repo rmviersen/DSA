@@ -273,6 +273,95 @@ body {
   background: rgba(255, 255, 255, 0.08);
 }
 
+/* ── Public (guest) header, 2026-09-18 ──
+   One row instead of logo-then-links-below: brand | links | data badge + login. */
+.site-nav--report {
+  flex-wrap: wrap;
+  justify-content: flex-start;
+  gap: 0.5rem 1.75rem;
+  padding-block: 0.5rem;
+}
+
+.site-nav--report .site-logo {
+  height: 64px;
+}
+
+.site-nav--report .site-brand-acronym {
+  font-size: 1.5rem;
+}
+
+.site-nav--report .site-nav-links {
+  flex: 0 1 auto;
+  order: 0;
+  gap: 0.35rem;
+}
+
+.site-nav--report .site-nav-links a {
+  font-size: 1rem;
+  padding: 0.45rem 0.9rem;
+  border-radius: 999px;
+  border: 1px solid transparent;
+}
+
+.site-nav--report .site-nav-links a[aria-current="page"] {
+  color: var(--color-text-on-navy);
+  background: rgba(201, 185, 143, 0.16);
+  border-color: rgba(201, 185, 143, 0.55);
+}
+
+.site-nav--report .site-nav-actions {
+  margin-left: auto;
+  gap: 1rem;
+}
+
+/* "Data as of" + refresh status (DataStatus.tsx) */
+.data-status {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  line-height: 1.25;
+  text-align: right;
+}
+
+.data-status-date {
+  font-size: 0.8125rem;
+  font-weight: 600;
+  color: var(--color-text-on-navy);
+  white-space: nowrap;
+}
+
+.data-status-state {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4em;
+  font-size: 0.6875rem;
+  color: var(--color-text-on-navy-muted);
+  white-space: nowrap;
+}
+
+.data-status-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--color-green-bright);
+  flex-shrink: 0;
+}
+
+.data-status--refreshing .data-status-dot {
+  background: #e0a030;
+}
+
+.data-status--delayed .data-status-dot {
+  background: #e5484d;
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .data-status--current .data-status-dot,
+  .data-status--refreshing .data-status-dot {
+    animation: dsa-pulse 2s ease-in-out infinite;
+  }
+}
+
 /* Login/preview button on the guest-facing header (2026-08-30 fix) -- it
    was using shadcn's `text-primary-foreground` Tailwind utility, which is
    THEME-REACTIVE (light: #f6f3ec, cream -- fine; dark: #0a1620, near-black
@@ -1306,6 +1395,21 @@ tbody tr:last-child td {
     width: 100%;
   }
 
+  .site-nav--report .site-nav-actions {
+    margin-left: 0;
+    width: 100%;
+    justify-content: space-between;
+  }
+
+  .site-nav--report .site-logo {
+    height: 52px;
+  }
+
+  .data-status {
+    align-items: flex-start;
+    text-align: left;
+  }
+
   .site-nav-links a {
     flex: 1;
     text-align: center;
@@ -1505,5 +1609,17 @@ tbody tr:last-child td {
   }
   html {
     @apply font-sans;
+  }
+}
+/* Farm Rankings prospect lines on phones (2026-09-18): the age/level/PA-IP/WAR meta no longer fits beside the name at ~375px and ran into it, so it drops to its own indented line under the name. */
+@media (max-width: 640px) {
+  .system-prospect-list li {
+    flex-wrap: wrap;
+  }
+
+  .system-prospect-meta {
+    margin-left: 2.4375rem;
+    width: 100%;
+    align-self: auto;
   }
 }

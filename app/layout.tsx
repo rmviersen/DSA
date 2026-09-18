@@ -1,6 +1,6 @@
 import { Fraunces, Inter } from "next/font/google";
 import { ConditionalNav } from "./_components/ConditionalNav";
-import { getLatestGameDate } from "../lib/queries";
+import { getLatestGameDate, getDataFreshness } from "../lib/queries";
 import { checkOwnerState } from "../lib/owner-cookie";
 import { getDefaultLeagueId } from "../lib/league";
 import "./globals.css";
@@ -80,7 +80,7 @@ export default async function RootLayout({ children }: { children: React.ReactNo
   // deferred rather than done speculatively for a league that isn't real
   // yet; revisit when Duud actually ships.
   const leagueId = await getDefaultLeagueId();
-  const [latestGameDate, ownerState] = await Promise.all([getLatestGameDate(leagueId), checkOwnerState()]);
+  const [latestGameDate, ownerState, freshness] = await Promise.all([getLatestGameDate(leagueId), checkOwnerState(), getDataFreshness(leagueId)]);
 
   return (
     <html lang="en" className={cn(displayFont.variable, bodyFont.variable)} suppressHydrationWarning>
@@ -90,6 +90,7 @@ export default async function RootLayout({ children }: { children: React.ReactNo
       <body>
         <ConditionalNav
           latestGameDate={latestGameDate}
+          freshness={freshness}
           isRealOwner={ownerState.isRealOwner}
           isPreviewingGuest={ownerState.isPreviewingGuest}
         />

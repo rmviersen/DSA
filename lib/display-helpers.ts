@@ -225,6 +225,16 @@ export function fmtInningsPitched(trueInnings: number | null): string {
   return `${Math.floor(outs / 3)}.${outs % 3}`;
 }
 
+// Data-freshness badge for the public header (2026-09-18, Rees's ask: "show the
+// 'Data as of' and status... so users can tell when the data is refreshed").
+// Computed server-side (getDataFreshness in lib/queries.ts), rendered by
+// app/_components/DataStatus.tsx.
+export interface DataFreshness {
+  gameDate: string | null; // league in-game date of the latest SUCCEEDED refresh, e.g. "2032-05-24"
+  completedAt: string | null; // real-world ISO timestamp that refresh finished
+  state: "current" | "refreshing" | "delayed";
+}
+
 // Injury status (2026-09-10, Rees's ask: red name + injury length on
 // /free-agency, "in a small, discreet way so it doesn't add another wide
 // column"). Pulled out here as the ONE shared implementation -- this exact

@@ -4,6 +4,7 @@ import { usePathname } from "next/navigation";
 import { SiteNav } from "./SiteNav";
 import { ReportHeader } from "./ReportHeader";
 import { DEFAULT_LEAGUE_SLUG } from "@/lib/league-slug";
+import type { DataFreshness } from "../../lib/display-helpers";
 
 // Anything under /TBL/prospects (the public Top Prospects + System
 // Rankings pages, split 2026-08-25 -- was one page at /report before that)
@@ -33,10 +34,12 @@ import { DEFAULT_LEAGUE_SLUG } from "@/lib/league-slug";
 // only real destination any of them ever actually redirect to today).
 export function ConditionalNav({
   latestGameDate,
+  freshness,
   isRealOwner,
   isPreviewingGuest,
 }: {
   latestGameDate: string | null;
+  freshness: DataFreshness;
   isRealOwner: boolean;
   isPreviewingGuest: boolean;
 }) {
@@ -44,7 +47,7 @@ export function ConditionalNav({
   const firstSegment = pathname?.split("/")[1];
   const league = firstSegment || DEFAULT_LEAGUE_SLUG;
   if (pathname?.startsWith("/TBL/prospects")) {
-    return <ReportHeader league={league} isRealOwner={isRealOwner} isPreviewingGuest={isPreviewingGuest} />;
+    return <ReportHeader league={league} freshness={freshness} isRealOwner={isRealOwner} isPreviewingGuest={isPreviewingGuest} />;
   }
   return <SiteNav league={league} latestGameDate={latestGameDate} isRealOwner={isRealOwner} />;
 }

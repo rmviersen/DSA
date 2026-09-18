@@ -1,5 +1,10 @@
+"use client";
+
 import Image from "next/image";
 import Link from "next/link";
+import { usePathname } from "next/navigation";
+import { DataStatus } from "./DataStatus";
+import type { DataFreshness } from "../../lib/display-helpers";
 import { buttonVariants } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 
@@ -53,10 +58,12 @@ const loginButtonClass = cn(buttonVariants({ variant: "ghost", size: "sm" }), "r
 // gets "Exit Guest Preview" instead of either -- they don't need to log in
 // again, just to clear the preview cookie, and they shouldn't see "Full
 // Site" while the whole point is that they're seeing the restricted view.
-export function ReportHeader({ league, isRealOwner, isPreviewingGuest }: { league: string; isRealOwner: boolean; isPreviewingGuest: boolean }) {
+// Redesigned 2026-09-18 (Rees: "a bit bland... I don't like the amount of blank space, specifically by having the navbar below the logo"). The shared .site-nav-links rule forces the link row onto its OWN full-width line (that fix was for the owner nav's 7 items); with only 2 public links it just left a wide empty band under the logo. The .site-nav--report modifier puts brand, links and actions on ONE row, shrinks the logo, highlights the active page, and adds the "Data as of" / refresh-status badge (DataStatus) so guests can see how fresh the numbers are.
+export function ReportHeader({ league, freshness, isRealOwner, isPreviewingGuest }: { league: string; freshness: DataFreshness; isRealOwner: boolean; isPreviewingGuest: boolean }) {
+  const pathname = usePathname() ?? "";
   return (
-    <header className="site-header">
-      <nav className="site-nav" aria-label="Site">
+    <header className="site-header site-header--report">
+      <nav className="site-nav site-nav--report" aria-label="Site">
         <Link href={`/${league}/prospects`} className="site-brand">
           <Image src="/logo.png" alt="DSA logo" width={96} height={96} className="site-logo" priority />
           <span className="site-brand-text">
@@ -65,11 +72,16 @@ export function ReportHeader({ league, isRealOwner, isPreviewingGuest }: { leagu
           </span>
         </Link>
         <div className="site-nav-links">
-          {PUBLIC_NAV_ITEMS.map(({ href, label }) => (
-            <Link key={href} href={`/${league}${href}`}>
+          {PUBLIC_NAV_ITEMS.map(({ href, label }) => {
+            const full = `/${league}${href}`;
+            // Top Prospects also owns nothing under /prospects/farms, so an exact-or-child match with the farms page winning is enough.
+            const active = href === "/prospects" ? pathname === full : pathname.startsWith(full);
+            return (
+            <Link key={href} href={full} aria-current={active ? "page" : undefined}>
               {label}
             </Link>
-          ))}
+            );
+          })}
         </div>
         {/* Right-side action cluster -- just the login/preview link now.
             No dark-mode toggle here (2026-08-30): guest pages are forced
@@ -78,6 +90,7 @@ export function ReportHeader({ league, isRealOwner, isPreviewingGuest }: { leagu
             wrapper (not a bare Link) to match SiteNav.tsx's structure and
             leave room if this cluster grows a second item again later. */}
         <div className="site-nav-actions">
+          <DataStatus freshness={freshness} />
           {isRealOwner && isPreviewingGuest ? (
             // Plain <a>, not <Link> -- this is a state-changing GET, and
             // <Link> prefetches links in view by default, which would risk
