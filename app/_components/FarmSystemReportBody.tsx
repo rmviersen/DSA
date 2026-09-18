@@ -78,7 +78,7 @@ export async function FarmSystemReportBody({
           Eligible players: under 45 days of MLB service time and age 25 or younger.
         </p>
       </header>
-      {/* "About the Rankings" (2026-09-14, Rees's ask; text rewritten by Rees himself 2026-09-18 -- edit the wording in place, keep apostrophes as &apos;) -- a high-level,
+      {/* Intro write-up (2026-09-14, Rees's ask; text rewritten by Rees himself 2026-09-18, and the "About the Rankings" heading dropped the same day -- edit the wording in place, keep apostrophes as &apos;) -- a high-level,
           official-reading description of the rating system for anyone
           landing on this report (this component is shared by the internal
           /prospects page and the public /TBL/prospects one). Deliberately
@@ -86,7 +86,6 @@ export async function FarmSystemReportBody({
           formulas/coefficients behind it -- Rees's own spec: "without going
           into too much detail." */}
       <div style={{ border: "1px solid var(--color-border)", borderRadius: 8, padding: "12px 16px", background: "var(--color-surface)", marginBottom: 16, fontSize: "0.875rem", lineHeight: 1.5 }}>
-        <h3 style={{ margin: "0 0 6px", fontSize: "0.9375rem" }}>About the Rankings</h3>
         <p style={{ margin: "0 0 8px" }}>
           Welcome to the Drunk Scouting Association, where sometimes we get things right! I&apos;ve built this system over a number of versions and with the help of some extreme water usage, have been able to create the best version of it yet. We are called the DSA because I consider this to be an inexact science. OOTP is intentionally difficult to quantify from scouted ratings, so I consider this like having my own army of inebriated scouts sending half-assed reports that I try and make sense of.
         </p>
