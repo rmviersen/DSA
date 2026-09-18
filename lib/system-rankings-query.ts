@@ -85,6 +85,10 @@ export interface SystemRankingProspect {
   war: number | null;
   warYear: number | null;
   warIsFallback: boolean;
+  // Plate appearances (hitters) or TRUE decimal innings (pitchers, outs / 3 --
+  // render with fmtInningsPitched) for the SAME season as `war` (2026-09-18).
+  pa: number | null;
+  ip: number | null;
 }
 
 export interface SystemRankingGrade {
@@ -208,30 +212,37 @@ export async function getSystemRankingsDetailed(leagueId: number): Promise<Syste
   if (currentYear !== null) fbQuery = fbQuery.lt("year", currentYear);
   const { data: fbRow } = await fbQuery.order("year", { ascending: false }).order("refresh_run_id", { ascending: false }).limit(1).maybeSingle();
   const fallbackSeason = fbRow as { year: number; refresh_run_id: number } | null;
+  // Returns WAR plus the volume it was earned over: PA for hitters, total OUTS for
+  // pitchers (the stored `ip` column is whole innings only -- see queries.ts).
   async function warFor(year: number, runId: number, ids: number[], table: "player_batting_stats_snapshots" | "player_pitching_stats_snapshots") {
-    const out = new Map<number, number>();
+    const out = new Map<number, { war: number; vol: number }>();
+    const volCol = table === "player_batting_stats_snapshots" ? "pa" : "outs";
     for (let i = 0; i < ids.length; i += 200) {
-      const { data, error } = await supabase.from(table).select("player_id,war").eq("refresh_run_id", runId).eq("year", year).eq("split_id", 1).in("player_id", ids.slice(i, i + 200));
+      const { data, error } = await supabase.from(table).select(`player_id,war,${volCol}`).eq("refresh_run_id", runId).eq("year", year).eq("split_id", 1).in("player_id", ids.slice(i, i + 200));
       if (error) throw error;
-      for (const r of data as { player_id: number; war: number | null }[]) if (r.war !== null) out.set(r.player_id, (out.get(r.player_id) ?? 0) + r.war);
+      for (const r of data as unknown as ({ player_id: number; war: number | null } & Record<string, number | null>)[]) {
+        if (r.war === null) continue;
+        const cur = out.get(r.player_id) ?? { war: 0, vol: 0 };
+        out.set(r.player_id, { war: cur.war + r.war, vol: cur.vol + (r[volCol] ?? 0) });
+      }
     }
     return out;
   }
   const hIds = [...shownIds].filter(([, ph]) => ph === "H").map(([id]) => id);
   const pIds = [...shownIds].filter(([, ph]) => ph === "P").map(([id]) => id);
-  const none = () => Promise.resolve(new Map<number, number>());
+  const none = () => Promise.resolve(new Map<number, { war: number; vol: number }>());
   const [curH, curP, fbH, fbP] = await Promise.all([
     currentYear !== null ? warFor(currentYear, refreshRunId, hIds, "player_batting_stats_snapshots") : none(),
     currentYear !== null ? warFor(currentYear, refreshRunId, pIds, "player_pitching_stats_snapshots") : none(),
     fallbackSeason ? warFor(fallbackSeason.year, fallbackSeason.refresh_run_id, hIds, "player_batting_stats_snapshots") : none(),
     fallbackSeason ? warFor(fallbackSeason.year, fallbackSeason.refresh_run_id, pIds, "player_pitching_stats_snapshots") : none(),
   ]);
-  const warByPlayer = new Map<number, { war: number; year: number; isFallback: boolean }>();
+  const warByPlayer = new Map<number, { war: number; vol: number; year: number; isFallback: boolean }>();
   for (const [id, ph] of shownIds) {
     const cur = (ph === "H" ? curH : curP).get(id);
-    if (cur !== undefined && currentYear !== null) { warByPlayer.set(id, { war: cur, year: currentYear, isFallback: false }); continue; }
+    if (cur !== undefined && currentYear !== null) { warByPlayer.set(id, { war: cur.war, vol: cur.vol, year: currentYear, isFallback: false }); continue; }
     const fb = (ph === "H" ? fbH : fbP).get(id);
-    if (fb !== undefined && fallbackSeason) warByPlayer.set(id, { war: fb, year: fallbackSeason.year, isFallback: true });
+    if (fb !== undefined && fallbackSeason) warByPlayer.set(id, { war: fb.war, vol: fb.vol, year: fallbackSeason.year, isFallback: true });
   }
 
   const hittersByOrg = new Map<number, SystemRankingProspect[]>();
@@ -256,6 +267,7 @@ export async function getSystemRankingsDetailed(leagueId: number): Promise<Syste
           player_id: r.player_id, rank: r.prospect_rank, role: r.role, name: r.name,
           age: p.age, level: levelLabel(effectiveLevel(p.level, p.league_id, leagueId)),
           war: w?.war ?? null, warYear: w?.year ?? null, warIsFallback: w?.isFallback ?? false,
+          pa: w && ph === "H" ? w.vol : null, ip: w && ph === "P" ? w.vol / 3 : null,
         };
       });
     (ph === "H" ? hittersByOrg : pitchersByOrg).set(orgId, top);

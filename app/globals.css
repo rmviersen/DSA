@@ -1011,8 +1011,8 @@ tbody tr:last-child td {
   display: flex;
   flex-direction: column;
   gap: 0.875rem;
-  /* Narrower cards (2026-09-18, Rees's ask) -- was full page width. */
-  max-width: 60rem;
+  /* Narrower cards (2026-09-18, Rees's ask) -- was full page width. Bumped 60 -> 64rem when PA/IP joined the age/level/WAR meta on each line. */
+  max-width: 64rem;
 }
 
 @media (prefers-reduced-motion: no-preference) {

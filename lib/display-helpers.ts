@@ -215,6 +215,16 @@ export function percentileStyle(pct: number | null): { color: string; fontWeight
   return { color: interpolateStops(Math.max(0, Math.min(100, pct)), PERCENTILE_STOPS), fontWeight: 700 };
 }
 
+// Innings pitched in baseball notation (2026-09-18, Rees's ask): 40.1 means 40
+// and one-third innings, 40.2 means 40 and two-thirds -- the ".1"/".2" are outs,
+// not tenths. Takes TRUE decimal innings (outs / 3), the form ERA/K9/FIP math
+// wants, and rounds through whole outs so float noise never prints ".3".
+export function fmtInningsPitched(trueInnings: number | null): string {
+  if (trueInnings === null || trueInnings === undefined) return "\u2014";
+  const outs = Math.round(trueInnings * 3);
+  return `${Math.floor(outs / 3)}.${outs % 3}`;
+}
+
 // Injury status (2026-09-10, Rees's ask: red name + injury length on
 // /free-agency, "in a small, discreet way so it doesn't add another wide
 // column"). Pulled out here as the ONE shared implementation -- this exact

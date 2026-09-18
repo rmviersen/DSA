@@ -4,7 +4,7 @@ import { useState } from "react";
 import Link from "next/link";
 import { useParams } from "next/navigation";
 import type { SystemRankingCardRow, SystemRankingProspect } from "../../lib/system-rankings-query";
-import { percentileStyle, statsPlusPlayerUrl } from "../../lib/display-helpers";
+import { percentileStyle, statsPlusPlayerUrl, fmtInningsPitched } from "../../lib/display-helpers";
 
 const rankLabel = (n: number | null) => (n === null ? "—" : `#${n}`);
 
@@ -56,7 +56,7 @@ function ProspectColumn({ title, prospects, showInternalLinks }: { title: string
                 {p.age ?? "—"} · {p.level} ·{" "}
                 {p.war === null ? "— WAR" : (
                   <span style={p.warIsFallback ? { fontStyle: "italic" } : undefined} title={p.warYear ? p.warYear + " season" + (p.warIsFallback ? " (no current-season stats yet)" : "") : undefined}>
-                    {p.war.toFixed(1)} WAR{p.warIsFallback && p.warYear ? " ('" + String(p.warYear).slice(-2) + ")" : ""}
+                    {p.pa !== null ? `${p.pa} PA · ` : p.ip !== null ? `${fmtInningsPitched(p.ip)} IP · ` : ""}{p.war.toFixed(1)} WAR{p.warIsFallback && p.warYear ? " ('" + String(p.warYear).slice(-2) + ")" : ""}
                   </span>
                 )}
               </span>

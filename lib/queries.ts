@@ -1048,6 +1048,8 @@ export interface SeasonTotals {
   war: number | null;
   // batters
   ab: number | null;
+  // Plate appearances (2026-09-18, Rees: show PA instead of AB on the stat line).
+  pa: number | null;
   avg: number | null;
   obp: number | null;
   slg: number | null;
@@ -1055,6 +1057,7 @@ export interface SeasonTotals {
   sb: number | null;
   zr: number | null; // Zone Rating, straight from player_fielding_stats_snapshots
   // pitchers
+  // TRUE decimal innings (outs / 3); render with fmtInningsPitched() for 40.1 notation.
   ip: number | null;
   era: number | null;
   fip: number | null;
@@ -1371,8 +1374,8 @@ export async function getTopProspectsDetailed(leagueId: number, orgId?: number, 
     .order("year", { ascending: false }).order("refresh_run_id", { ascending: false }).limit(1).maybeSingle();
   const fallback = fallbackRow as { year: number; refresh_run_id: number } | null;
 
-  type BatRow = { player_id: number; level_id: number; ab: number; h: number; d: number; t: number; hr: number; bb: number; hp: number; sf: number; sb: number; war: number | null };
-  type PitRow = { player_id: number; level_id: number; ip: number; er: number; k: number; bb: number; hp: number; hra: number; war: number | null };
+  type BatRow = { player_id: number; level_id: number; pa: number; ab: number; h: number; d: number; t: number; hr: number; bb: number; hp: number; sf: number; sb: number; war: number | null };
+  type PitRow = { player_id: number; level_id: number; outs: number; er: number; k: number; bb: number; hp: number; hra: number; war: number | null };
   type FieldRow = { player_id: number; level_id: number; zr: number | null };
 
   // A player can have one row PER LEVEL they played at this season
@@ -1400,10 +1403,10 @@ export async function getTopProspectsDetailed(leagueId: number, orgId?: number, 
     for (let i = 0; i < playerIds.length; i += 500) {
       const chunk = playerIds.slice(i, i + 500);
       const batP = supabase.from("player_batting_stats_snapshots")
-        .select("player_id,level_id,ab,h,d,t,hr,bb,hp,sf,sb,war")
+        .select("player_id,level_id,pa,ab,h,d,t,hr,bb,hp,sf,sb,war")
         .eq("refresh_run_id", statsRefreshRunId).eq("year", year).eq("split_id", 1).in("player_id", chunk);
       const pitP = supabase.from("player_pitching_stats_snapshots")
-        .select("player_id,level_id,ip,er,k,bb,hp,hra,war")
+        .select("player_id,level_id,outs,er,k,bb,hp,hra,war")
         .eq("refresh_run_id", statsRefreshRunId).eq("year", year).eq("split_id", 1).in("player_id", chunk);
       // split_id=0 -- fielding stats aren't handedness-split like batting/
       // pitching are, so there's no vL/vR row to avoid double-counting here.
@@ -1478,13 +1481,16 @@ export async function getTopProspectsDetailed(leagueId: number, orgId?: number, 
       .map((lvl) => levelLabel(lvl));
 
     const bat = batStints.length > 0 ? {
-      ab: sum(batStints.map((x) => x.ab)), h: sum(batStints.map((x) => x.h)), d: sum(batStints.map((x) => x.d)),
+      pa: sum(batStints.map((x) => x.pa)), ab: sum(batStints.map((x) => x.ab)), h: sum(batStints.map((x) => x.h)), d: sum(batStints.map((x) => x.d)),
       t: sum(batStints.map((x) => x.t)), hr: sum(batStints.map((x) => x.hr)), bb: sum(batStints.map((x) => x.bb)),
       hp: sum(batStints.map((x) => x.hp)), sf: sum(batStints.map((x) => x.sf)), sb: sum(batStints.map((x) => x.sb)),
       war: batStints.some((x) => x.war !== null) ? sum(batStints.map((x) => x.war ?? 0)) : null,
     } : undefined;
     const pit = pitStints.length > 0 ? {
-      ip: sum(pitStints.map((x) => x.ip)), er: sum(pitStints.map((x) => x.er)), k: sum(pitStints.map((x) => x.k)),
+      // True innings = total OUTS / 3 (2026-09-18). The stored `ip` column is
+      // only the WHOLE-innings part (the leftover 1-2 outs live in `ipf`), so
+      // summing it truncated every pitcher's innings and inflated ERA/K9/FIP.
+      ip: sum(pitStints.map((x) => x.outs)) / 3, er: sum(pitStints.map((x) => x.er)), k: sum(pitStints.map((x) => x.k)),
       bb: sum(pitStints.map((x) => x.bb)), hp: sum(pitStints.map((x) => x.hp)), hra: sum(pitStints.map((x) => x.hra)),
       war: pitStints.some((x) => x.war !== null) ? sum(pitStints.map((x) => x.war ?? 0)) : null,
     } : undefined;
@@ -1492,7 +1498,7 @@ export async function getTopProspectsDetailed(leagueId: number, orgId?: number, 
     const field = fieldZrs.length > 0 ? { zr: sum(fieldZrs) / fieldZrs.length } : undefined;
 
     let seasonTotals: SeasonTotals = {
-      war: null, ab: null, avg: null, obp: null, slg: null, hr: null, sb: null, zr: null,
+      war: null, ab: null, pa: null, avg: null, obp: null, slg: null, hr: null, sb: null, zr: null,
       ip: null, era: null, fip: null, k9: null, levels: seasonLevels,
     };
     if (ph === "H" && bat) {
@@ -1502,6 +1508,7 @@ export async function getTopProspectsDetailed(leagueId: number, orgId?: number, 
         ...seasonTotals,
         war: bat.war,
         ab: bat.ab,
+        pa: bat.pa,
         avg: bat.ab > 0 ? bat.h / bat.ab : null,
         obp: obpDenom > 0 ? (bat.h + bat.bb + bat.hp) / obpDenom : null,
         slg: bat.ab > 0 ? totalBases / bat.ab : null,

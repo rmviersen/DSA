@@ -148,10 +148,10 @@ async function main() {
       for (const k of ["ab", "h", "d", "t", "hr", "bb", "hp", "sf"] as const) c[k] += r[k] ?? 0;
       bat.set(r.player_id, c);
     }
-    const { data: p } = await supabase.from("player_pitching_stats_snapshots").select("player_id,ip,er,k,bb").eq("refresh_run_id", runId).eq("year", gameYear).eq("split_id", 1).in("player_id", chunk);
-    for (const r of (p ?? []) as { player_id: number; ip: number; er: number; k: number; bb: number }[]) {
+    const { data: p } = await supabase.from("player_pitching_stats_snapshots").select("player_id,outs,er,k,bb").eq("refresh_run_id", runId).eq("year", gameYear).eq("split_id", 1).in("player_id", chunk);
+    for (const r of (p ?? []) as { player_id: number; outs: number; er: number; k: number; bb: number }[]) {
       const c = pit.get(r.player_id) ?? { ip: 0, er: 0, k: 0, bb: 0 };
-      c.ip += r.ip ?? 0; c.er += r.er ?? 0; c.k += r.k ?? 0; c.bb += r.bb ?? 0;
+      c.ip += (r.outs ?? 0) / 3; c.er += r.er ?? 0; c.k += r.k ?? 0; c.bb += r.bb ?? 0;
       pit.set(r.player_id, c);
     }
   }
@@ -166,7 +166,7 @@ async function main() {
     }
     const s = pit.get(id);
     if (!s || s.ip < 20) return "no meaningful current-season sample (under 20 IP) -- do not cite stats";
-    return `${gameYear}: ${(s.er * 9 / s.ip).toFixed(2)} ERA, ${(s.k * 9 / s.ip).toFixed(1)} K/9, ${(s.bb * 9 / s.ip).toFixed(1)} BB/9 in ${s.ip.toFixed(1)} IP`;
+    return `${gameYear}: ${(s.er * 9 / s.ip).toFixed(2)} ERA, ${(s.k * 9 / s.ip).toFixed(1)} K/9, ${(s.bb * 9 / s.ip).toFixed(1)} BB/9 in ${Math.floor(Math.round(s.ip * 3) / 3)}.${Math.round(s.ip * 3) % 3} IP`;
   }
   const pcById = new Map(pc.map((r) => [r.player_id, r]));
 

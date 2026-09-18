@@ -9,7 +9,7 @@ import type { ProspectRow } from "../../lib/queries";
 // would get bundled into the browser (and crash) if a "use client" component
 // pulls in even one unrelated value export from that file. See
 // display-helpers.ts's top comment.
-import { levelLabel, statsPlusPlayerUrl, teamLogoUrl } from "../../lib/display-helpers";
+import { levelLabel, statsPlusPlayerUrl, teamLogoUrl, fmtInningsPitched } from "../../lib/display-helpers";
 
 const fmtInt = (n: number | null) => (n === null || n === undefined ? "—" : Math.round(n));
 const fmt1 = (n: number | null) => (n === null || n === undefined ? "—" : n.toFixed(1));
@@ -33,7 +33,7 @@ function fmtStaleDate(iso: string): string {
 // decision -- see lib/queries.ts's getTopProspectsDetailed for why: a
 // mid-season promotion was silently truncating a real full-season workload
 // down to whatever the new level alone showed). Pitchers: IP/FIP/ERA/K-9/
-// WAR. Batters: AB, the standard AVG/OBP/SLG slash line, HR, SB, ZR (Zone
+// WAR. Batters: PA (was AB until 2026-09-18), the standard AVG/OBP/SLG slash line, HR, SB, ZR (Zone
 // Rating, a real raw fielding stat), WAR. Levels played this season are
 // their own trailing "· LEVEL" or "· LEVEL/LEVEL" segment now (2026-08-30,
 // Rees's spec: "552 AB · .301/.349/.505 · 27 HR · 2 SB · -0.1 ZR · 1.9 WAR
@@ -42,7 +42,8 @@ function fmtStaleDate(iso: string): string {
 // came from, not just the split ones. Order still best-level-first (see
 // t.levels' own ascending-by-level-number sort in lib/queries.ts) --
 // unchanged by this rewrite, just the punctuation/wording around it.
-// "value LABEL" throughout (2026-08-20 decision), e.g. "26 AB" not "AB 26" --
+// IP prints in baseball notation (40.1 = 40 and 1/3), 2026-09-18.
+// "value LABEL" throughout (2026-08-20 decision), e.g. "26 PA" not "PA 26" --
 // matches how the slash line already reads (no leading label at all).
 //
 // Leading "YYYY: " label (2026-09-13, Rees's ask, reworded 2026-09-14) --
@@ -62,11 +63,11 @@ function statLine(r: ProspectRow): string {
   const levelsSuffix = t.levels.length > 0 ? ` · ${t.levels.join("/")}` : "";
   if (r.ph === "P") {
     if (t.ip === null) return "No Stats";
-    return `${yearLabel}${fmt1(t.ip)} IP · ${fmt2(t.fip)} FIP · ${fmt2(t.era)} ERA · ${fmt1(t.k9)} K/9 · ${fmt1(t.war)} WAR${levelsSuffix}`;
+    return `${yearLabel}${fmtInningsPitched(t.ip)} IP · ${fmt2(t.fip)} FIP · ${fmt2(t.era)} ERA · ${fmt1(t.k9)} K/9 · ${fmt1(t.war)} WAR${levelsSuffix}`;
   }
   if (r.ph === "H") {
     if (t.ab === null) return "No Stats";
-    return `${yearLabel}${fmtInt(t.ab)} AB · ${rate(t.avg)}/${rate(t.obp)}/${rate(t.slg)} · ${fmtInt(t.hr)} HR · ${fmtInt(t.sb)} SB · ${fmt1(t.zr)} ZR · ${fmt1(t.war)} WAR${levelsSuffix}`;
+    return `${yearLabel}${fmtInt(t.pa)} PA · ${rate(t.avg)}/${rate(t.obp)}/${rate(t.slg)} · ${fmtInt(t.hr)} HR · ${fmtInt(t.sb)} SB · ${fmt1(t.zr)} ZR · ${fmt1(t.war)} WAR${levelsSuffix}`;
   }
   return "No Stats";
 }
