@@ -370,6 +370,15 @@ async function main() {
       process.exitCode = 1;
     }
 
+    // First-MLB-season table (2026-09-19) -- feeds /admin/work-ethic-mlb. Current season only; cheap.
+    console.log("Updating MLB debut table for this run...");
+    try {
+      execFileSync("npx", ["tsx", "scripts/update-mlb-debuts.ts"], { stdio: "inherit", shell: true });
+    } catch (err) {
+      console.error(`update-mlb-debuts.ts failed after a successful refresh -- raw data is fine, but player_mlb_debut wasn't updated this run: ${err}`);
+      process.exitCode = 1;
+    }
+
     // MLB standings (2026-09-18) -- record + division position for Farm Rankings.
     console.log("Capturing MLB standings for this run...");
     try {
