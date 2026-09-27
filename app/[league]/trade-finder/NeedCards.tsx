@@ -34,9 +34,9 @@ function rankLabel(rank: number | null, totalTeams: number | null): string {
 }
 
 const AVAILABILITY_LABEL: Record<BroaderCandidate["availabilitySignal"], string> = {
-  "short-control": "≤2 yrs control",
+  "short-control": "last year of contract",
   "weak-team": "weak team",
-  both: "≤2 yrs control + weak team",
+  both: "last year of contract + weak team",
 };
 
 const thStyle: CSSProperties = { padding: "2px 6px 2px 0", fontWeight: 600, fontSize: "0.6875rem", color: "var(--color-text-muted)", textAlign: "left", whiteSpace: "nowrap" };
@@ -90,16 +90,24 @@ function CandidateTable({ title, rows }: { title: string; rows: (TradeBlockCandi
 }
 
 function NeedCard({ need, block, broader }: { need: RoleRankNeed; block: TradeBlockCandidate[]; broader: BroaderCandidate[] }) {
-  const isInjuryDriven = need.excludedInjuredPlayers.length > 0 && need.unadjustedRankPct !== null && need.unadjustedRankPct > need.rankPct;
+  const isInjuryDriven = need.excludedInjuredPlayers.length > 0 && need.unadjustedRankPct !== null && need.rankPct !== null && need.unadjustedRankPct > need.rankPct;
   return (
     <div style={{ border: "1px solid var(--color-border)", borderRadius: 8, padding: "8px 12px", background: "var(--color-surface)" }}>
       <div style={{ display: "flex", alignItems: "baseline", gap: 10, flexWrap: "wrap" }}>
         <h3 style={{ margin: 0, fontSize: "0.9375rem" }}>{need.role}</h3>
+        {need.isNeed && (
+          <span style={{
+            fontSize: "0.6875rem", fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.03em",
+            color: "rgb(220,38,38)", background: "rgba(220,38,38,0.12)", borderRadius: 4, padding: "1px 6px",
+          }}>
+            Need
+          </span>
+        )}
         <span style={{ fontSize: "0.8125rem", ...percentileStyle(need.rankPct) }}>
           {fmt1(need.rating)} <span style={{ color: "var(--color-text-muted)", fontWeight: 400 }}>(Lg {fmt1(need.leagueAvg)})</span>
         </span>
         <span style={{ fontSize: "0.8125rem", ...percentileStyle(need.rankPct) }}>
-          {rankLabel(need.rank, need.totalTeams)} <span style={{ color: "var(--color-text-muted)", fontWeight: 400 }}>({need.rankPct.toFixed(0)}th pct)</span>
+          {rankLabel(need.rank, need.totalTeams)} <span style={{ color: "var(--color-text-muted)", fontWeight: 400 }}>({need.rankPct !== null ? need.rankPct.toFixed(0) : "—"}th pct)</span>
         </span>
         {isInjuryDriven && (
           <span style={{ fontSize: "0.75rem", color: "rgb(220,38,38)" }}>
@@ -113,6 +121,14 @@ function NeedCard({ need, block, broader }: { need: RoleRankNeed; block: TradeBl
   );
 }
 
+// Every position with at least one real upgrade candidate gets a card now
+// (2026-09-27, Rees: "display the best available upgrades at each
+// position" -- no longer gated to just the bottom-third "needs"). Trade-
+// block hits are emphasized two ways: within a card the block table already
+// renders above the broader-scan table, and cards themselves are sorted so
+// every position WITH a trade-block upgrade comes first (ranked by that
+// upgrade's size), ahead of positions where only the broader scan found
+// something.
 export default function NeedCards({
   needs, blockMatches, broaderMatches,
 }: {
@@ -120,15 +136,29 @@ export default function NeedCards({
   blockMatches: NeedWithTradeBlockCandidates[];
   broaderMatches: NeedWithBroaderCandidates[];
 }) {
+  const cards = needs
+    .map((need) => ({
+      need,
+      block: blockMatches.find((m) => m.need.role === need.role)?.candidates ?? [],
+      broader: broaderMatches.find((m) => m.need.role === need.role)?.candidates ?? [],
+    }))
+    .filter((c) => c.block.length > 0 || c.broader.length > 0)
+    .sort((a, b) => {
+      const aHasBlock = a.block.length > 0, bHasBlock = b.block.length > 0;
+      if (aHasBlock !== bHasBlock) return aHasBlock ? -1 : 1;
+      const aBest = aHasBlock ? a.block[0].upgradeSize : a.broader[0].upgradeSize;
+      const bBest = bHasBlock ? b.block[0].upgradeSize : b.broader[0].upgradeSize;
+      return bBest - aBest;
+    });
+
+  if (cards.length === 0) {
+    return <p>No real upgrades found at any position right now -- nothing on the trade block or in the broader scan clears what we can already field.</p>;
+  }
+
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-      {needs.map((need) => (
-        <NeedCard
-          key={need.role}
-          need={need}
-          block={blockMatches.find((m) => m.need.role === need.role)?.candidates ?? []}
-          broader={broaderMatches.find((m) => m.need.role === need.role)?.candidates ?? []}
-        />
+      {cards.map((c) => (
+        <NeedCard key={c.need.role} need={c.need} block={c.block} broader={c.broader} />
       ))}
     </div>
   );

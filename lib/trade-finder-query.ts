@@ -46,7 +46,17 @@ export interface RoleRankNeed {
   // topN pool, for EVERY org (not just ours) -- an apples-to-apples
   // comparison, not just us being penalized while everyone else's injuries
   // go uncounted.
-  rankPct: number;
+  //
+  // Null only in the edge case where we have no ranked player at all for
+  // this slot (see getPositionSlots below, 2026-09-27) -- every other slot
+  // always gets a real percentile now, since this file no longer filters
+  // slots down to just the weak ones before returning them.
+  rankPct: number | null;
+  // Bottom-third leaguewide (2026-09-27, Rees's ask: "display the best
+  // available upgrades at each position" -- every slot is now returned
+  // regardless of rank, so this flag carries the old "this is one of our
+  // weak spots" signal for the page's own badge instead of being a filter).
+  isNeed: boolean;
   rank: number | null;
   totalTeams: number | null;
   rating: number | null;
@@ -208,11 +218,11 @@ function bestExactPositionScore(rows: LeaguePlayerRow[], orgId: number, pos: Fie
 function getExactPositionNeeds(rows: LeaguePlayerRow[], orgId: number): RoleRankNeed[] {
   const orgIds = [...new Set(rows.map((r) => r.organization_id))];
   const needs: RoleRankNeed[] = [];
-  // Needs detection only replaces "INF" (2B/3B) -- C/1B/SS/LF/CF/RF stay on
+  // "Needs detection" only replaces "INF" (2B/3B) -- C/1B/SS/LF/CF/RF stay on
   // ROLE_HEALTH_ROWS's own already-calibrated Batting-only convention above
   // (getRoleHealthNeeds), unchanged. bestExactPositionScore itself is now
   // general across all 8 positions because Step 2's candidate matching
-  // below needs that generality; needs detection just doesn't call it for
+  // below needs that generality; this function just doesn't call it for
   // anything but 2B/3B.
   for (const pos of ["2B", "3B"] as const) {
     const adjustedByOrg = new Map(orgIds.map((oid) => [oid, bestExactPositionScore(rows, oid, pos, true)]));
@@ -222,7 +232,9 @@ function getExactPositionNeeds(rows: LeaguePlayerRow[], orgId: number): RoleRank
     const leagueAvg = totalTeams > 0 ? adjustedScores.reduce((a, b) => a + b, 0) / totalTeams : null;
     const rank = ourAdjusted !== null ? adjustedScores.indexOf(ourAdjusted.score) + 1 : null;
     const rankPct = rank !== null && totalTeams > 1 ? ((totalTeams - rank) / (totalTeams - 1)) * 100 : (rank !== null ? 50 : null);
-    if (rankPct === null || rankPct > NEEDS_RANK_PCT_MAX) continue;
+    // 2026-09-27: every slot is returned now (Rees: "best available upgrades
+    // at each position," not just the weak ones) -- rankPct just feeds the
+    // isNeed badge below instead of gating whether this slot exists at all.
 
     // Unadjusted side, for transparency, and to find which of our players
     // (if any) the exclusion actually removed.
@@ -238,7 +250,7 @@ function getExactPositionNeeds(rows: LeaguePlayerRow[], orgId: number): RoleRank
       : (ourUnadjusted !== null && ourAdjusted === null ? rows.find((r) => r.id === ourUnadjusted.playerId) : undefined);
 
     needs.push({
-      kind: "role-rank", role: pos, rankPct, rank, totalTeams,
+      kind: "role-rank", role: pos, rankPct, isNeed: rankPct !== null && rankPct <= NEEDS_RANK_PCT_MAX, rank, totalTeams,
       rating: ourAdjusted?.score ?? null, leagueAvg, unadjustedRankPct,
       excludedInjuredPlayers: excluded ? [{ playerId: excluded.id, name: excluded.name, daysLeft: excluded.daysLeft }] : [],
     });
@@ -292,7 +304,8 @@ function getRoleHealthNeeds(rows: LeaguePlayerRow[], orgId: number): RoleRankNee
     const leagueAvg = totalTeams > 0 ? adjustedScores.reduce((a, b) => a + b, 0) / totalTeams : null;
     const rank = ourAdjusted !== null ? adjustedScores.indexOf(ourAdjusted) + 1 : null;
     const rankPct = rank !== null && totalTeams > 1 ? ((totalTeams - rank) / (totalTeams - 1)) * 100 : (rank !== null ? 50 : null);
-    if (rankPct === null || rankPct > NEEDS_RANK_PCT_MAX) continue;
+    // 2026-09-27: every slot is returned now -- see the comment in
+    // getExactPositionNeeds above.
 
     const unadjustedByOrg = new Map(
       orgIds.map((oid) => [oid, topNAvg(roleValuesForOrg(rows, oid, row.label, row.roles, false).map((v) => v.value), row.topN)])
@@ -312,7 +325,7 @@ function getRoleHealthNeeds(rows: LeaguePlayerRow[], orgId: number): RoleRankNee
       .map((v) => ({ playerId: v.playerId, name: v.name, daysLeft: v.daysLeft }));
 
     needs.push({
-      kind: "role-rank", role: row.label, rankPct, rank, totalTeams,
+      kind: "role-rank", role: row.label, rankPct, isNeed: rankPct !== null && rankPct <= NEEDS_RANK_PCT_MAX, rank, totalTeams,
       rating: ourAdjusted, leagueAvg, unadjustedRankPct,
       excludedInjuredPlayers: ourLongInjuredHere,
     });
@@ -320,7 +333,14 @@ function getRoleHealthNeeds(rows: LeaguePlayerRow[], orgId: number): RoleRankNee
   return needs;
 }
 
-export async function getPositionalNeeds(leagueId: number, orgId: number): Promise<Need[]> {
+// Every one of the 11 role/position slots (SP, RP, C, 1B, 2B, 3B, SS, LF, CF,
+// RF, DH), always -- renamed from getPositionalNeeds (2026-09-27, Rees: "I
+// want to display the best available upgrades at each position," not just
+// the ones already ranked bottom-third). Each slot still carries `isNeed`
+// (the old bottom-third bar) so the page can badge the genuinely weak spots,
+// but every slot is returned regardless, and matched against the trade block
+// / broader scan the same way a flagged need always was.
+export async function getPositionSlots(leagueId: number, orgId: number): Promise<Need[]> {
   const rows = await fetchLeagueRoster(leagueId);
   return [...getRoleHealthNeeds(rows, orgId), ...getExactPositionNeeds(rows, orgId)];
 }
@@ -508,9 +528,11 @@ export async function getTradeBlockMatches(leagueId: number, orgId: number, need
 // left on their contract, or players on weak, rebuilding teams." Two real,
 // existing-data-only signals -- no new ingestion, no invented metric:
 //
-// 1. Short remaining control (yearsOfControl <= 2, Rees's own "one or two
-//    years" wording) -- reuses trade-value.ts's yearsOfControl(), already
-//    the site's one real "how much control is left" answer.
+// 1. Short remaining control (yearsOfControl <= 1, tightened 2026-09-27 from
+//    the original <= 2 -- Rees: "show any players on the last year of their
+//    contract, changing the current logic to just 1 year remaining") --
+//    reuses trade-value.ts's yearsOfControl(), already the site's one real
+//    "how much control is left" answer.
 // 2. A "weak/rebuilding" seller team -- team_computed.roster_rank (ranks
 //    every team by team_ovr, its current MLB roster talent) in the bottom
 //    third leaguewide, the SAME bottom-third bar as every other need in
@@ -524,7 +546,7 @@ export async function getTradeBlockMatches(leagueId: number, orgId: number, need
 // a joint requirement. Anyone already surfaced via the trade block (Step 2)
 // is excluded here, so a listed player isn't shown twice under two
 // different framings.
-const BROADER_SCAN_MAX_CONTROL_YEARS = 2;
+const BROADER_SCAN_MAX_CONTROL_YEARS = 1;
 
 // team_computed's own latest refresh_run_id -- NOT assumed to match player_
 // computed's (compute-team-ratings.ts runs as its own step, same "can lag

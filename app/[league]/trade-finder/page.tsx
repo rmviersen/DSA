@@ -1,4 +1,4 @@
-import { getPositionalNeeds, getTradeBlockMatches, getBroaderTargets, getTradeBlockMeta } from "@/lib/trade-finder-query";
+import { getPositionSlots, getTradeBlockMatches, getBroaderTargets, getTradeBlockMeta } from "@/lib/trade-finder-query";
 import { fetchComputedPlayers } from "@/lib/queries";
 import { resolveLeagueId, resolveDefaultOrgId } from "@/lib/league";
 import NeedCards from "./NeedCards";
@@ -8,13 +8,24 @@ export const dynamic = "force-dynamic";
 
 // Trade Finder (2026-09-14, Rees's ask). Step 4 of the approved plan
 // (splendid-spinning-wigderson.md) -- the page itself, pulling together the
-// three data-layer steps built earlier the same day: getPositionalNeeds()
-// (role-rank + exact-2B/3B needs, injury-adjusted), getTradeBlockMatches()
-// (who on the live trade block would actually be a starter/depth upgrade),
-// and getBroaderTargets() (a leaguewide scan for plausibly-available players
-// not on the block -- short contract control, or a seller team's weak
-// roster). Owner-only by directory convention, same as /lineup and
-// /my-roster -- not in middleware.ts's GUEST_ALLOWED_PATHS.
+// three data-layer steps built earlier the same day: getPositionSlots()
+// (role-rank + exact-2B/3B slots, injury-adjusted -- every slot now, not
+// just the weak ones; see that function's own comment, 2026-09-27),
+// getTradeBlockMatches() (who on the live trade block would actually be a
+// starter/depth upgrade), and getBroaderTargets() (a leaguewide scan for
+// plausibly-available players not on the block -- last year of contract
+// control, or a seller team's weak roster). Owner-only by directory
+// convention, same as /lineup and /my-roster -- not in middleware.ts's
+// GUEST_ALLOWED_PATHS.
+//
+// 2026-09-27 redesign (Rees: "instead of just finding positions where we are
+// below league avg, I want to display the best available upgrades at each
+// position... emphasize trade block listed players, and then show any
+// players on the last year of their contract"): every position/role slot is
+// fetched and matched now, not just the ones ranked bottom-third leaguewide;
+// NeedCards.tsx filters down to slots with a real candidate and sorts
+// trade-block hits first. A slot that's ALSO one of our bottom-third weak
+// spots still gets a "Need" badge for context (need.isNeed).
 export default async function TradeFinderPage({
   params,
   searchParams,
@@ -27,7 +38,7 @@ export default async function TradeFinderPage({
   const leagueId = await resolveLeagueId(league);
   const orgId = search.org ? Number(search.org) : await resolveDefaultOrgId(leagueId);
 
-  const needs = await getPositionalNeeds(leagueId, orgId);
+  const needs = await getPositionSlots(leagueId, orgId);
   const [blockMatches, broaderMatches, blockMetaById] = await Promise.all([
     getTradeBlockMatches(leagueId, orgId, needs),
     getBroaderTargets(leagueId, orgId, needs),
@@ -61,19 +72,16 @@ export default async function TradeFinderPage({
       <header className="page-header">
         <h1>Trade Finder</h1>
         <p>
-          Positional needs found automatically -- any role or exact position in the bottom third leaguewide (accounting for
-          injuries: a role only counts as a need if it's still weak once any 30+ day injury is excluded from the comparison,
-          for every team, not just ours). Each need below is matched against the real trade block and a broader leaguewide
-          scan of plausibly-available players (short contract control, or a team whose overall roster talent is bottom-third
-          leaguewide) -- a candidate only appears if he'd genuinely clear real position/role eligibility AND beat what we can
-          actually field today.
+          The best real upgrade available at every role and position (SP, RP, C, 1B, 2B, 3B, SS, LF, CF, RF, DH) -- a
+          candidate only appears if he'd genuinely clear real position/role eligibility AND beat what we can actually field
+          today (injury-adjusted: a 30+ day injury doesn't count toward what we can field). Trade-block listings are
+          emphasized first; below them, a broader leaguewide scan surfaces players not on the block who are plausibly
+          available anyway -- either they're in the last year of their contract, or their team's overall roster talent is
+          bottom-third leaguewide. Positions that are ALSO one of our bottom-third weak spots get a "Need" badge for
+          context, but every position with a real upgrade shows up here now, not just the weak ones.
         </p>
       </header>
-      {needs.length === 0 ? (
-        <p>No positional needs currently flagged -- every role and position clears the bottom-third bar league-wide.</p>
-      ) : (
-        <NeedCards needs={needs} blockMatches={blockMatches} broaderMatches={broaderMatches} />
-      )}
+      <NeedCards needs={needs} blockMatches={blockMatches} broaderMatches={broaderMatches} />
 
       <h2 style={{ marginTop: 24 }}>Full Trade Block ({fullBlockRows.length})</h2>
       <p style={{ color: "var(--color-text-muted, #888)", fontSize: 12, marginTop: -6 }}>
