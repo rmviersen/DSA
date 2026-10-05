@@ -48,6 +48,41 @@ async function insertBatched(supabase: ReturnType<typeof makeSupabaseClient>, ta
   }
 }
 
+// Raw per-run copies a refresh writes before the ratings step (2026-10-05). If the run then fails,
+// every one of these is a full duplicate of the next successful run's data -- during a multi-day
+// StatsPlus API-token outage, 55 failed runs left ~3M duplicate rows, which pushed the career-stats
+// queries past the API's 8s statement timeout and broke compute-ratings. So a failed run removes its
+// OWN rows (this refresh_run_id only, never any other run's), in small slices to stay under that limit.
+const RAW_PER_RUN_TABLES = [
+  "player_batting_stats_snapshots",
+  "player_pitching_stats_snapshots",
+  "player_fielding_stats_snapshots",
+  "team_batting_stats_snapshots",
+  "team_pitching_stats_snapshots",
+  "contract_snapshots",
+  "contract_extension_snapshots",
+];
+
+async function cleanupFailedRunRows(supabase: ReturnType<typeof makeSupabaseClient>, runId: number) {
+  for (const table of RAW_PER_RUN_TABLES) {
+    try {
+      let removed = 0;
+      for (;;) {
+        const { data: ids, error: selErr } = await supabase.from(table).select("id").eq("refresh_run_id", runId).limit(2000);
+        if (selErr) throw new Error(JSON.stringify(selErr));
+        if (!ids || ids.length === 0) break;
+        const { error: delErr } = await supabase.from(table).delete().in("id", (ids as unknown as { id: number }[]).map((r) => r.id));
+        if (delErr) throw new Error(JSON.stringify(delErr));
+        removed += ids.length;
+      }
+      console.log(`Failed-run cleanup: removed ${removed} ${table} rows for run ${runId}.`);
+    } catch (err) {
+      // Best effort -- never mask the original failure with a cleanup failure.
+      console.error(`Failed-run cleanup for ${table} (run ${runId}) did not complete: ${err}`);
+    }
+  }
+}
+
 // Fixed, league-wide set of level league_ids — confirmed empirically 2026-08-18
 // by cross-referencing players.league_id against players.level for every org.
 // CORRECTED 2026-09-04: 203/204 were originally assumed to be "two parallel
@@ -491,6 +526,7 @@ async function main() {
     await supabase.from("refresh_runs").update({ status: "failed", completed_at: new Date().toISOString(), notes: String(err) }).eq("id", refreshRunId);
     console.error(`Refresh run ${refreshRunId} failed:`, err);
     process.exitCode = 1;
+    await cleanupFailedRunRows(supabase, refreshRunId);
   }
 }
 
