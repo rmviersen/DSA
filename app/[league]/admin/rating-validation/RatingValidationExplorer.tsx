@@ -38,7 +38,10 @@ const statValueStyle: React.CSSProperties = { fontSize: "1.375rem", fontWeight: 
 interface Variable { key: string; label: string; getValue: (p: ValidationPoint) => number | null }
 
 function buildVariables(playerType: "hitter" | "pitcher"): Variable[] {
-  const overall: Variable = { key: "overall", label: "Overall", getValue: (p) => p.overall };
+  // Plotted on the RAW formula score on purpose (this page tests the engine's formula against real production, not the
+  // display scale -- the calibrated Overall is a piecewise-linear re-ruler of the same number). Labeled so it isn't
+  // mistaken for the Overall shown on every other page (2026-10-06, Rees: hover said 61.1 vs 82.0 elsewhere).
+  const overall: Variable = { key: "overall", label: "Overall (raw formula score)", getValue: (p) => p.overall };
   const gradeVars = (playerType === "hitter" ? HITTER_VARIABLES : PITCHER_VARIABLES).map((v) => ({
     key: v.key, label: v.label, getValue: (p: ValidationPoint) => p.grades[v.key] ?? null,
   }));
@@ -224,7 +227,7 @@ export default function RatingValidationExplorer({ points }: Props) {
           </table>
         </div>
         <div style={{ fontSize: "0.75rem", color: "var(--color-text-muted)", marginTop: "0.5rem" }}>
-          ★ Overall is the rating engine's composite; the rest are the raw grades (and, for Fielding, the derived composite) that feed into it. Click a row to plot it below. Higher R² = that variable explains more of the real variation in {warRateLabel}.
+          ★ Overall here is the rating engine's composite on its raw formula scale (the hover shows both this raw score and the calibrated Overall displayed on every other page — same ranking, different ruler); the rest are the raw grades (and, for Fielding, the derived composite) that feed into it. Click a row to plot it below. Higher R² = that variable explains more of the real variation in {warRateLabel}.
         </div>
       </div>
 
@@ -249,7 +252,10 @@ export default function RatingValidationExplorer({ points }: Props) {
                     </button>
                   )}
                 </div>
-                <div style={{ color: "var(--color-text-muted)" }}>{activePoint.role} · Overall {activePoint.overall.toFixed(1)}</div>
+                <div style={{ color: "var(--color-text-muted)" }}>
+                  {activePoint.role} · Overall {(activePoint.overallCalibrated ?? activePoint.overall).toFixed(1)}
+                  {activePoint.overallCalibrated != null && <> · raw formula score {activePoint.overall.toFixed(1)}</>}
+                </div>
                 <div style={{ fontWeight: 600 }}>
                   {(getRate(activePoint) ?? 0).toFixed(2)} {warRateLabel}
                 </div>

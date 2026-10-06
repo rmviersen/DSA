@@ -99,7 +99,10 @@ export interface ValidationPoint {
   playerName: string;
   role: string;
   playerType: "hitter" | "pitcher";
-  overall: number;
+  overall: number; // RAW formula score (player_computed.overall_raw) -- what is plotted/regressed here
+  // The calibrated Overall shown everywhere else on the site (player_computed.overall), for the hover only
+  // (2026-10-06, Rees: hover said 61.1 for Porten while every other page says 82.0 -- same player, two scales).
+  overallCalibrated: number | null;
   war: number; // raw season WAR -- shown for context in the detail panel, not plotted/regressed
   warRate: number; // WAR per 100 PA (hitters) or per 100 IP (pitchers) -- the actual plotted/regressed value
   playingTime: number; // PA for hitters, IP for pitchers
@@ -184,8 +187,8 @@ export async function getRatingValidationPoints(leagueId: number): Promise<Valid
     // on the raw formula's fit. Aliased back to `overall` in the select so
     // every downstream reference in this file (pc.overall etc.) needs no
     // changes of its own.
-    fetchAll<{ player_id: number; overall: number | null; role: string | null }>((from, to) =>
-      supabase.from("player_computed").select("player_id, overall:overall_raw, role").eq("refresh_run_id", computedRunId).range(from, to) as never
+    fetchAll<{ player_id: number; overall: number | null; calibrated: number | null; role: string | null }>((from, to) =>
+      supabase.from("player_computed").select("player_id, overall:overall_raw, calibrated:overall, role").eq("refresh_run_id", computedRunId).range(from, to) as never
     ),
     fetchAll<{
       player_id: number; cntct: number | null; gap: number | null; pow: number | null; eye: number | null; ks: number | null; speed: number | null;
@@ -273,7 +276,7 @@ export async function getRatingValidationPoints(leagueId: number): Promise<Valid
       if (!bat || bat.pa < MIN_PA) continue;
       const fieldingInnings = fieldingInningsByPlayer.get(playerId) ?? null;
       points.push({
-        playerId, playerName, role: pc.role, playerType, overall: pc.overall,
+        playerId, playerName, role: pc.role, playerType, overall: pc.overall, overallCalibrated: pc.calibrated ?? null,
         war: bat.war, warRate: (bat.war / bat.pa) * 100, playingTime: bat.pa,
         fieldingInnings,
         warRateByFieldingInnings: fieldingInnings && fieldingInnings > 0 ? (bat.war / fieldingInnings) * 100 : null,
@@ -284,7 +287,7 @@ export async function getRatingValidationPoints(leagueId: number): Promise<Valid
       const minIp = pc.role === "SP" ? MIN_IP_SP : MIN_IP_RP;
       if (!pit || pit.ip < minIp) continue;
       points.push({
-        playerId, playerName, role: pc.role, playerType, overall: pc.overall,
+        playerId, playerName, role: pc.role, playerType, overall: pc.overall, overallCalibrated: pc.calibrated ?? null,
         war: pit.war, warRate: (pit.war / pit.ip) * 100, playingTime: pit.ip,
         fieldingInnings: null, warRateByFieldingInnings: null,
         grades: { stf: r.stf, mov: r.mov, ctrl: r.ctrl, stm: r.stm, pbabip: r.pbabip },
