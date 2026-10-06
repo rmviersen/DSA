@@ -303,9 +303,23 @@ async function computeRatingsForRun(supabase: ReturnType<typeof makeSupabaseClie
     // SPECIFIC years this computation needs (`last3Years`), not just any
     // row for the league at all -- the real question was never "does this
     // table have data," it's "does it have OUR window's data."
-    const { data, error } = await supabase.from(table).select("refresh_run_id").eq("dsa_league_id", leagueId).in("year", last3Years).order("refresh_run_id", { ascending: false }).limit(1).maybeSingle();
-    if (error) throw new Error(`latestStatsRunId(${table}) failed: ${error.message}`);
-    return (data as { refresh_run_id: number } | null)?.refresh_run_id ?? refreshRunId;
+    //
+    // Rewritten 2026-10-06 as one lookup PER YEAR, taking the max: the old single
+    // `year IN (...) ORDER BY refresh_run_id DESC LIMIT 1` let Postgres pick a backward
+    // scan of the (refresh_run_id, ...) unique index and filter on year, which meant
+    // walking past every newer run that only carries the current season. After 55
+    // failed refresh runs each stored a duplicate 2032 snapshot, that walk took 10.3s
+    // and tripped the API's 8s statement_timeout (compute-ratings failed, run 123).
+    // A single-year lookup is an exact seek on (dsa_league_id, year, refresh_run_id).
+    // Same answer as before: the newest run carrying at least one of last3Years.
+    let newest: number | null = null;
+    for (const year of last3Years) {
+      const { data, error } = await supabase.from(table).select("refresh_run_id").eq("dsa_league_id", leagueId).eq("year", year).order("refresh_run_id", { ascending: false }).limit(1).maybeSingle();
+      if (error) throw new Error(`latestStatsRunId(${table}, ${year}) failed: ${error.message}`);
+      const id = (data as { refresh_run_id: number } | null)?.refresh_run_id;
+      if (id !== undefined && (newest === null || id > newest)) newest = id;
+    }
+    return newest ?? refreshRunId;
   }
 
   async function sumBySplit(table: string, statCol: string): Promise<{ vsL: number; vsR: number }> {
