@@ -47,13 +47,35 @@ const MIN_POOLED_SLOPE = 0.001;
 // instead of a number this season's data can't actually back up -- the
 // mechanism stays fully built and ready to activate for real once (if) the
 // relationship strengthens with more seasons.
+//
+// REWORKED 2026-10-06 (the 2026-10-06 incident): this used to be a hard on/off
+// switch at 0.02. With a full 2032 season of data the pooled R² came in at
+// 0.021 -- a hair over the line -- and EVERY role flipped from a flat x1.0 to
+// x1.6-2.4 (SS/CF/INF/COF/C) or x0.67-0.80 (1B/DH) overnight, even though a
+// 0.021 R² explains 2% of the variance and SS's own raw slope was NEGATIVE.
+// Because Overall isn't re-normalized, that inflated every infielder/outfielder/
+// catcher's raw Overall by ~16-20 points, dragged the MLB hitter mean from 51 to
+// 65 and the SD from 3.2 to 9.8, and crushed every 1B/DH (Jeremy Porten, one of
+// the best bats in the league, read 44.1). A threshold with a cliff on a number
+// that can land within rounding error of it is the bug, so now:
+//   * R² only STARTS to matter at MIN_R_SQUARED and ramps linearly up to its
+//     full effect at FULL_EFFECT_R_SQUARED -- a hair over the floor moves the
+//     multipliers by a hair, never by 2x.
+//   * The ramped multipliers are re-centred so their sample-weighted mean is
+//     exactly 1 -- role weights can redistribute fielding's importance between
+//     positions but can never inflate or deflate the whole hitter scale.
+//   * Final bounds are [MIN_MULTIPLIER, MAX_MULTIPLIER] = [0.5, 1.5].
+//   * The pooled slope must be POSITIVE (better fielding -> more WAR); a flat or
+//     negative pooled relationship builds no role differentiation at all.
 const MIN_R_SQUARED = 0.02;
+const FULL_EFFECT_R_SQUARED = 0.10;
 
-// Defensive bound on the final multiplier -- however the data shakes out,
-// never let fielding swing Overall by more than 3x today's flat weight in
-// either direction. A real, earned difference should show up well inside
-// this range; anything trying to exceed it is more likely noise.
-const MAX_MULTIPLIER = 3;
+// Defensive bounds on the final multiplier -- however the data shakes out,
+// never let fielding swing Overall by more than 1.5x / 0.5x today's flat weight.
+// (Was a 3x ceiling and no floor before 2026-10-06; a real, earned difference
+// belongs well inside this range, anything outside it is more likely noise.)
+const MIN_MULTIPLIER = 0.5;
+const MAX_MULTIPLIER = 1.5;
 
 async function main() {
   const supabase = makeSupabaseClient();
@@ -104,37 +126,49 @@ async function main() {
   // regardless of what one season's noisy per-role regression says alone.
   const orderedSlopes = isotonicRegressionNonIncreasing(rows.map((r) => r.rawSlope), rows.map((r) => r.sampleSize));
 
-  const pooledSlopeUsable = Math.abs(pooledFit.slope) >= MIN_POOLED_SLOPE;
+  // Needs a clearly positive pooled slope (better fielding -> more WAR); a slope near zero
+  // or negative can't anchor a "relative" multiplier (see MIN_POOLED_SLOPE above).
+  const pooledSlopeUsable = pooledFit.slope >= MIN_POOLED_SLOPE;
   if (!pooledSlopeUsable) {
     console.warn(
-      `Pooled slope (${pooledFit.slope.toFixed(4)}) is too close to zero to build a stable relative multiplier from -- ` +
+      `Pooled slope (${pooledFit.slope.toFixed(4)}) is not clearly positive (needs >= ${MIN_POOLED_SLOPE}) -- ` +
       `every role will get a flat x1.00 this run rather than a number the data doesn't actually support yet.`
     );
   }
-  const relationshipIsMeaningful = pooledFit.rSquared >= MIN_R_SQUARED;
-  if (!relationshipIsMeaningful) {
-    console.warn(
-      `Pooled R² (${pooledFit.rSquared.toFixed(3)}) is below the ${MIN_R_SQUARED} floor -- the fielding-vs-WAR ` +
-      `relationship isn't established enough yet to trust ANY role's differentiation from it. Every role gets a ` +
-      `flat x1.00 this run (today's unchanged behavior) regardless of what an individual role's slope looks like.`
-    );
-  }
+  // Smooth ramp instead of an on/off switch: 0 at R² <= MIN_R_SQUARED, 1 at R² >= FULL_EFFECT_R_SQUARED.
+  const evidenceRamp = pooledSlopeUsable
+    ? Math.max(0, Math.min(1, (pooledFit.rSquared - MIN_R_SQUARED) / (FULL_EFFECT_R_SQUARED - MIN_R_SQUARED)))
+    : 0;
+  console.log(
+    `Evidence ramp: pooled R² ${pooledFit.rSquared.toFixed(3)} (starts mattering at ${MIN_R_SQUARED}, full effect at ${FULL_EFFECT_R_SQUARED}) -> ` +
+    `role differentiation applied at ${(evidenceRamp * 100).toFixed(1)}% strength.`
+  );
 
-  console.log("Per-role fielding weights (raw -> ordered -> shrunk -> multiplier):");
-  const results = rows.map((r, i) => {
+  console.log("Per-role fielding weights (raw -> ordered -> shrunk -> unramped multiplier -> final):");
+  const staged = rows.map((r, i) => {
     const orderedSlope = orderedSlopes[i];
     const shrinkWeight = r.sampleSize / (r.sampleSize + SHRINKAGE_K);
     const shrunkSlope = pooledFit.slope + (orderedSlope - pooledFit.slope) * shrinkWeight;
-    let relativeMultiplier = (pooledSlopeUsable && relationshipIsMeaningful) ? shrunkSlope / pooledFit.slope : 1;
-    // Never let fielding SUBTRACT value -- a defensive specialist should
-    // never rate below an offensively-identical player with worse fielding,
-    // which a negative multiplier would do. Also bound the top end (see
-    // MAX_MULTIPLIER comment above).
-    relativeMultiplier = Math.max(0, Math.min(MAX_MULTIPLIER, relativeMultiplier));
+    const fullStrengthMultiplier = pooledSlopeUsable ? shrunkSlope / pooledFit.slope : 1;
+    // Blend from a flat 1.0 toward the full-strength multiplier by how much evidence there is.
+    const rampedMultiplier = 1 + (fullStrengthMultiplier - 1) * evidenceRamp;
+    return { role: r.role, rawSlope: r.rawSlope, orderedSlope, shrunkSlope, fullStrengthMultiplier, rampedMultiplier, sampleSize: r.sampleSize };
+  });
+  // Re-centre so the sample-weighted mean multiplier is exactly 1: role weights may MOVE fielding's
+  // importance between positions, never inflate or deflate the whole hitter scale (every hitter's raw
+  // Overall includes fielding * this multiplier and calibration is anchored on the hitter population).
+  const totalN = staged.reduce((s, r) => s + r.sampleSize, 0);
+  const weightedMean = totalN > 0 ? staged.reduce((s, r) => s + r.rampedMultiplier * r.sampleSize, 0) / totalN : 1;
+  const centre = weightedMean > 0 ? weightedMean : 1;
+  const results = staged.map((r) => {
+    // Never let fielding SUBTRACT value (a negative multiplier would rate a defensive specialist below an
+    // offensively-identical player with worse fielding), and keep it inside [MIN_MULTIPLIER, MAX_MULTIPLIER].
+    const relativeMultiplier = Math.max(MIN_MULTIPLIER, Math.min(MAX_MULTIPLIER, r.rampedMultiplier / centre));
     console.log(
-      `  ${r.role.padEnd(4)} raw=${r.rawSlope.toFixed(4)} ordered=${orderedSlope.toFixed(4)} shrunk=${shrunkSlope.toFixed(4)} -> x${relativeMultiplier.toFixed(2)}  (n=${r.sampleSize})`
+      `  ${r.role.padEnd(4)} raw=${r.rawSlope.toFixed(4)} ordered=${r.orderedSlope.toFixed(4)} shrunk=${r.shrunkSlope.toFixed(4)} -> ` +
+      `full x${r.fullStrengthMultiplier.toFixed(2)} -> final x${relativeMultiplier.toFixed(3)}  (n=${r.sampleSize})`
     );
-    return { role: r.role, rawSlope: r.rawSlope, orderedSlope, shrunkSlope, relativeMultiplier, sampleSize: r.sampleSize };
+    return { role: r.role, rawSlope: r.rawSlope, orderedSlope: r.orderedSlope, shrunkSlope: r.shrunkSlope, relativeMultiplier, sampleSize: r.sampleSize };
   });
 
   console.log("Finding latest refresh run (for tagging this computation)...");

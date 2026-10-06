@@ -86,6 +86,7 @@ async function main() {
   // unexpected response) aborts the whole run before it starts.
   const wantsRatings = !skipRatings;
   let gameHistoryRows: Awaited<ReturnType<typeof sp.gameHistory>> | null = null;
+  let ratingsRows: Awaited<ReturnType<typeof sp.ratings>> | null = null;
   if (wantsRatings) {
     if (!sp.hasSession()) {
       console.error(
@@ -100,6 +101,14 @@ async function main() {
     try {
       gameHistoryRows = await sp.gameHistory();
       console.log(`Auth valid — game history pull returned ${gameHistoryRows.length} rows.`);
+      // The RATINGS export is the call that actually rejects an expired API token (game history
+      // can still succeed -- confirmed 2026-10-05: 55 consecutive runs got past the old game-history-
+      // only check, wrote a full copy of the season's stats + contracts each, then died at the ratings
+      // step, leaving ~4M junk rows behind and stalling every downstream calculation for 10 days).
+      // So pull it HERE, before the run row or any data is written, and hold it in memory (~13.5k rows).
+      console.log("Pulling ratings (async job — this can take a few minutes; also validates the API token against the endpoint that rejects it first)...");
+      ratingsRows = await sp.ratings();
+      console.log(`Ratings pull returned ${ratingsRows.length} rows.`);
     } catch (err) {
       console.error(
         `Refresh aborted before writing anything: StatsPlus auth validation failed (${err}). ` +
@@ -256,8 +265,8 @@ async function main() {
       console.log("Storing game history (already pulled during cookie validation above)...");
       await upsertBatched(supabase, "game_results", gameHistoryRows!.map((r) => map.mapGameResult(r, refreshRunId)), "statsplus_game_id", leagueId);
 
-      console.log("Pulling ratings (async job — this can take a few minutes)...");
-      await insertBatched(supabase, "player_ratings_snapshots", (await sp.ratings()).map((r) => map.mapPlayerRatings(r, refreshRunId, capturedAt)), leagueId);
+      console.log("Storing ratings (pulled during the up-front auth validation above)...");
+      await insertBatched(supabase, "player_ratings_snapshots", ratingsRows!.map((r) => map.mapPlayerRatings(r, refreshRunId, capturedAt)), leagueId);
     } else {
       console.log("Skipping ratings/game history — --skip-ratings passed.");
     }
@@ -324,7 +333,17 @@ async function main() {
     // ingestion (it genuinely succeeded) but does flag the process as failed
     // so it doesn't look like a silent no-op.
     console.log("Computing player ratings for this run...");
-    try {
+    // computeOk (2026-10-06): did THIS run really end up with fresh player_computed rows? Everything below that
+    // READS computed ratings (team ratings, every self-training weight regression, the market-contract scan) is
+    // skipped when it didn't -- compute-ratings can fail (DB timeout) or be refused by its own sanity gate
+    // (lib/rating-sanity.ts), and during the 2026-10-05 outage the regressions kept running against ratings
+    // from a run months stale, auto-applying weights trained on a mismatched sample.
+    let computeOk = false;
+    if (!wantsRatings) {
+      // A deliberate --skip-ratings (public-only) run has no new ratings by design, so there is nothing to
+      // compute and nothing that depends on new computed ratings to run -- not a failure.
+      console.log("--skip-ratings: no new ratings in this run, so computed ratings (and the steps that read them) are left as they are.");
+    } else try {
       // shell:true is required on Windows -- npx resolves to npx.cmd, a batch
       // file, which execFileSync can't invoke directly without going through
       // a shell. Without this it fails with ENOENT even though npx is on
@@ -332,30 +351,36 @@ async function main() {
       // 2026-08-20: this exact bug let a real refresh (run 10) succeed on
       // raw data while silently leaving no computed snapshot behind.
       execFileSync("npx", ["tsx", "scripts/compute-ratings.ts"], { stdio: "inherit", shell: true });
+      const { count, error: countErr } = await supabase.from("player_computed").select("player_id", { count: "exact", head: true }).eq("refresh_run_id", refreshRunId);
+      computeOk = !countErr && (count ?? 0) > 0;
+      if (!computeOk) console.error(`compute-ratings.ts exited cleanly but run ${refreshRunId} has no player_computed rows (${countErr?.message ?? "count 0"}).`);
     } catch (err) {
       console.error(`compute-ratings.ts failed after a successful refresh -- raw data is fine, but no fresh player_computed snapshot was produced: ${err}`);
-      process.exitCode = 1;
     }
-    console.log("Computing team ratings for this run...");
-    try {
-      execFileSync("npx", ["tsx", "scripts/compute-team-ratings.ts"], { stdio: "inherit", shell: true });
-    } catch (err) {
-      console.error(`compute-team-ratings.ts failed after a successful refresh -- raw data is fine, but no fresh team_computed snapshot was produced: ${err}`);
+    if (wantsRatings && !computeOk) {
       process.exitCode = 1;
+      await supabase.from("refresh_runs").update({ notes: "RATINGS STALE: compute-ratings did not produce player_computed for this run (failed or refused by the sanity gate); the previous computed ratings stay live. See the workflow log." }).eq("id", refreshRunId);
     }
+    // Runs a script that depends on fresh computed ratings; skipped (loudly) when computeOk is false.
+    function runDependentStep(label: string, script: string, consequence: string) {
+      if (!computeOk) {
+        console.warn(`Skipping ${label}: run ${refreshRunId} has no fresh player_computed (compute-ratings failed or was refused), and ${script} reads computed ratings -- running it on stale ones would train/store the wrong thing.`);
+        return;
+      }
+      console.log(`${label}...`);
+      try {
+        execFileSync("npx", ["tsx", `scripts/${script}`], { stdio: "inherit", shell: true });
+      } catch (err) {
+        console.error(`${script} failed after a successful refresh -- raw data is fine, but ${consequence}: ${err}`);
+        process.exitCode = 1;
+      }
+    }
+    runDependentStep("Computing team ratings for this run", "compute-team-ratings.ts", "no fresh team_computed snapshot was produced");
 
-    // Role-calibrated fielding weight (2026-08-31) -- reads the
-    // player_computed/rating snapshot this run JUST wrote, so its output
-    // (fielding_role_weights) is naturally one refresh behind: this run's
-    // numbers get picked up by compute-ratings.ts on the NEXT refresh, not
-    // this one. Same lag already accepted for contracts vs. ratings.
-    console.log("Computing role-calibrated fielding weights for this run...");
-    try {
-      execFileSync("npx", ["tsx", "scripts/compute-fielding-weights.ts"], { stdio: "inherit", shell: true });
-    } catch (err) {
-      console.error(`compute-fielding-weights.ts failed after a successful refresh -- raw data is fine, but fielding_role_weights wasn't refreshed this run: ${err}`);
-      process.exitCode = 1;
-    }
+    // The role-calibrated fielding-weight step (compute-fielding-weights.ts) was REMOVED from the pipeline
+    // 2026-10-06: that mechanism is retired (HANDOFF.md) and compute-ratings.ts no longer reads its output.
+    // Leaving it wired in is exactly how it reactivated itself by accident (pooled R-squared 0.021 vs a 0.020
+    // gate) and corrupted every hitter rating -- see the 2026-10-06 incident entry.
 
     // Ballpark factors (2026-09-01) -- StatsPlus only publishes CURRENT
     // factors (confirmed: no year selector, no per-season history anywhere
@@ -407,54 +432,18 @@ async function main() {
     // own prior call that it shouldn't set a weight); pitching's FIP-
     // target stays diagnostic-only too (WAR/100 IP fits better in both
     // roles with real data -- Rees's call, 2026-09-15).
-    console.log("Computing hitting weight-tuning regression for this run...");
-    try {
-      execFileSync("npx", ["tsx", "scripts/compute-hitting-weights.ts"], { stdio: "inherit", shell: true });
-    } catch (err) {
-      console.error(`compute-hitting-weights.ts failed after a successful refresh -- raw data is fine, but this run's hitting regression wasn't saved: ${err}`);
-      process.exitCode = 1;
-    }
-    console.log("Computing baserunning weight-tuning regression for this run...");
-    try {
-      execFileSync("npx", ["tsx", "scripts/compute-baserunning-weights.ts"], { stdio: "inherit", shell: true });
-    } catch (err) {
-      console.error(`compute-baserunning-weights.ts failed after a successful refresh -- raw data is fine, but this run's baserunning regression wasn't saved: ${err}`);
-      process.exitCode = 1;
-    }
-    console.log("Computing pitching weight-tuning regression for this run...");
-    try {
-      execFileSync("npx", ["tsx", "scripts/compute-pitching-weights.ts"], { stdio: "inherit", shell: true });
-    } catch (err) {
-      console.error(`compute-pitching-weights.ts failed after a successful refresh -- raw data is fine, but this run's pitching regression wasn't saved: ${err}`);
-      process.exitCode = 1;
-    }
-    console.log("Computing Batting/Fielding/Baserunning blend weight-tuning regression for this run...");
-    try {
-      execFileSync("npx", ["tsx", "scripts/compute-overall-blend-weights.ts"], { stdio: "inherit", shell: true });
-    } catch (err) {
-      console.error(`compute-overall-blend-weights.ts failed after a successful refresh -- raw data is fine, but this run's overall-blend regression wasn't saved: ${err}`);
-      process.exitCode = 1;
-    }
-    console.log("Computing Fielding-vs-defensive-innings reference regression for this run...");
-    try {
-      execFileSync("npx", ["tsx", "scripts/compute-fielding-defensive-weights.ts"], { stdio: "inherit", shell: true });
-    } catch (err) {
-      console.error(`compute-fielding-defensive-weights.ts failed after a successful refresh -- raw data is fine, but this run's fielding-defensive regression wasn't saved: ${err}`);
-      process.exitCode = 1;
-    }
+    runDependentStep("Computing hitting weight-tuning regression for this run", "compute-hitting-weights.ts", "this run's hitting regression wasn't saved");
+    runDependentStep("Computing baserunning weight-tuning regression for this run", "compute-baserunning-weights.ts", "this run's baserunning regression wasn't saved");
+    runDependentStep("Computing pitching weight-tuning regression for this run", "compute-pitching-weights.ts", "this run's pitching regression wasn't saved");
+    runDependentStep("Computing Batting/Fielding/Baserunning blend weight-tuning regression for this run", "compute-overall-blend-weights.ts", "this run's overall-blend regression wasn't saved");
+    runDependentStep("Computing Fielding-vs-defensive-innings reference regression for this run", "compute-fielding-defensive-weights.ts", "this run's fielding-defensive regression wasn't saved");
 
     // Trade-value engine, market-rate piece (2026-08-31) -- accumulates any
     // newly-signed clean free-agent contracts into market_rate_training_
     // contracts. Cheap and append-only (a no-op for a contract already on
     // file), so it's safe to run every refresh rather than on its own
     // separate cadence.
-    console.log("Scanning for new clean market-rate contracts...");
-    try {
-      execFileSync("npx", ["tsx", "scripts/scan-market-contracts.ts"], { stdio: "inherit", shell: true });
-    } catch (err) {
-      console.error(`scan-market-contracts.ts failed after a successful refresh -- raw data is fine, but this run's contracts weren't scanned into the training pool: ${err}`);
-      process.exitCode = 1;
-    }
+    runDependentStep("Scanning for new clean market-rate contracts", "scan-market-contracts.ts", "this run's contracts weren't scanned into the training pool (it stores each contract's Overall, so it must see fresh ratings)");
 
     // Trade block + trade history (2026-09-04) -- previously manual-only, so
     // both had gone stale (trade block hadn't been re-scraped since it was

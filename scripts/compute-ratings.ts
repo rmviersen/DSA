@@ -3,6 +3,7 @@ import { makeSupabaseClient } from "../lib/supabase-client.js";
 import { computeRatings, type RatingsInput, type WeightSet, type HandednessSplits } from "../lib/rating-engine.js";
 import { effectiveLevel } from "../lib/display-helpers.js";
 import { getLeagueId, leagueSlugFromArgv } from "../lib/league.js";
+import { checkRatingDistribution, acceptShiftOverride, type RatingDistribution, type PreviousDistribution } from "../lib/rating-sanity.js";
 
 const PAGE_SIZE = 1000;
 
@@ -71,28 +72,18 @@ async function loadSharedContext(supabase: ReturnType<typeof makeSupabaseClient>
   const weights: WeightSet = weightRow as WeightSet;
   console.log(`Using weight set #${weights.id}: "${(weightRow as { label: string }).label}"`);
 
-  // Role-calibrated fielding weight (2026-08-31) -- fielding_role_weights is
-  // computed separately by scripts/compute-fielding-weights.ts (its own
-  // refresh_run_id, one run behind this one, same lag already accepted
-  // elsewhere in this pipeline e.g. contracts vs. ratings). Missing
-  // entirely (table never populated yet) or missing a specific role both
-  // fall back to a multiplier of 1 inside computeRatings -- today's flat
-  // w.fielding behavior, unchanged. Retired as of 2026-09-02 (see
-  // HANDOFF.md) -- every role reads back 1.0 regardless, kept wired in
-  // rather than ripped out since it's a harmless no-op.
-  console.log("Loading role-calibrated fielding weights (if any exist yet)...");
-  const { data: fieldingWeightRows } = await supabase
-    .from("fielding_role_weights").select("refresh_run_id, role, relative_multiplier").eq("dsa_league_id", leagueId).order("refresh_run_id", { ascending: false });
+  // Role-calibrated fielding multipliers are RETIRED (HANDOFF.md: "Phase 1 (role-calibrated fielding weight)
+  // is retired, not just dormant" -- within-role fielding variance is structurally too small for a role
+  // regression to find anything, and that does not get better with more data). This block used to read
+  // fielding_role_weights and was only a no-op because an R-squared gate happened to stay under 0.02.
+  // On 2026-10-06 a full season pushed the pooled R-squared to 0.021, the gate opened, every role's
+  // multiplier jumped to x0.67-2.4, raw hitter Overall inflated ~16-20 points for INF/COF/C/SS/CF and
+  // fell for 1B/DH, the MLB hitter mean went 51 -> 65.5, and every hitter rating was corrupted
+  // league-wide (Jeremy Porten, one of the best bats in the game, read 44.1). So the engine now ignores
+  // that table entirely: every role is a flat 1.0 BY CONSTRUCTION, not by a threshold that can be crossed.
+  // Do not re-enable this without re-reading the 2026-10-06 incident entry in HANDOFF.md.
+  console.log("Role fielding multipliers are retired -- every role uses the flat w.fielding baseline.");
   const fieldingWeights: Record<string, number> = {};
-  if (fieldingWeightRows && fieldingWeightRows.length > 0) {
-    const latestFieldingRunId = (fieldingWeightRows[0] as { refresh_run_id: number }).refresh_run_id;
-    for (const row of fieldingWeightRows as { refresh_run_id: number; role: string; relative_multiplier: number }[]) {
-      if (row.refresh_run_id === latestFieldingRunId) fieldingWeights[row.role] = row.relative_multiplier;
-    }
-    console.log(`  Using fielding weights from refresh_run_id ${latestFieldingRunId}: ${JSON.stringify(fieldingWeights)}`);
-  } else {
-    console.log("  None found yet -- every role uses the flat w.fielding baseline this run.");
-  }
 
   // --- Player-comp career workload, 2026-08-31 (Rees's spec) ----------
   // Career MLB AB/IP for EVERY player who's ever appeared at level_id=1,
@@ -729,6 +720,44 @@ async function computeRatingsForRun(supabase: ReturnType<typeof makeSupabaseClie
   console.log(`Calibration anchor -- Hitters: mean=${hitterStats.mean.toFixed(3)} sd=${hitterStats.sd.toFixed(3)} (n=${referencePool.filter((c) => c.ph === "H").length}); ` +
     `Pitchers: mean=${pitcherStats.mean.toFixed(3)} sd=${pitcherStats.sd.toFixed(3)} (n=${referencePool.filter((c) => c.ph === "P").length})`);
 
+  // --- Rating sanity gate (2026-10-06, see lib/rating-sanity.ts) ----------------------------------------
+  // Nothing below this point has written anything yet. If this run's hitter/pitcher distribution moved
+  // implausibly versus the previous run (history: mean never moved more than ~0.3 between runs; the
+  // 2026-10-06 corruption moved it +14.4 and tripled the SD), REFUSE to write it: the previous good
+  // player_computed stays the latest, the pipeline skips everything that depends on fresh ratings, and the
+  // freshness badge flips to delayed. RATINGS_ACCEPT_SHIFT=1 / --accept-shift lets a deliberate change through.
+  {
+    const roleAcc = new Map<string, { sum: number; n: number }>();
+    for (const c of referencePool) {
+      if (c.ph !== "H" || !c.role) continue;
+      const cell = roleAcc.get(c.role) ?? { sum: 0, n: 0 };
+      cell.sum += c.overall;
+      cell.n += 1;
+      roleAcc.set(c.role, cell);
+    }
+    const current: RatingDistribution = {
+      hitterMean: hitterStats.mean, hitterSd: hitterStats.sd, pitcherMean: pitcherStats.mean, pitcherSd: pitcherStats.sd,
+      hitterRoleMeans: Object.fromEntries([...roleAcc].map(([role, v]) => [role, { mean: v.sum / v.n, n: v.n }])),
+    };
+    const { data: prevRow, error: prevErr } = await supabase
+      .from("refresh_runs").select("id,hitter_overall_mean,hitter_overall_sd,pitcher_overall_mean,pitcher_overall_sd")
+      .eq("dsa_league_id", leagueId).lt("id", refreshRunId).not("hitter_overall_mean", "is", null)
+      .order("id", { ascending: false }).limit(1).maybeSingle();
+    if (prevErr) throw new Error(`sanity gate: could not read the previous run's distribution: ${prevErr.message}`);
+    const pr = prevRow as { id: number; hitter_overall_mean: number; hitter_overall_sd: number; pitcher_overall_mean: number; pitcher_overall_sd: number } | null;
+    const previous: PreviousDistribution | null = pr
+      ? { runId: pr.id, hitterMean: Number(pr.hitter_overall_mean), hitterSd: Number(pr.hitter_overall_sd), pitcherMean: Number(pr.pitcher_overall_mean), pitcherSd: Number(pr.pitcher_overall_sd) }
+      : null;
+    const problems = checkRatingDistribution(current, previous);
+    if (problems.length > 0) {
+      const msg = `Rating sanity gate FAILED for refresh_run_id ${refreshRunId}:\n  - ${problems.join("\n  - ")}`;
+      if (acceptShiftOverride()) console.warn(`${msg}\n  (continuing: RATINGS_ACCEPT_SHIFT / --accept-shift is set)`);
+      else throw new Error(`${msg}\n  Nothing was written; the previous player_computed stays live. If this shift is intentional, re-run with RATINGS_ACCEPT_SHIFT=1.`);
+    } else {
+      console.log(`Rating sanity gate: passed (vs run ${previous?.runId ?? "n/a"}; role means ${Object.entries(current.hitterRoleMeans).map(([r, v]) => `${r}=${v.mean.toFixed(1)}`).join(" ")}).`);
+    }
+  }
+
   // Level anchors for the below-mean side (2026-09-04) -- this run's own
   // real average raw Overall, by type, at each canonical level 2 (AAA)
   // through 8 (International). Level 1 (MLB) is NOT computed here -- it's
@@ -1114,8 +1143,15 @@ async function main() {
   // unchanged: only the latest succeeded+ratings run.
   const backfillAll = process.argv.includes("--all");
 
+  // --run=125,126 (2026-10-06): recompute exactly those runs (upsert), e.g. to repair runs written under a bad
+  // weight state, without --all's rewrite of the whole history.
+  const runArg = process.argv.find((a) => a.startsWith("--run="));
   let refreshRunIds: number[];
-  if (backfillAll) {
+  if (runArg) {
+    refreshRunIds = runArg.slice("--run=".length).split(",").map((x) => Number(x.trim())).filter((x) => Number.isInteger(x) && x > 0).sort((a, b) => a - b);
+    if (refreshRunIds.length === 0) throw new Error("--run= needs at least one refresh run id (e.g. --run=125,126)");
+    console.log(`--run: recomputing refresh runs ${refreshRunIds.join(", ")}`);
+  } else if (backfillAll) {
     console.log("--all: finding every succeeded refresh run with ratings...");
     const { data: runRows, error } = await supabase
       .from("refresh_runs").select("id").eq("dsa_league_id", leagueId).eq("status", "succeeded").eq("ratings_included", true).order("id", { ascending: true });

@@ -105,10 +105,10 @@ export async function getLatestGameDate(leagueId: number): Promise<string | null
 // failed (its game date is past the last success), or nothing has succeeded in 7 days.
 export async function getDataFreshness(leagueId: number): Promise<DataFreshness> {
   const { data, error } = await supabase
-    .from("refresh_runs").select("id,status,started_at,completed_at,game_date")
+    .from("refresh_runs").select("id,status,started_at,completed_at,game_date,ratings_included")
     .eq("dsa_league_id", leagueId).order("id", { ascending: false }).limit(15);
   if (error) throw error;
-  const runs = (data ?? []) as { id: number; status: string; started_at: string; completed_at: string | null; game_date: string | null }[];
+  const runs = (data ?? []) as { id: number; status: string; started_at: string; completed_at: string | null; game_date: string | null; ratings_included: boolean | null }[];
   const lastOk = runs.find((r) => r.status === "succeeded" && r.game_date !== null) ?? null;
   const latest = runs[0] ?? null;
   const now = Date.now();
@@ -118,6 +118,21 @@ export async function getDataFreshness(leagueId: number): Promise<DataFreshness>
     else if (latest.status === "failed" && latest.game_date !== null && latest.game_date > (lastOk.game_date as string)) state = "delayed";
   }
   if (lastOk?.completed_at && now - new Date(lastOk.completed_at).getTime() > 7 * 24 * 3600 * 1000) state = "delayed";
+  // Computed-ratings freshness (2026-10-06). "succeeded" only means the RAW pull landed; the ratings/rankings
+  // the site actually shows come from player_computed, which a later step produces (and which can fail, or be
+  // refused by compute-ratings' sanity gate). From 2026-09-24 to 2026-10-06 every refresh "succeeded" while
+  // player_computed stayed stuck on run 67 -- and this badge still said Current. So if the newest
+  // ratings-bearing succeeded run has no computed ratings of its own after a 45-minute grace period (the
+  // compute step runs right after the run is marked succeeded), the data is NOT current.
+  const lastOkRatings = runs.find((r) => r.status === "succeeded" && r.ratings_included === true) ?? null;
+  if (lastOkRatings) {
+    const { data: compRow, error: compErr } = await supabase
+      .from("player_computed").select("refresh_run_id").eq("dsa_league_id", leagueId).order("refresh_run_id", { ascending: false }).limit(1).maybeSingle();
+    if (compErr) throw compErr;
+    const computedRunId = (compRow as { refresh_run_id: number } | null)?.refresh_run_id ?? 0;
+    const finishedAt = new Date(lastOkRatings.completed_at ?? lastOkRatings.started_at).getTime();
+    if (computedRunId < lastOkRatings.id && now - finishedAt > 45 * 60 * 1000) state = "delayed";
+  }
   return { gameDate: lastOk?.game_date ?? null, completedAt: lastOk?.completed_at ?? null, state };
 }
 

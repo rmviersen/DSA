@@ -8,6 +8,7 @@
     "check-new-sim": "tsx scripts/check-new-sim.ts",
     "refresh:public-only": "tsx scripts/refresh.ts --skip-ratings",
     "compute-ratings": "tsx scripts/compute-ratings.ts",
+    "verify-ratings": "tsx scripts/verify-ratings.ts",
     "compute-fielding-weights": "tsx scripts/compute-fielding-weights.ts",
     "compute-hitting-weights": "tsx scripts/compute-hitting-weights.ts",
     "compute-baserunning-weights": "tsx scripts/compute-baserunning-weights.ts",

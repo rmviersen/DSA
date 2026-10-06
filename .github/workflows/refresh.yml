@@ -61,7 +61,7 @@ jobs:
       #
       # This one step is the whole pipeline, not just the raw pull --
       # refresh.ts's own downstream chain already runs compute-ratings.ts,
-      # compute-team-ratings.ts, compute-fielding-weights.ts, every weight-
+      # compute-team-ratings.ts, every weight-
       # tuning regression, scan-market-contracts.ts, and the trade-block/
       # -history scrapes internally (see its own file for the full list).
       # Two more explicit "Compute player ratings"/"Compute team ratings"
@@ -80,3 +80,16 @@ jobs:
           STATSPLUS_BASE_URL: https://atl-02.statsplus.net/thebigleague/api
           STATSPLUS_API_TOKEN: ${{ secrets.STATSPLUS_API_TOKEN }}
         run: npm run refresh
+
+      # Independent ratings-health audit (2026-10-06, after the role-multiplier incident -- see HANDOFF.md).
+      # Runs on EVERY tick (if: always(), so it still runs when the refresh step above failed) and re-reads the
+      # database: are the newest run's computed ratings actually there, did the hitter/pitcher distribution jump,
+      # does every weight group still sum to 1, are failed runs piling up. Any FAIL turns this workflow run red
+      # (GitHub emails the repo owner on a failed scheduled run), so stale or implausible ratings can no longer
+      # sit unnoticed behind a green-looking refresh for days. Cheap (a few reads), so it is not gated on new data.
+      - name: Verify ratings health
+        if: always()
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+        run: npm run verify-ratings
