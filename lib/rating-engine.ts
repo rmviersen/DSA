@@ -125,6 +125,32 @@ export interface WeightSet {
   stuff_gate_mid_threshold: number; stuff_gate_mid_multiplier: number;
   stuff_gate_low_threshold: number; stuff_gate_low_multiplier: number;
   developed_age_threshold: number;
+  // Durability discount for Prospect Potential (2026-10-07, Rees chose "option B" after the hitter-vs-pitcher
+  // investigation in HANDOFF.md). A Fragile/Wrecked player loses `loss_share * max(0, potential - replacement)` raw
+  // points instead of the old flat 5, where loss_share is the measured fraction of playing time he actually loses
+  // (quality-adjusted, per type: h = hitters, sp = starters, rp = relievers) and replacement is the raw score at which
+  // a player is worth zero WAR. ANY of these nine being null (every historical weight-set row) means "legacy flat -5",
+  // so old rows reproduce their old ratings exactly.
+  durability_fragile_loss_h?: number | null; durability_fragile_loss_sp?: number | null; durability_fragile_loss_rp?: number | null;
+  durability_wrecked_loss_h?: number | null; durability_wrecked_loss_sp?: number | null; durability_wrecked_loss_rp?: number | null;
+  durability_replacement_h?: number | null; durability_replacement_sp?: number | null; durability_replacement_rp?: number | null;
+}
+
+/**
+ * Raw-score discount for an injury-prone player (Prone = Fragile or Wrecked), subtracted from Potential inside
+ * Prospect Potential. Pure function so scripts and tests can call it directly.
+ */
+export function durabilityDiscount(
+  prone: string | null, ph: "H" | "P", role: string, potentialRaw: number, w: WeightSet
+): number {
+  const tier = prone === "Wrecked" ? "wrecked" : prone === "Fragile" ? "fragile" : null;
+  if (tier === null) return 0;
+  const group = ph === "H" ? "h" : role === "SP" ? "sp" : "rp";
+  const wv = w as unknown as Record<string, number | null | undefined>;
+  const loss = wv[`durability_${tier}_loss_${group}`];
+  const replacement = wv[`durability_replacement_${group}`];
+  if (loss == null || replacement == null) return 5; // legacy flat discount (weight sets that predate option B)
+  return Number(loss) * Math.max(0, potentialRaw - Number(replacement));
 }
 
 // Real league-wide handedness exposure, computed fresh every refresh from
@@ -743,8 +769,10 @@ export function computeRatings(
   const potential = Math.max(battingP * w.batting + fielding * fieldingWeight + baserunning * w.baserunning, pitchingP);
   const ph: "H" | "P" = batting * w.batting + fielding * fieldingWeight + baserunning * w.baserunning > pitching ? "H" : "P";
 
-  const isBustRisk = r.prone === "Fragile" || r.prone === "Wrecked";
-  const riskAdjusted = isBustRisk ? potential - 5 : potential;
+  // Durability discount (reworked 2026-10-07, option B): proportional to the talent at stake and different for
+  // hitters / starters / relievers and for Fragile vs Wrecked -- see durabilityDiscount() and WeightSet above.
+  // Used to be a flat 5 for every Fragile/Wrecked player; weight sets without the new columns still do exactly that.
+  const riskAdjusted = potential - durabilityDiscount(r.prone, ph, role, potential, w);
   const prospectPotential = riskAdjusted + overall * 0.25 - 12.5;
 
   // --- TBL Pos: which defensive positions this player projects to handle.

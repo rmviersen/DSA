@@ -29,8 +29,13 @@ export async function applyRatingWeightUpdate(
   const { data: current, error: curErr } = await supabase.from("rating_weights").select("*").eq("dsa_league_id", leagueId).eq("is_active", true).maybeSingle();
   if (curErr) throw new Error(`applyRatingWeightUpdate: could not read the active weight set: ${curErr.message}`);
   if (current) {
+    const currentRow = current as Record<string, unknown>;
     const tooBig = Object.entries(updates)
-      .map(([key, next]) => ({ key, next, prev: Number((current as Record<string, unknown>)[key]) }))
+      // A column that is currently unset (null) has no previous value to compare against -- first-time population of a
+      // new weight (e.g. the durability-discount columns, 2026-10-07) is not a "step". Number(null) would be 0 and make
+      // the very first write look like a giant jump.
+      .filter(([key]) => currentRow[key] !== null && currentRow[key] !== undefined)
+      .map(([key, next]) => ({ key, next, prev: Number(currentRow[key]) }))
       .filter((u) => Number.isFinite(u.prev) && Math.abs(u.next - u.prev) > MAX_AUTO_WEIGHT_STEP);
     if (tooBig.length > 0) {
       throw new Error(

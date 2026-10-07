@@ -3,6 +3,7 @@ import { makeSupabaseClient } from "../lib/supabase-client.js";
 import { computeRatings, type RatingsInput, type WeightSet, type HandednessSplits } from "../lib/rating-engine.js";
 import { effectiveLevel } from "../lib/display-helpers.js";
 import { getLeagueId, leagueSlugFromArgv } from "../lib/league.js";
+import { writeFileSync } from "node:fs";
 import { checkRatingDistribution, acceptShiftOverride, type RatingDistribution, type PreviousDistribution } from "../lib/rating-sanity.js";
 
 const PAGE_SIZE = 1000;
@@ -1131,8 +1132,51 @@ async function computeRatingsForRun(supabase: ReturnType<typeof makeSupabaseClie
   byOverallDesc.slice(0, 5).forEach((c, i) => console.log(`  ${i + 1}. player ${c.player_id} (${c.ph}) — Overall ${calibratedByPlayer.get(c.player_id)!.overall.toFixed(2)} (raw ${c.overall.toFixed(2)})`));
 }
 
+// --dry-run (2026-10-07): run the WHOLE computation against the real data but write NOTHING. Every insert / upsert /
+// update / delete / rpc is swallowed (and the payloads captured), reads pass straight through. With
+// --dry-run-out=<file.json> the rows that would have gone to player_computed are saved for comparison. Built to verify a
+// rating-engine or weight change on real data without disturbing a published run (prospect bios, farm write-ups and the
+// 'stale since' markers are all keyed to the run's ranks), and to test alternative weightings later.
+type Captured = { table: string; op: string; payload: unknown };
+function inertBuilder(): unknown {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const p: any = new Proxy(function () {}, {
+    get: (_t, prop) => (prop === "then" ? (resolve: (v: unknown) => void) => resolve({ data: null, error: null, count: null }) : () => p),
+    apply: () => p,
+  });
+  return p;
+}
+function dryRunClient(real: ReturnType<typeof makeSupabaseClient>, captured: Captured[]): ReturnType<typeof makeSupabaseClient> {
+  return new Proxy(real, {
+    get(target, prop, receiver) {
+      if (prop === "rpc") return (fn: string, args: unknown) => { captured.push({ table: `rpc:${fn}`, op: "rpc", payload: args }); return inertBuilder(); };
+      if (prop === "from") {
+        return (table: string) => {
+          const builder = target.from(table);
+          return new Proxy(builder, {
+            get(bt, bp, br) {
+              if (bp === "insert" || bp === "upsert" || bp === "update" || bp === "delete") {
+                return (payload?: unknown) => { captured.push({ table, op: String(bp), payload }); return inertBuilder(); };
+              }
+              const v = Reflect.get(bt, bp, br);
+              return typeof v === "function" ? v.bind(bt) : v;
+            },
+          });
+        };
+      }
+      const v = Reflect.get(target, prop, receiver);
+      return typeof v === "function" ? v.bind(target) : v;
+    },
+  }) as ReturnType<typeof makeSupabaseClient>;
+}
+
 async function main() {
-  const supabase = makeSupabaseClient();
+  const dryRun = process.argv.includes("--dry-run");
+  const dryOutPath = process.argv.find((a) => a.startsWith("--dry-run-out="))?.slice("--dry-run-out=".length);
+  const captured: Captured[] = [];
+  const realClient = makeSupabaseClient();
+  const supabase = dryRun ? dryRunClient(realClient, captured) : realClient;
+  if (dryRun) console.log("*** DRY RUN: computing everything, writing NOTHING to the database ***");
   const leagueId = await getLeagueId(supabase, leagueSlugFromArgv());
   const shared = await loadSharedContext(supabase, leagueId);
 
@@ -1182,6 +1226,14 @@ async function main() {
   }
   if (backfillAll) {
     console.log(`\nBackfill complete: ${refreshRunIds.length - failures}/${refreshRunIds.length} runs succeeded.`);
+  }
+  if (dryRun) {
+    console.log(`\nDRY RUN complete: ${captured.length} write call(s) were swallowed (${[...new Set(captured.map((c) => c.table + ":" + c.op))].join(", ")}). Nothing was written.`);
+    if (dryOutPath) {
+      const rows = captured.filter((c) => c.table === "player_computed" && c.op === "upsert").flatMap((c) => c.payload as unknown[]);
+      writeFileSync(dryOutPath, JSON.stringify(rows));
+      console.log(`Saved the ${rows.length} player_computed row(s) it would have written to ${dryOutPath}.`);
+    }
   }
   if (failures > 0) process.exitCode = 1;
 }

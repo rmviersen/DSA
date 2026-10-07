@@ -855,6 +855,10 @@ export interface ActiveWeightSet {
   stuff_gate_mid_threshold: number; stuff_gate_mid_multiplier: number;
   stuff_gate_low_threshold: number; stuff_gate_low_multiplier: number;
   developed_age_threshold: number;
+  // Durability discount for Prospect Potential (2026-10-07, option B). Null on weight sets that predate it (= legacy flat 5).
+  durability_fragile_loss_h: number | null; durability_fragile_loss_sp: number | null; durability_fragile_loss_rp: number | null;
+  durability_wrecked_loss_h: number | null; durability_wrecked_loss_sp: number | null; durability_wrecked_loss_rp: number | null;
+  durability_replacement_h: number | null; durability_replacement_sp: number | null; durability_replacement_rp: number | null;
   notes: string | null;
 }
 

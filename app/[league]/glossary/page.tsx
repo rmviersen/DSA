@@ -564,14 +564,32 @@ export default async function GlossaryPage({ params }: { params: Promise<{ leagu
           high-schooler with the same grades but years of developmental risk ahead, with no age/level special-casing.
         </p>
         <code style={formulaStyle}>
-          RiskAdjusted = Potential − 5 if Prone is &quot;Fragile&quot; or &quot;Wrecked&quot;, else Potential{"\n"}
+          Discount = LossShare × max(0, Potential − Replacement)   if Prone is &quot;Fragile&quot; or &quot;Wrecked&quot;, else 0{"\n"}
+          RiskAdjusted = Potential − Discount{"\n"}
           Prospect Potential = RiskAdjusted + Overall×0.25 − 12.5
         </code>
         <p style={noteStyle}>
-          Uses the same calibrated Overall/Potential as above (calibration is applied to Prospect Potential too, via
-          the same per-type constants). Known gap: the original bust-risk discount also checked an &quot;Extreme/Very
-          High&quot; Risk field alongside Prone — StatsPlus&apos;s feed only exposes Prone, so the discount applies
-          from Prone alone.
+          The durability discount is proportional to the talent at stake and differs for hitters, starters and relievers
+          and for Fragile vs. Wrecked. LossShare is the measured share of playing time a Fragile or Wrecked player actually
+          loses (quality- and level-adjusted, from our own league data); Replacement is the raw score where a player is
+          worth zero WAR. Potential here is the raw formula score, before the per-type calibration that is applied to
+          the final Prospect Potential.{" "}
+          {weights && weights.durability_fragile_loss_h != null && weights.durability_replacement_h != null ? (
+            <>
+              Live values — Fragile loses {Math.round(Number(weights.durability_fragile_loss_h) * 100)}% (hitters) /{" "}
+              {Math.round(Number(weights.durability_fragile_loss_sp) * 100)}% (starters) /{" "}
+              {Math.round(Number(weights.durability_fragile_loss_rp) * 100)}% (relievers); Wrecked loses{" "}
+              {Math.round(Number(weights.durability_wrecked_loss_h) * 100)}% /{" "}
+              {Math.round(Number(weights.durability_wrecked_loss_sp) * 100)}% /{" "}
+              {Math.round(Number(weights.durability_wrecked_loss_rp) * 100)}%; replacement level{" "}
+              {Number(weights.durability_replacement_h).toFixed(1)} / {Number(weights.durability_replacement_sp).toFixed(1)} /{" "}
+              {Number(weights.durability_replacement_rp).toFixed(1)}.
+            </>
+          ) : (
+            <>This weight set predates the proportional discount, so it uses the original flat 5-point discount.</>
+          )}{" "}
+          Known gap: the original bust-risk discount also checked an &quot;Extreme/Very High&quot; Risk field alongside
+          Prone — StatsPlus&apos;s feed only exposes Prone, so the discount applies from Prone alone.
         </p>
       </section>
 
