@@ -3,6 +3,7 @@ import type { PlayerRow } from "./queries";
 import { makeSupabaseClient } from "./supabase-client";
 import { effectiveLevel, levelLabel } from "./display-helpers";
 import { getLatestMarketRateCurves, getLatestRoleMultipliers } from "./market-rate-query";
+import { marketTypeForRole, marketRateAav } from "./market-rate-math";
 import { playerTypeForRole } from "./contract-classification";
 import { fetchAll, ROLE_HEALTH_ROWS, topNAvg } from "./org-minors-query";
 
@@ -29,6 +30,9 @@ export interface FreeAgentsResult {
   // display cap" from "genuinely has no ratings yet this refresh" instead of
   // conflating the two into one misleading gap.
   totalWithRatings: number;
+  // Players the database still flags as free agents but who are absent from the newest game-export import (which is
+  // newer than the last data refresh) -- i.e. already signed. Hidden from the table; surfaced as a count.
+  hiddenAsSigned: number;
 }
 
 // "Real, actionable free agent" (established 2026-08-31 -- see HANDOFF.md's
@@ -77,7 +81,32 @@ export async function getFreeAgents(leagueId: number, myOrgId: number): Promise<
     if (data.length < PAGE_SIZE) break;
     from += PAGE_SIZE;
   }
-  if (players.length === 0) return { rows: [], totalRealFreeAgents: 0, totalWithRatings: 0 };
+  // Already-signed filter (2026-10-13, Rees: Motoshi Tanabe and Jonathan Mendoza were listed but had already signed).
+  // players.free_agent comes from StatsPlus and only updates on a data refresh, so a player signed in the game after the
+  // last refresh still reads as a free agent. The demand import is a fresh export of the game's own "all free agents"
+  // list (every free agent is a row, demand blank if he has no ask yet) -- when that import is NEWER than the last
+  // successful refresh, anyone the database calls a free agent who is missing from it has signed since. When the import
+  // is older than the refresh, the database is the fresher source and nothing is filtered.
+  let hiddenAsSigned = 0;
+  {
+    const [{ data: impRow }, { data: runRow }] = await Promise.all([
+      supabase.from("free_agent_demand_imports").select("id,imported_at").eq("dsa_league_id", leagueId).order("id", { ascending: false }).limit(1).maybeSingle(),
+      supabase.from("refresh_runs").select("completed_at").eq("dsa_league_id", leagueId).eq("status", "succeeded").order("id", { ascending: false }).limit(1).maybeSingle(),
+    ]);
+    const imp = impRow as { id: number; imported_at: string } | null;
+    const run = runRow as { completed_at: string | null } | null;
+    if (imp && run?.completed_at && new Date(imp.imported_at).getTime() > new Date(run.completed_at).getTime()) {
+      const inImport = await fetchByIdsChunked<{ player_id: number }>(players.map((p) => p.id), (chunk) =>
+        supabase.from("free_agent_demands").select("player_id").eq("import_id", imp.id).in("player_id", chunk) as never
+      );
+      const stillFree = new Set(inImport.map((r) => r.player_id));
+      const kept = players.filter((p) => stillFree.has(p.id));
+      hiddenAsSigned = players.length - kept.length;
+      players.length = 0;
+      players.push(...kept);
+    }
+  }
+  if (players.length === 0) return { rows: [], totalRealFreeAgents: 0, totalWithRatings: 0, hiddenAsSigned };
 
   const lastTeamIdByPlayer = new Map(players.map((p) => [p.id, p.last_team_id]));
   const refreshRunId = await latestRefreshRunId(leagueId);
@@ -302,10 +331,11 @@ export async function getFreeAgents(leagueId: number, myOrgId: number): Promise<
   const multiplierByRole = new Map(roleMultipliers.map((m) => [m.role, m.finalMultiplier]));
   function fairValueAav(overall: number, role: string | null): number | null {
     if (role === null) return null;
-    const curve = curveByType.get(playerTypeForRole(role));
+    // Hitters / starting pitchers / relievers each have their own curve (2026-10-13); marketRateAav also caps the result
+    // at $50M and never extrapolates past the best Overall actually seen signing in that curve's sample.
+    const curve = curveByType.get(marketTypeForRole(role));
     if (!curve) return null;
-    const base = Math.exp(curve.intercept + curve.slope * overall);
-    return base * (multiplierByRole.get(role) ?? 1);
+    return marketRateAav(curve, overall, multiplierByRole.get(role) ?? 1);
   }
 
   // "Sign" (2026-09-06, Rees's ask): would signing this free agent, at the
@@ -439,5 +469,5 @@ export async function getFreeAgents(leagueId: number, myOrgId: number): Promise<
     };
   });
 
-  return { rows, totalRealFreeAgents: players.length, totalWithRatings };
+  return { rows, totalRealFreeAgents: players.length, totalWithRatings, hiddenAsSigned };
 }

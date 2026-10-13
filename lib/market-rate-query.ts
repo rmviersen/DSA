@@ -1,5 +1,6 @@
 import { makeSupabaseClient } from "./supabase-client";
 import { fitLine } from "./regression";
+import { marketTypeForRole, type MarketType } from "./market-rate-math";
 
 // Data layer for /admin/market-rates (2026-08-31) -- kept separate from
 // queries.ts on purpose, same reasoning as org-minors-query.ts/admin-
@@ -18,7 +19,9 @@ import { fitLine } from "./regression";
 // rating-validation-query.ts) can't reintroduce that exact crash.
 
 export interface MarketRateCurve {
-  playerType: "hitter" | "pitcher";
+  // "hitter" | "sp" | "rp" since 2026-10-13 (pitchers split). Curve rows from older fit runs may say "pitcher"; the app only
+  // reads the newest run, so those never reach here.
+  playerType: MarketType;
   intercept: number;
   slope: number;
   rSquared: number;
@@ -75,7 +78,7 @@ export async function getLatestMarketRateCurves(leagueId: number): Promise<Marke
       league_minimum_salary: number; refresh_run_id: number; computed_at: string;
     };
     return {
-      playerType: row.player_type as "hitter" | "pitcher",
+      playerType: row.player_type as MarketType,
       intercept: row.intercept, slope: row.slope, rSquared: row.r_squared, residualStdDev: row.residual_std_dev,
       sampleSize: row.sample_size, minOverallInSample: row.min_overall_in_sample, maxOverallInSample: row.max_overall_in_sample,
       leagueMinimumSalary: row.league_minimum_salary, refreshRunId: row.refresh_run_id, computedAt: row.computed_at,
@@ -166,7 +169,7 @@ export interface OffseasonCurveFit {
   sampleSize: number;
 }
 export interface OffseasonImpact {
-  playerType: "hitter" | "pitcher";
+  playerType: MarketType;
   // Fit against everything EXCEPT this offseason's new signings (season_year
   // < currentSeasonYear) -- null if too few contracts existed before this
   // offseason to fit a meaningful line (fitLine still runs, but n<10 isn't
@@ -227,7 +230,7 @@ export async function getOffseasonMarketImpact(leagueId: number): Promise<Offsea
 
   const clean = rows
     .filter((r) => currentOverallById.has(r.player_id))
-    .map((r) => ({ overall: currentOverallById.get(r.player_id)!, role: r.role, playerType: r.player_type, aav: r.aav, seasonYear: r.season_year }));
+    .map((r) => ({ overall: currentOverallById.get(r.player_id)!, role: r.role, playerType: marketTypeForRole(r.role), aav: r.aav, seasonYear: r.season_year }));
 
   const MIN_SAMPLE = 10; // same floor compute-market-rates.ts enforces before trusting a fit
   function fit(points: { overall: number; aav: number }[]): OffseasonCurveFit | null {
@@ -236,7 +239,7 @@ export async function getOffseasonMarketImpact(leagueId: number): Promise<Offsea
     return { intercept, slope, rSquared, sampleSize: points.length };
   }
 
-  const curves: OffseasonImpact[] = (["hitter", "pitcher"] as const)
+  const curves: OffseasonImpact[] = (["hitter", "sp", "rp"] as const)
     .map((playerType) => {
       const group = clean.filter((c) => c.playerType === playerType);
       const before = group.filter((c) => c.seasonYear < currentSeasonYear);

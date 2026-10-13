@@ -14,7 +14,7 @@ export default async function FreeAgencyPage({ params }: { params: Promise<{ lea
   const { league } = await params;
   const leagueId = await resolveLeagueId(league);
   const myOrgId = await resolveDefaultOrgId(leagueId);
-  const [{ rows, totalRealFreeAgents, totalWithRatings }, dataInfo] = await Promise.all([
+  const [{ rows, totalRealFreeAgents, totalWithRatings, hiddenAsSigned }, dataInfo] = await Promise.all([
     getFreeAgents(leagueId, myOrgId),
     getFreeAgencyDataInfo(leagueId),
   ]);
@@ -53,7 +53,7 @@ export default async function FreeAgencyPage({ params }: { params: Promise<{ lea
         <p style={{ color: "var(--color-text-muted, #888)", fontSize: "0.8125rem", marginTop: 6 }}>
           Demands as of in-game {dataInfo.demandGameDate ?? "an unknown date"} (imported {fmtDay(dataInfo.demandImportedAt)};{" "}
           {dataInfo.demandsWithAsk.toLocaleString()} players have an ask). Market rates: curves fit {fmtDay(dataInfo.curveComputedAt)} on{" "}
-          {dataInfo.hitterCurveN ?? "?"} hitter and {dataInfo.pitcherCurveN ?? "?"} pitcher signed contracts.
+          {dataInfo.hitterCurveN ?? "?"} hitter, {dataInfo.spCurveN ?? "?"} starting-pitcher and {dataInfo.rpCurveN ?? "?"} reliever signed contracts (separate curve each; fair values never exceed $50M).{hiddenAsSigned > 0 ? ` ${hiddenAsSigned.toLocaleString()} players the database still lists as free agents are hidden because they are missing from that newer game export (already signed).` : ""}
         </p>
       </header>
       <PlayerTable rows={rows} showTeam showProspectCols={false} showStatLevel showSign showValueVsDemand renderLimit={100} />

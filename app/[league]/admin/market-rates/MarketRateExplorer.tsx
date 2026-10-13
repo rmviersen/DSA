@@ -6,6 +6,7 @@ import {
   ResponsiveContainer, Line, ComposedChart,
 } from "recharts";
 import type { MarketRateCurve, RoleMultiplier, TrainingContractPoint, OffseasonImpactResult } from "../../../../lib/market-rate-query";
+import { marketTypeForRole, marketRateAav, MARKET_RATE_MAX_AAV, type MarketType } from "../../../../lib/market-rate-math";
 
 // Interactive tuning view for the market-rate curve (2026-08-31, Rees's
 // ask) -- a scatterplot of the accumulated training pool (Overall vs. AAV)
@@ -54,7 +55,15 @@ interface Props {
   offseasonImpact: OffseasonImpactResult;
 }
 
-type PlayerTypeFilter = "all" | "hitter" | "pitcher";
+// Three market curves since 2026-10-13 (pitchers split into SP and RP); contracts are bucketed by ROLE, not by the stored
+// hitter/pitcher player_type.
+type PlayerTypeFilter = "all" | MarketType;
+const CURVE_LABEL: Record<MarketType, string> = { hitter: "hitter", sp: "starting pitcher", rp: "reliever" };
+const CURVE_STROKE: Record<MarketType, { color: string; dash: string | undefined }> = {
+  hitter: { color: "var(--color-navy)", dash: undefined },
+  sp: { color: "var(--color-tan)", dash: "6 4" },
+  rp: { color: "#3f6b32", dash: "2 3" },
+};
 
 // Predicted AAV at a few representative Overall values (2026-09-07) -- makes
 // the before/after offseason-impact comparison concrete in real dollars,
@@ -62,7 +71,7 @@ type PlayerTypeFilter = "all" | "hitter" | "pitcher";
 const SAMPLE_OVERALLS = [45, 55, 65];
 
 function predictedAav(fit: { intercept: number; slope: number }, overall: number): number {
-  return Math.exp(fit.intercept + fit.slope * overall);
+  return Math.min(MARKET_RATE_MAX_AAV, Math.exp(fit.intercept + fit.slope * overall));
 }
 
 export default function MarketRateExplorer({ curves, roleMultipliers, contracts, offseasonImpact }: Props) {
@@ -84,7 +93,8 @@ export default function MarketRateExplorer({ curves, roleMultipliers, contracts,
   const activePoint = hoveredPoint ?? pinnedPoint;
 
   const hitterCurve = curves.find((c) => c.playerType === "hitter");
-  const pitcherCurve = curves.find((c) => c.playerType === "pitcher");
+  const spCurve = curves.find((c) => c.playerType === "sp");
+  const rpCurve = curves.find((c) => c.playerType === "rp");
 
   // Recent signings (2026-09-07, Rees's ask: "a view into recent contracts
   // signing on that page, now that there should be contracts flowing since
@@ -96,9 +106,10 @@ export default function MarketRateExplorer({ curves, roleMultipliers, contracts,
   const RECENT_SIGNINGS_LIMIT = 30;
   const multiplierByRole = useMemo(() => new Map(roleMultipliers.map((r) => [r.role, r.finalMultiplier])), [roleMultipliers]);
   function curveDrivenFairValue(c: TrainingContractPoint): number | null {
-    const curve = c.playerType === "hitter" ? hitterCurve : pitcherCurve;
+    const type = marketTypeForRole(c.role);
+    const curve = type === "hitter" ? hitterCurve : type === "sp" ? spCurve : rpCurve;
     if (!curve) return null;
-    return predictedAav(curve, c.overall) * (multiplierByRole.get(c.role) ?? 1);
+    return marketRateAav(curve, c.overall, multiplierByRole.get(c.role) ?? 1);
   }
   const recentSignings = useMemo(
     () => [...contracts].sort((a, b) => new Date(b.firstObservedAt).getTime() - new Date(a.firstObservedAt).getTime()).slice(0, RECENT_SIGNINGS_LIMIT),
@@ -115,7 +126,7 @@ export default function MarketRateExplorer({ curves, roleMultipliers, contracts,
 
   const filtered = useMemo(() => {
     return contracts.filter((c) => {
-      if (playerTypeFilter !== "all" && c.playerType !== playerTypeFilter) return false;
+      if (playerTypeFilter !== "all" && marketTypeForRole(c.role) !== playerTypeFilter) return false;
       if (!roleFilter.has(c.role)) return false;
       return true;
     });
@@ -123,22 +134,22 @@ export default function MarketRateExplorer({ curves, roleMultipliers, contracts,
 
   // Curve line points, one series per player type currently in view.
   const curveLines = useMemo(() => {
-    const lines: { type: "hitter" | "pitcher"; points: { overall: number; aav: number }[] }[] = [];
-    for (const curve of [hitterCurve, pitcherCurve]) {
+    const lines: { type: MarketType; points: { overall: number; aav: number }[] }[] = [];
+    for (const curve of [hitterCurve, spCurve, rpCurve]) {
       if (!curve) continue;
       if (playerTypeFilter !== "all" && playerTypeFilter !== curve.playerType) continue;
-      const visibleForType = filtered.filter((c) => c.playerType === curve.playerType);
+      const visibleForType = filtered.filter((c) => marketTypeForRole(c.role) === curve.playerType);
       if (visibleForType.length === 0 && playerTypeFilter === "all") continue;
       const points: { overall: number; aav: number }[] = [];
       const steps = 20;
       for (let i = 0; i <= steps; i++) {
         const x = curve.minOverallInSample + ((curve.maxOverallInSample - curve.minOverallInSample) * i) / steps;
-        points.push({ overall: x, aav: Math.exp(curve.intercept + curve.slope * x) });
+        points.push({ overall: x, aav: marketRateAav(curve, x) });
       }
       lines.push({ type: curve.playerType, points });
     }
     return lines;
-  }, [hitterCurve, pitcherCurve, playerTypeFilter, filtered]);
+  }, [hitterCurve, spCurve, rpCurve, playerTypeFilter, filtered]);
 
   const roleRowsForTable = useMemo(() => {
     const visibleRoles = new Set(filtered.map((c) => c.role));
@@ -155,7 +166,7 @@ export default function MarketRateExplorer({ curves, roleMultipliers, contracts,
       {/* Filters */}
       <div style={{ ...cardStyle, display: "flex", flexWrap: "wrap", gap: "1.25rem", alignItems: "center" }}>
         <div style={{ display: "flex", gap: "0.5rem" }}>
-          {(["all", "hitter", "pitcher"] as const).map((t) => (
+          {(["all", "hitter", "sp", "rp"] as const).map((t) => (
             <button
               key={t}
               onClick={() => setPlayerTypeFilter(t)}
@@ -163,7 +174,7 @@ export default function MarketRateExplorer({ curves, roleMultipliers, contracts,
                 padding: "0.35rem 0.85rem", borderRadius: "999px", fontSize: "0.8125rem", fontWeight: 600,
                 border: `1px solid ${playerTypeFilter === t ? "var(--color-border-strong)" : "var(--color-border)"}`,
                 background: playerTypeFilter === t ? "var(--color-table-hover)" : "transparent",
-                color: "var(--color-text)", cursor: "pointer", textTransform: "capitalize",
+                color: "var(--color-text)", cursor: "pointer", textTransform: t === "sp" || t === "rp" ? "uppercase" : "capitalize",
               }}
             >
               {t}
@@ -197,9 +208,9 @@ export default function MarketRateExplorer({ curves, roleMultipliers, contracts,
 
       {/* Fit stats */}
       <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))", gap: "1rem" }}>
-        {[hitterCurve, pitcherCurve].filter((c): c is MarketRateCurve => !!c).map((curve) => (
+        {[hitterCurve, spCurve, rpCurve].filter((c): c is MarketRateCurve => !!c).map((curve) => (
           <div key={curve.playerType} style={cardStyle}>
-            <div style={{ ...statLabelStyle, marginBottom: "0.35rem" }}>{curve.playerType} curve</div>
+            <div style={{ ...statLabelStyle, marginBottom: "0.35rem" }}>{CURVE_LABEL[curve.playerType]} curve</div>
             <div style={{ fontSize: "0.8125rem", fontFamily: "monospace", color: "var(--color-text)", marginBottom: "0.6rem" }}>
               ln(AAV) = {curve.intercept.toFixed(3)} + {curve.slope.toFixed(4)} × Overall
             </div>
@@ -239,7 +250,7 @@ export default function MarketRateExplorer({ curves, roleMultipliers, contracts,
             {offseasonImpact.curves.map((c) => (
               <div key={c.playerType}>
                 <div style={{ ...statLabelStyle, marginBottom: "0.35rem" }}>
-                  {c.playerType} — {c.newContractCount} new contract{c.newContractCount === 1 ? "" : "s"} signed this offseason
+                  {CURVE_LABEL[c.playerType]} — {c.newContractCount} new contract{c.newContractCount === 1 ? "" : "s"} signed this offseason
                 </div>
                 {!c.before ? (
                   <div style={{ fontSize: "0.8125rem", color: "var(--color-text-muted)" }}>
@@ -408,9 +419,9 @@ export default function MarketRateExplorer({ curves, roleMultipliers, contracts,
                 dot={false}
                 activeDot={false}
                 legendType="none"
-                stroke={line.type === "hitter" ? "var(--color-navy)" : "var(--color-tan)"}
+                stroke={CURVE_STROKE[line.type].color}
                 strokeWidth={2}
-                strokeDasharray={line.type === "hitter" ? undefined : "6 4"}
+                strokeDasharray={CURVE_STROKE[line.type].dash}
                 isAnimationActive={false}
               />
             ))}
@@ -418,7 +429,9 @@ export default function MarketRateExplorer({ curves, roleMultipliers, contracts,
         </ResponsiveContainer>
         <div style={{ display: "flex", gap: "1.5rem", marginTop: "0.5rem", fontSize: "0.75rem", color: "var(--color-text-muted)" }}>
           <span><span style={{ display: "inline-block", width: 16, height: 2, background: "var(--color-navy)", marginRight: 6, verticalAlign: "middle" }} />hitter curve</span>
-          <span><span style={{ display: "inline-block", width: 16, height: 2, background: "var(--color-tan)", marginRight: 6, verticalAlign: "middle", borderTop: "2px dashed var(--color-tan)" }} />pitcher curve</span>
+          <span><span style={{ display: "inline-block", width: 16, height: 2, background: "var(--color-tan)", marginRight: 6, verticalAlign: "middle", borderTop: "2px dashed var(--color-tan)" }} />starting-pitcher curve</span>
+          <span><span style={{ display: "inline-block", width: 16, height: 2, background: "#3f6b32", marginRight: 6, verticalAlign: "middle", borderTop: "2px dotted #3f6b32" }} />reliever curve</span>
+          <span>curves stop at the best Overall actually seen signing and never exceed ${MARKET_RATE_MAX_AAV / 1_000_000}M</span>
         </div>
       </div>
 

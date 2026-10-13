@@ -1,7 +1,8 @@
 import "dotenv/config";
 import { makeSupabaseClient } from "../lib/supabase-client.js";
 import { getLeagueId, leagueSlugFromArgv } from "../lib/league.js";
-import { PITCHER_ROLES, computeLeagueMinimumSalary, type PlayerType } from "../lib/contract-classification.js";
+import { computeLeagueMinimumSalary } from "../lib/contract-classification.js";
+import { marketTypeForRole, type MarketType } from "../lib/market-rate-math.js";
 import { fitLine } from "../lib/regression.js";
 
 // Fits "what does the open market actually pay for this talent level" from
@@ -23,6 +24,13 @@ import { fitLine } from "../lib/regression.js";
 // role's raw multiplier toward 1.0 by sample size, and explicitly capping DH
 // at the lowest other hitting-role multiplier (a domain constraint no
 // regression can infer on its own).
+//
+// 2026-10-13 (Rees: "SP and RP split into separate regressions and market
+// values"): the pitcher curve is now two -- SP and RP each get their own
+// line, since pooling them priced relievers off the starters' market (split
+// curves cut the pitchers' log-error ~10%). Hitters keep one curve plus the
+// position multipliers. SP and RP multipliers are measured against their OWN
+// curve, so they land near 1.0 (just a small log-fit bias correction).
 
 const PAGE_SIZE = 1000;
 
@@ -162,9 +170,9 @@ async function main() {
   // hitter curve, which fit fine, was never getting saved because the
   // pitcher side happened to fail). Only a genuine "neither type has enough
   // data" is still a hard abort -- nothing at all to write in that case.
-  const curvesByType = new Map<PlayerType, { intercept: number; slope: number; rSquared: number; residualStdDev: number; sampleSize: number; minOverall: number; maxOverall: number }>();
-  for (const type of ["hitter", "pitcher"] as const) {
-    const group = clean.filter((c) => PITCHER_ROLES.has(c.role) === (type === "pitcher"));
+  const curvesByType = new Map<MarketType, { intercept: number; slope: number; rSquared: number; residualStdDev: number; sampleSize: number; minOverall: number; maxOverall: number }>();
+  for (const type of ["hitter", "sp", "rp"] as const) {
+    const group = clean.filter((c) => marketTypeForRole(c.role) === type);
     if (group.length < 10) {
       console.log(`Only ${group.length} clean ${type} contracts -- too small to fit a curve. Skipping ${type}, not aborting.`);
       continue;
@@ -176,7 +184,7 @@ async function main() {
     console.log(`${type} curve: ln(AAV) = ${intercept.toFixed(4)} + ${slope.toFixed(4)} * Overall (n=${group.length}, R²=${rSquared.toFixed(3)}, residual SD=${residualStdDev.toFixed(3)}, Overall range ${Math.min(...overalls)}-${Math.max(...overalls)})`);
   }
   if (curvesByType.size === 0) {
-    throw new Error("Neither hitter nor pitcher had enough clean contracts to fit a curve -- nothing to write. Aborting.");
+    throw new Error("None of hitter / SP / RP had enough clean contracts to fit a curve -- nothing to write. Aborting.");
   }
 
   // Per-role multiplier: each role's actual average AAV vs. what its own
@@ -190,13 +198,13 @@ async function main() {
     byRole.get(c.role)!.push(c);
   }
   interface RoleRow {
-    role: string; playerType: PlayerType; sampleSize: number; avgOverall: number;
+    role: string; playerType: MarketType; sampleSize: number; avgOverall: number;
     avgActualAav: number; avgPredictedAav: number; rawMultiplier: number; shrunkMultiplier: number;
     finalMultiplier: number; dhCapped: boolean;
   }
   const roleRows: RoleRow[] = [];
   for (const [role, group] of byRole) {
-    const playerType: PlayerType = PITCHER_ROLES.has(role) ? "pitcher" : "hitter";
+    const playerType = marketTypeForRole(role);
     const curve = curvesByType.get(playerType);
     // No curve for this role's player type (skipped above, too few clean
     // contracts) -- can't compute "actual vs. what the curve predicted"

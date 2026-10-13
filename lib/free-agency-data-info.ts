@@ -11,7 +11,8 @@ export interface FreeAgencyDataInfo {
   demandsWithAsk: number;
   curveComputedAt: string | null;
   hitterCurveN: number | null;
-  pitcherCurveN: number | null;
+  spCurveN: number | null;
+  rpCurveN: number | null;
 }
 
 export async function getFreeAgencyDataInfo(leagueId: number): Promise<FreeAgencyDataInfo> {
@@ -29,7 +30,7 @@ export async function getFreeAgencyDataInfo(leagueId: number): Promise<FreeAgenc
 
   const { data: runRow } = await supabase
     .from("market_rate_curves").select("refresh_run_id").eq("dsa_league_id", leagueId).order("refresh_run_id", { ascending: false }).limit(1).maybeSingle();
-  let curveComputedAt: string | null = null, hitterCurveN: number | null = null, pitcherCurveN: number | null = null;
+  let curveComputedAt: string | null = null, hitterCurveN: number | null = null, spCurveN: number | null = null, rpCurveN: number | null = null;
   if (runRow) {
     const { data: curves, error: curveErr } = await supabase
       .from("market_rate_curves").select("player_type,sample_size,computed_at").eq("dsa_league_id", leagueId).eq("refresh_run_id", (runRow as { refresh_run_id: number }).refresh_run_id);
@@ -37,8 +38,9 @@ export async function getFreeAgencyDataInfo(leagueId: number): Promise<FreeAgenc
     for (const c of (curves ?? []) as { player_type: string; sample_size: number; computed_at: string }[]) {
       curveComputedAt = c.computed_at;
       if (c.player_type === "hitter") hitterCurveN = c.sample_size;
-      if (c.player_type === "pitcher") pitcherCurveN = c.sample_size;
+      if (c.player_type === "sp") spCurveN = c.sample_size;
+      if (c.player_type === "rp") rpCurveN = c.sample_size;
     }
   }
-  return { demandImportedAt: latest?.imported_at ?? null, demandGameDate: latest?.game_date ?? null, demandsWithAsk, curveComputedAt, hitterCurveN, pitcherCurveN };
+  return { demandImportedAt: latest?.imported_at ?? null, demandGameDate: latest?.game_date ?? null, demandsWithAsk, curveComputedAt, hitterCurveN, spCurveN, rpCurveN };
 }
