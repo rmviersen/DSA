@@ -1,4 +1,5 @@
 import { getFreeAgents } from "../../../lib/free-agency-query";
+import { getFreeAgencyDataInfo } from "../../../lib/free-agency-data-info";
 import { resolveLeagueId, resolveDefaultOrgId } from "../../../lib/league";
 import { PlayerTable } from "../../_components/PlayerTable";
 
@@ -13,8 +14,12 @@ export default async function FreeAgencyPage({ params }: { params: Promise<{ lea
   const { league } = await params;
   const leagueId = await resolveLeagueId(league);
   const myOrgId = await resolveDefaultOrgId(leagueId);
-  const { rows, totalRealFreeAgents, totalWithRatings } = await getFreeAgents(leagueId, myOrgId);
+  const [{ rows, totalRealFreeAgents, totalWithRatings }, dataInfo] = await Promise.all([
+    getFreeAgents(leagueId, myOrgId),
+    getFreeAgencyDataInfo(leagueId),
+  ]);
   const missingRatings = totalRealFreeAgents - totalWithRatings;
+  const fmtDay = (iso: string | null) => (iso ? new Date(iso).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric", timeZone: "UTC" }) : "unknown");
 
   return (
     <>
@@ -44,6 +49,11 @@ export default async function FreeAgencyPage({ params }: { params: Promise<{ lea
           injury-proneness scouting grade (Iron Man → Durable → Normal → Fragile → Wrecked, best to worst) — use the
           filter chips above to include/exclude by tier, or the Demand min/max fields to bracket by real dollar ask
           (in whole $M).
+        </p>
+        <p style={{ color: "var(--color-text-muted, #888)", fontSize: "0.8125rem", marginTop: 6 }}>
+          Demands as of in-game {dataInfo.demandGameDate ?? "an unknown date"} (imported {fmtDay(dataInfo.demandImportedAt)};{" "}
+          {dataInfo.demandsWithAsk.toLocaleString()} players have an ask). Market rates: curves fit {fmtDay(dataInfo.curveComputedAt)} on{" "}
+          {dataInfo.hitterCurveN ?? "?"} hitter and {dataInfo.pitcherCurveN ?? "?"} pitcher signed contracts.
         </p>
       </header>
       <PlayerTable rows={rows} showTeam showProspectCols={false} showStatLevel showSign showValueVsDemand renderLimit={100} />
