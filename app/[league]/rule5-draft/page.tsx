@@ -1,5 +1,6 @@
 import { getRule5DraftBoard } from "../../../lib/rule5-draft-query";
 import { resolveLeagueId, resolveDefaultOrgId } from "../../../lib/league";
+import { getRosterFreshness } from "../../../lib/roster-freshness";
 import { PlayerTable } from "../../_components/PlayerTable";
 
 export const dynamic = "force-dynamic";
@@ -14,7 +15,10 @@ export default async function Rule5DraftPage({ params }: { params: Promise<{ lea
   const { league } = await params;
   const leagueId = await resolveLeagueId(league);
   const orgId = await resolveDefaultOrgId(leagueId);
-  const { toProtect, toDraft } = await getRule5DraftBoard(leagueId, orgId);
+  const [{ toProtect, toDraft }, freshness] = await Promise.all([getRule5DraftBoard(leagueId, orgId), getRosterFreshness(leagueId)]);
+  const asOfText = freshness.asOf
+    ? new Date(freshness.asOf).toLocaleString("en-US", { month: "short", day: "numeric", hour: "numeric", minute: "2-digit", timeZone: "UTC", timeZoneName: "short" })
+    : "an unknown time";
 
   return (
     <>
@@ -37,6 +41,11 @@ export default async function Rule5DraftPage({ params }: { params: Promise<{ lea
           current filters/sort produce (same pattern) since the real leaguewide pool runs over 1,800. Sort by
           Potential (not just Overall) to surface high-upside arms/bats whose current numbers don&apos;t yet reflect
           it.
+        </p>
+        <p style={{ color: "var(--color-text-muted, #888)", fontSize: "0.8125rem", marginTop: 6 }}>
+          Roster status (who is on the 40-man, org, level) as of {asOfText}, from the last {freshness.source === "sync" ? "roster sync" : "full data refresh"}.
+          Moves made in the game since then — protecting a player, a release — aren&apos;t reflected until the next sync or
+          refresh (<code>npm run sync-roster-flags</code> updates just this, in seconds).
         </p>
       </header>
 

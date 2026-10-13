@@ -4,6 +4,7 @@ import { makeSupabaseClient } from "./supabase-client";
 import { effectiveLevel, levelLabel } from "./display-helpers";
 import { getLatestMarketRateCurves, getLatestRoleMultipliers } from "./market-rate-query";
 import { marketTypeForRole, marketRateAav } from "./market-rate-math";
+import { getRosterFreshness } from "./roster-freshness";
 import { playerTypeForRole } from "./contract-classification";
 import { fetchAll, ROLE_HEALTH_ROWS, topNAvg } from "./org-minors-query";
 
@@ -89,13 +90,13 @@ export async function getFreeAgents(leagueId: number, myOrgId: number): Promise<
   // is older than the refresh, the database is the fresher source and nothing is filtered.
   let hiddenAsSigned = 0;
   {
-    const [{ data: impRow }, { data: runRow }] = await Promise.all([
+    const [{ data: impRow }, freshness] = await Promise.all([
       supabase.from("free_agent_demand_imports").select("id,imported_at").eq("dsa_league_id", leagueId).order("id", { ascending: false }).limit(1).maybeSingle(),
-      supabase.from("refresh_runs").select("completed_at").eq("dsa_league_id", leagueId).eq("status", "succeeded").order("id", { ascending: false }).limit(1).maybeSingle(),
+      // The newer of the last full refresh and the last roster sync (scripts/sync-roster-flags.ts) -- either one refreshes free_agent.
+      getRosterFreshness(leagueId),
     ]);
     const imp = impRow as { id: number; imported_at: string } | null;
-    const run = runRow as { completed_at: string | null } | null;
-    if (imp && run?.completed_at && new Date(imp.imported_at).getTime() > new Date(run.completed_at).getTime()) {
+    if (imp && freshness.asOf && new Date(imp.imported_at).getTime() > new Date(freshness.asOf).getTime()) {
       const inImport = await fetchByIdsChunked<{ player_id: number }>(players.map((p) => p.id), (chunk) =>
         supabase.from("free_agent_demands").select("player_id").eq("import_id", imp.id).in("player_id", chunk) as never
       );

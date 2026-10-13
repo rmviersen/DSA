@@ -25,6 +25,7 @@
     "scrape-trade-block": "tsx scripts/scrape-trade-block.ts",
     "scrape-trade-history": "tsx scripts/scrape-trade-history.ts",
     "compute-market-rates": "tsx scripts/compute-market-rates.ts",
+    "sync-roster-flags": "tsx scripts/sync-roster-flags.ts",
     "scan-market-contracts": "tsx scripts/scan-market-contracts.ts",
     "compute-draft-pick-value": "tsx scripts/compute-draft-pick-value.ts",
     "ingest-duud": "tsx scripts/ingest-duud-dump.ts",
