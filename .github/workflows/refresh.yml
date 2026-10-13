@@ -53,6 +53,7 @@ jobs:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
           STATSPLUS_BASE_URL: https://atl-02.statsplus.net/thebigleague/api
+          STATSPLUS_API_TOKEN: ${{ secrets.STATSPLUS_API_TOKEN }}
         run: npm run check-new-sim
 
       # A scheduled tick only proceeds if new data was actually found -- most
