@@ -100,7 +100,7 @@ function downloadDraftListCsv(rows: PlayerRow[], filename: string) {
   URL.revokeObjectURL(url);
 }
 
-export function PlayerTable({ rows, showTeam, showProspectCols, showStatLevel, showValueVsDemand, showSign, showDraftStatus, showPotentialTools, showEligiblePositions, showTradeBlockInfo, showDraftMetrics, hideStatColumns, renderLimit, showExport, exportFilename, showTeamFilter }: { rows: PlayerRow[]; showTeam: boolean; showProspectCols: boolean; showStatLevel?: boolean; showValueVsDemand?: boolean; showSign?: boolean; showDraftStatus?: boolean; showPotentialTools?: boolean; showEligiblePositions?: boolean; showTradeBlockInfo?: boolean; showDraftMetrics?: boolean; hideStatColumns?: boolean; renderLimit?: number; showExport?: boolean; exportFilename?: string; showTeamFilter?: boolean }) {
+export function PlayerTable({ rows, showTeam, showProspectCols, showStatLevel, showValueVsDemand, showSign, showDraftStatus, showPotentialTools, showEligiblePositions, showTradeBlockInfo, showDraftMetrics, hideStatColumns, renderLimit, showExport, exportFilename, showTeamFilter, showNameSearch = true }: { rows: PlayerRow[]; showTeam: boolean; showProspectCols: boolean; showStatLevel?: boolean; showValueVsDemand?: boolean; showSign?: boolean; showDraftStatus?: boolean; showPotentialTools?: boolean; showEligiblePositions?: boolean; showTradeBlockInfo?: boolean; showDraftMetrics?: boolean; hideStatColumns?: boolean; renderLimit?: number; showExport?: boolean; exportFilename?: string; showTeamFilter?: boolean; showNameSearch?: boolean }) {
   // Multi-league routing (2026-09-10) -- this table is only ever rendered
   // under a page inside app/[league]/..., so the league slug is always in
   // the URL.
@@ -127,6 +127,9 @@ export function PlayerTable({ rows, showTeam, showProspectCols, showStatLevel, s
   // table: team abbreviation as a dropdown to minimize space). Single-select,
   // "" = all teams.
   const [teamFilter, setTeamFilter] = useState("");
+  // Name search (2026-10-13, Rees's ask, for the Rule 5 board: a capped table hides low-Overall players, so there has to be a
+  // way to look one up by name). ON by default for every table (Rees: fine on all tables; pass showNameSearch={false} to hide); case- and accent-insensitive substring match on "first last".
+  const [nameSearch, setNameSearch] = useState("");
   // Sign-only filter (2026-09-06, Rees's ask) -- only meaningful where the
   // Sign column itself is shown (showSign), same gating as the column.
   const [signOnly, setSignOnly] = useState(false);
@@ -248,10 +251,15 @@ export function PlayerTable({ rows, showTeam, showProspectCols, showStatLevel, s
     // "at least $X" is a real bar a no-demand player hasn't cleared.
     if (demandMax !== null && !Number.isNaN(demandMax)) out = out.filter((r) => r.demandSalary === null || r.demandSalary <= demandMax);
     if (showTeamFilter && teamFilter !== "") out = out.filter((r) => (r.team_abbr ?? r.team_nickname ?? "") === teamFilter);
+    if (showNameSearch && nameSearch.trim() !== "") {
+      const norm = (s: string) => s.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase();
+      const q = norm(nameSearch.trim()).replace(/\s+/g, " ");
+      out = out.filter((r) => norm(`${r.first_name} ${r.last_name}`).includes(q));
+    }
     if (signOnly) out = out.filter((r) => r.signFlag === true);
     if (showDraftStatus && availableOnly) out = out.filter((r) => r.draftedByTeam === null);
     return out;
-  }, [phFiltered, roleFilter, proneFilter, ageMin, ageMax, overallMin, draftValueMin, teamFilter, showTeamFilter, demandMinM, demandMaxM, signOnly, showDraftStatus, availableOnly]);
+  }, [phFiltered, roleFilter, proneFilter, ageMin, ageMax, overallMin, draftValueMin, teamFilter, showTeamFilter, nameSearch, showNameSearch, demandMinM, demandMaxM, signOnly, showDraftStatus, availableOnly]);
 
   const sortedRows = useMemo(() => {
     const dir = sortDir === "desc" ? -1 : 1;
@@ -582,6 +590,18 @@ export function PlayerTable({ rows, showTeam, showProspectCols, showStatLevel, s
           >
             ✓ Sign only
           </button>
+        )}
+        {showNameSearch && (
+          <>
+            <span style={{ fontSize: 12 }}>Name</span>
+            <input
+              type="search"
+              value={nameSearch}
+              onChange={(e) => setNameSearch(e.target.value)}
+              placeholder="Search by name"
+              style={{ padding: "3px 6px", fontSize: 12, width: 150, border: "1px solid var(--color-border-strong)", borderRadius: 4, background: "transparent", color: "inherit" }}
+            />
+          </>
         )}
         {showTeamFilter && (
           <>

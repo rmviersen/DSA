@@ -50,10 +50,10 @@ export default async function Rule5DraftPage({ params }: { params: Promise<{ lea
       </header>
 
       <h2 style={{ margin: "0 0 0.5rem" }}>Players to Protect</h2>
-      <PlayerTable rows={toProtect} showTeam showProspectCols renderLimit={20} />
+      <PlayerTable rows={toProtect} showTeam showProspectCols renderLimit={20} showNameSearch />
 
       <h2 style={{ margin: "2rem 0 0.5rem" }}>Rule 5 Draft Board</h2>
-      <PlayerTable rows={toDraft} showTeam showProspectCols renderLimit={100} />
+      <PlayerTable rows={toDraft} showTeam showProspectCols renderLimit={100} showNameSearch />
     </>
   );
 }
