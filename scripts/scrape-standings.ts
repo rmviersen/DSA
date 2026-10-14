@@ -2,6 +2,7 @@ import "dotenv/config";
 import * as cheerio from "cheerio";
 import { makeSupabaseClient } from "../lib/supabase-client.js";
 import { getLeagueId } from "../lib/league.js";
+import { makeStatsPlusClient } from "../lib/statsplus-client.js";
 
 // MLB standings snapshot (2026-09-18, Rees's ask -- Farm Rankings shows each
 // team's record and division position, e.g. "27-21, 4th in the FC Topaz").
@@ -44,9 +45,9 @@ export function parseStandingsHtml(html: string): StandingRow[] {
 }
 
 export async function scrapeStandings(refreshRunId: number, leagueId: number, supabase = makeSupabaseClient()): Promise<number> {
-  const res = await fetch(STANDINGS_URL);
-  if (!res.ok) throw new Error(`Standings page fetch failed: ${res.status}`);
-  const rows = parseStandingsHtml(await res.text());
+  // Shared site-page fetcher (session cookies + spacing) -- StatsPlus website pages need a browser session since ~2026-10-07.
+  const sp = makeStatsPlusClient({ baseUrl: process.env.STATSPLUS_BASE_URL ?? "https://atl-02.statsplus.net/thebigleague/api", sessionId: process.env.STATSPLUS_SESSION_ID, csrfToken: process.env.STATSPLUS_CSRF_TOKEN });
+  const rows = parseStandingsHtml(await sp.sitePage(STANDINGS_URL));
   if (rows.length < 20) throw new Error(`Only parsed ${rows.length} standings rows -- page layout likely changed, refusing to write.`);
   const { error } = await supabase.from("team_standings_snapshots").upsert(
     rows.map((r) => ({ dsa_league_id: leagueId, refresh_run_id: refreshRunId, team_id: r.teamId, wins: r.wins, losses: r.losses, division_name: r.divisionName, division_rank: r.divisionRank })) as never[],

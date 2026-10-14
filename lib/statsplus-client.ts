@@ -70,6 +70,45 @@ async function fetchText(url: string, headers: Record<string, string> = {}): Pro
   throw new Error(`StatsPlus kept returning 429 after ${MAX_429_RETRIES} attempts — ${url}`);
 }
 
+// --- StatsPlus WEBSITE pages (not the /api/ CSVs) ------------------------------------------------------------------------
+// (2026-10-14, Rees) Between 2026-10-06 and 2026-10-09 StatsPlus started refusing website pages (standings, ballparks, trade
+// block, trade ledger) to visitors without a first-visit/browser cookie: a plain request now gets a 403 "Continue to
+// StatsPlus" page, and the ballpark/standings/trade-block/trade-history side tasks of every refresh failed. These pages worked
+// before through Rees's own logged-in browser session cookies, so they are sent here -- the SAME sessionid/csrftoken pair the
+// ratings/gamehistory fallback uses (STATSPLUS_SESSION_ID / STATSPLUS_CSRF_TOKEN), and unlike cookieHeader() they are sent even
+// when an API token is configured, because the token only authenticates /api/ calls.
+//
+// We deliberately do NOT disguise the client as a browser: StatsPlus throttles visitors whose browser version is out of date, and
+// faking a current one would be evading its bot defence. The identity stays honest; the session cookie is the legitimate pass.
+// Website pages also get a wider request gap than the API (they are rate limited much harder), on top of fetchText's 429 backoff.
+const SITE_PAGE_GAP_MS = 8000;
+let lastSitePageAt = 0;
+
+function sitePageCookies(cfg: StatsPlusConfig): Record<string, string> {
+  if (!cfg.sessionId || !cfg.csrfToken) return {};
+  return { Cookie: `sessionid=${cfg.sessionId}; csrftoken=${cfg.csrfToken}` };
+}
+
+async function fetchSitePage(cfg: StatsPlusConfig, url: string): Promise<string> {
+  const wait = lastSitePageAt + SITE_PAGE_GAP_MS - Date.now();
+  if (wait > 0) await new Promise((r) => setTimeout(r, wait));
+  lastSitePageAt = Date.now();
+  const cookies = sitePageCookies(cfg);
+  try {
+    return await fetchText(url, cookies);
+  } catch (err) {
+    if (String(err).includes(" 403 ")) {
+      throw new Error(
+        `${err} -- StatsPlus's website pages need a logged-in browser session. ` +
+        (cookies.Cookie
+          ? "The STATSPLUS_SESSION_ID / STATSPLUS_CSRF_TOKEN cookies were sent but refused: they have most likely expired -- copy fresh ones from the browser (DevTools > Application > Cookies)."
+          : "STATSPLUS_SESSION_ID / STATSPLUS_CSRF_TOKEN are not set."),
+      );
+    }
+    throw err;
+  }
+}
+
 function parseCsv(text: string): RawRow[] {
   const trimmed = text.trim();
   // "Unknown API" means the endpoint/params are wrong — a real error. A truly
@@ -167,7 +206,7 @@ async function fetchCurrentGameDate(cfg: StatsPlusConfig): Promise<string | null
  */
 async function fetchTradeBlockHtml(cfg: StatsPlusConfig): Promise<string> {
   const leagueRoot = cfg.baseUrl.replace(/\/api\/?$/, "");
-  return fetchText(`${leagueRoot}/tradeblock/`);
+  return fetchSitePage(cfg, `${leagueRoot}/tradeblock/`);
 }
 
 /** One page of the trade-ledger AJAX endpoint (see fetchTradeLedgerHtml below). */
@@ -178,7 +217,7 @@ async function fetchTradeLedgerPage(
   const leagueRoot = cfg.baseUrl.replace(/\/api\/?$/, "");
   const { page = 0, rows = 25, view = "recent" } = opts;
   const url = `${leagueRoot}/ttajaxtable/?info=recent&page=${page}&rows=${rows}&view=${view}&team=0`;
-  const text = await fetchText(url);
+  const text = await fetchSitePage(cfg, url);
   const body = JSON.parse(text) as { data: string; total: number };
   return { total: body.total, html: body.data };
 }
@@ -218,6 +257,7 @@ export function makeStatsPlusClient(cfg: StatsPlusConfig) {
   return {
     teams: () => fetchPublicCsv(cfg, "teams"),
     tradeBlockHtml: () => fetchTradeBlockHtml(cfg),
+    sitePage: (url: string) => fetchSitePage(cfg, url),
     tradeLedgerHtml: (view?: "recent" | "void") => fetchTradeLedgerHtml(cfg, view),
     players: () => fetchPublicCsv(cfg, "players"),
     contracts: () => fetchPublicCsv(cfg, "contract"),

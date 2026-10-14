@@ -26,7 +26,7 @@ function extractTradeBlockPids(html: string): Record<string, string> {
 async function main() {
   const supabase = makeSupabaseClient();
   const leagueId = await getLeagueId(supabase);
-  const sp = makeStatsPlusClient({ baseUrl: process.env.STATSPLUS_BASE_URL! });
+  const sp = makeStatsPlusClient({ baseUrl: process.env.STATSPLUS_BASE_URL!, sessionId: process.env.STATSPLUS_SESSION_ID, csrfToken: process.env.STATSPLUS_CSRF_TOKEN });
 
   console.log("Finding latest refresh run to tag this snapshot against...");
   const { data: pcRow, error: pcErr } = await supabase

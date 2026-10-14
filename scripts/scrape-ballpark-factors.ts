@@ -2,6 +2,7 @@ import "dotenv/config";
 import * as cheerio from "cheerio";
 import { makeSupabaseClient } from "../lib/supabase-client.js";
 import { getLeagueId } from "../lib/league.js";
+import { makeStatsPlusClient } from "../lib/statsplus-client.js";
 
 // Ballpark factor snapshots (2026-09-01, Rees's ask, part of the decomposed
 // offense/defense redesign's Step 1). Captures StatsPlus's own published
@@ -32,14 +33,10 @@ function num(v: string | undefined): number | null {
 }
 
 async function fetchBallparksHtml(): Promise<string> {
-  // Confirmed directly (2026-09-01) -- unlike ratings/gamehistory, this page
-  // is PUBLIC. A bare fetch with no auth returns 200; a token is appended
-  // when available but isn't required.
-  const token = process.env.STATSPLUS_API_TOKEN;
-  const url = token ? `${BALLPARKS_URL}?token=${token}` : BALLPARKS_URL;
-  const res = await fetch(url);
-  if (!res.ok) throw new Error(`Ballparks page fetch failed: ${res.status}`);
-  return res.text();
+  // Was a bare public fetch (confirmed 2026-09-01); since ~2026-10-07 StatsPlus requires a browser session cookie on website
+  // pages, so this goes through the shared site-page fetcher (cookies + spacing + clear 403 message) -- see statsplus-client.ts.
+  const sp = makeStatsPlusClient({ baseUrl: process.env.STATSPLUS_BASE_URL ?? "https://atl-02.statsplus.net/thebigleague/api", sessionId: process.env.STATSPLUS_SESSION_ID, csrfToken: process.env.STATSPLUS_CSRF_TOKEN });
+  return sp.sitePage(BALLPARKS_URL);
 }
 
 interface ParkRow {
