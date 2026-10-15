@@ -216,7 +216,7 @@ export default function DraftPickValueExplorer({ rounds, players }: Props) {
           <table style={{ width: "100%", borderCollapse: "collapse", fontSize: "0.875rem" }}>
             <thead>
               <tr style={{ background: "var(--color-table-header)", textAlign: "left" }}>
-                {["Round", "n", "% Reached MLB (n)", "Avg WAR/yr (all picks)", "Avg WAR/yr (reached MLB)", "Smoothed", "Hit rate", "Best pick"].map((h) => (
+                {["Round", "n", "% Reached MLB (n)", "Avg WAR/yr (all picks)", "Avg WAR/yr (reached MLB)", "Hit rate", "Best pick"].map((h) => (
                   <th key={h} style={{ padding: "0.5rem 0.75rem", fontWeight: 700 }}>{h}</th>
                 ))}
               </tr>
@@ -242,7 +242,6 @@ export default function DraftPickValueExplorer({ rounds, players }: Props) {
                       ? <>{avgWarReachedByRound.get(r.round)!.avg.toFixed(3)} <span style={{ color: "var(--color-text-muted)" }}>(n={avgWarReachedByRound.get(r.round)!.n})</span></>
                       : "—"}
                   </td>
-                  <td style={{ padding: "0.5rem 0.75rem", fontVariantNumeric: "tabular-nums" }}>{r.smoothedWarPerYear.toFixed(3)}</td>
                   <td style={{ padding: "0.5rem 0.75rem", fontVariantNumeric: "tabular-nums" }}>{(hitRateByRound.get(r.round) ?? 0).toFixed(1)}%</td>
                   <td style={{ padding: "0.5rem 0.75rem" }}>
                     {r.bestPlayerName} <span style={{ color: "var(--color-text-muted)" }}>({r.bestPlayerCareerWar?.toFixed(1)} career WAR)</span>
@@ -257,8 +256,7 @@ export default function DraftPickValueExplorer({ rounds, players }: Props) {
           only the players who actually appeared in a major-league game, so it shows how good a pick is when he makes it.
           Both are career MLB WAR divided by years since the draft. Hit rate = the share of that round&apos;s OWN players who individually graded Plus-tier or better against the
           full population (percentile-based, not a fixed WAR cutoff — the real distribution is heavily skewed, so an
-          absolute cutoff would call almost everything &quot;replacement level&quot;). Smoothed WAR/yr is what the
-          trade-value composite will actually read. Click a row to see that round&apos;s individual players.
+          absolute cutoff would call almost everything &quot;replacement level&quot;). Click a row to see that round&apos;s individual players.
         </div>
       </div>
 
