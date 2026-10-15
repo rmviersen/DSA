@@ -75,6 +75,22 @@ export default function DraftPickValueExplorer({ rounds, players }: Props) {
 
   const allWarPerYear = useMemo(() => players.map((p) => p.warPerYear), [players]);
 
+  // Avg WAR/yr of ONLY the players who reached the MLB, per round (2026-10-13, Rees's ask -- replaces the Median column).
+  // The "Avg WAR/yr (all picks)" column counts every drafted player, busts at 0, so it answers "what is a pick worth";
+  // this one answers "when a pick does make it, how good is he". Same per-player metric as everywhere on this page
+  // (career MLB WAR / years since the draft, not years in the majors), over the same >= 3-years-since-draft pool.
+  const avgWarReachedByRound = useMemo(() => {
+    const acc = new Map<number, { sum: number; n: number }>();
+    for (const p of players) {
+      if (!p.reachedMlb) continue;
+      const e = acc.get(p.draftRound) ?? { sum: 0, n: 0 };
+      e.sum += p.warPerYear;
+      e.n += 1;
+      acc.set(p.draftRound, e);
+    }
+    return new Map([...acc].map(([round, { sum, n }]) => [round, { avg: sum / n, n }]));
+  }, [players]);
+
   const roundChartData = useMemo(
     () => rounds.map((r) => ({ round: r.round, pct: r.pctReachedMlb })),
     [rounds]
@@ -200,7 +216,7 @@ export default function DraftPickValueExplorer({ rounds, players }: Props) {
           <table style={{ width: "100%", borderCollapse: "collapse", fontSize: "0.875rem" }}>
             <thead>
               <tr style={{ background: "var(--color-table-header)", textAlign: "left" }}>
-                {["Round", "n", "% Reached MLB (n)", "Avg WAR/yr", "Median", "Smoothed", "Hit rate", "Best pick"].map((h) => (
+                {["Round", "n", "% Reached MLB (n)", "Avg WAR/yr (all picks)", "Avg WAR/yr (reached MLB)", "Smoothed", "Hit rate", "Best pick"].map((h) => (
                   <th key={h} style={{ padding: "0.5rem 0.75rem", fontWeight: 700 }}>{h}</th>
                 ))}
               </tr>
@@ -221,7 +237,11 @@ export default function DraftPickValueExplorer({ rounds, players }: Props) {
                     {r.pctReachedMlb.toFixed(1)}% <span style={{ color: "var(--color-text-muted)", fontWeight: 400 }}>(n={r.reachRateSampleSize})</span>
                   </td>
                   <td style={{ padding: "0.5rem 0.75rem", fontVariantNumeric: "tabular-nums" }}>{r.avgWarPerYear.toFixed(3)}</td>
-                  <td style={{ padding: "0.5rem 0.75rem", fontVariantNumeric: "tabular-nums" }}>{r.medianWarPerYear.toFixed(3)}</td>
+                  <td style={{ padding: "0.5rem 0.75rem", fontVariantNumeric: "tabular-nums" }}>
+                    {avgWarReachedByRound.has(r.round)
+                      ? <>{avgWarReachedByRound.get(r.round)!.avg.toFixed(3)} <span style={{ color: "var(--color-text-muted)" }}>(n={avgWarReachedByRound.get(r.round)!.n})</span></>
+                      : "—"}
+                  </td>
                   <td style={{ padding: "0.5rem 0.75rem", fontVariantNumeric: "tabular-nums" }}>{r.smoothedWarPerYear.toFixed(3)}</td>
                   <td style={{ padding: "0.5rem 0.75rem", fontVariantNumeric: "tabular-nums" }}>{(hitRateByRound.get(r.round) ?? 0).toFixed(1)}%</td>
                   <td style={{ padding: "0.5rem 0.75rem" }}>
@@ -233,7 +253,9 @@ export default function DraftPickValueExplorer({ rounds, players }: Props) {
           </table>
         </div>
         <div style={{ fontSize: "0.75rem", color: "var(--color-text-muted)", marginTop: "0.5rem" }}>
-          Hit rate = the share of that round&apos;s OWN players who individually graded Plus-tier or better against the
+          Avg WAR/yr (all picks) counts every drafted player in the round, busts at zero; Avg WAR/yr (reached MLB) counts
+          only the players who actually appeared in a major-league game, so it shows how good a pick is when he makes it.
+          Both are career MLB WAR divided by years since the draft. Hit rate = the share of that round&apos;s OWN players who individually graded Plus-tier or better against the
           full population (percentile-based, not a fixed WAR cutoff — the real distribution is heavily skewed, so an
           absolute cutoff would call almost everything &quot;replacement level&quot;). Smoothed WAR/yr is what the
           trade-value composite will actually read. Click a row to see that round&apos;s individual players.
