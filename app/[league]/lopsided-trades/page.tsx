@@ -145,7 +145,7 @@ export default async function LopsidedTradesPage({
               <summary>How these numbers are built</summary>
               <ul>
                 <li><b>WAR is credited to the receiving team only.</b> A player&apos;s WAR counts from the trade year on, with the team that got him — it stops when he leaves that team (split seasons are handled by team).</li>
-                <li><b>Draft picks become the player they turned into.</b> Rounds 2–28 are traced exactly (the draft order repeats every round). Round 1 is a lottery, so the pick is followed through its trades to the team that used it; if that team made several first-round picks, the average of those candidates is shown (marked <i>~</i>).</li>
+                <li><b>Draft picks become the player they turned into.</b> Rounds 2–28 are traced exactly (the draft order repeats every round). Round 1 is a lottery, so the pick is followed through its trades to the team that used it; when that team made several first-round picks, each candidate gets a probability (based on how first-round slots usually line up with a team&apos;s later-round slot — checked against known picks) and the expected WAR is shown, marked <i>~</i>.</li>
                 <li><b>A pick is counted once.</b> If a team received a pick and flipped it before the draft, that trade shows it as re-traded with no value; the later trade carries the player.</li>
                 <li><b>Not counted:</b> cash, picks for drafts not held yet, and picks that couldn&apos;t be traced (a few early draft classes are incomplete in our data) — those trades are understated.</li>
                 <li><b>Horizon is the present</b> (through the latest season on file), so a 2012 trade has had far longer to accumulate WAR than a 2030 one.</li>

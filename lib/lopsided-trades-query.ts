@@ -3,12 +3,12 @@ import { makeSupabaseClient } from "./supabase-client";
 // Data layer for /lopsided-trades (2026-10-14, Rees's ask). Reads trade_war_results, which scripts/compute-lopsided-trades.ts
 // fills (method documented there and in HANDOFF.md). Server-only; the Supabase client is created inside the function.
 
-export type PickPlayer = { playerId: number; name: string; pos: string; overallPick: number | null; war: number; draftedByTeamId: number };
+export type PickPlayer = { playerId: number; name: string; pos: string; overallPick: number | null; war: number; draftedByTeamId: number; probability?: number };
 export type TradeAsset =
   | { kind: "player"; playerId: number; name: string; pos: string; war: number; firstYear: number | null; lastYear: number | null }
   | {
       kind: "pick"; year: number; round: number; originalTeamId: number | null; originalTeamLabel: string | null;
-      resolution: "exact" | "candidates" | "undrafted" | "unresolved"; players: PickPlayer[]; war: number;
+      resolution: "exact" | "likely" | "candidates" | "undrafted" | "unresolved"; players: PickPlayer[]; war: number;
       credited: boolean; finalHolderId: number | null; reason?: string;
     }
   | { kind: "cash"; amount: number };

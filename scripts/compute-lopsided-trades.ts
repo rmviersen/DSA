@@ -1,6 +1,7 @@
 import "dotenv/config";
 import { makeSupabaseClient } from "../lib/supabase-client.js";
 import { getLeagueId, leagueSlugFromArgv } from "../lib/league.js";
+import { assignmentProbabilities } from "../lib/draft-pick-inference.js";
 
 // Most-lopsided-trades engine (2026-10-14, Rees's ask) -- writes one row per COMPLETED trade to trade_war_results; the
 // /lopsided-trades page shows the top 20 by margin. Full method + caveats are in HANDOFF.md ("Lopsided trades page").
@@ -17,6 +18,9 @@ import { getLeagueId, leagueSlugFromArgv } from "../lib/league.js";
 //        be inferred. Instead the pick is followed through its trade chain to the team that finally held it; if that team made
 //        exactly one round-1 pick that year the player is exact, otherwise the pick is one of N candidate players and the
 //        average WAR of those candidates is used and flagged.
+//        Since 2026-10-15 the 'several candidates' case is narrowed with lib/draft-pick-inference.ts: among the picks one holder made,
+//        owners are matched to slots by how close each owner's later-round slot is to the slot (calibrated on known cases: stated
+//        90%+ confidence is right ~96% of the time). The expected WAR over those probabilities is used, flagged 'likely'.
 //    Picks for drafts that have not happened yet carry 0 and are flagged "not yet drafted".
 //  * lopsidedness (margin) = |WAR received by A - WAR received by B|. Older trades have had longer to pay off, so the
 //    horizon is "through the present", not a fixed number of years -- the page says so.
@@ -202,9 +206,17 @@ async function main() {
     return holder;
   }
 
-  type PickPlayer = { playerId: number; name: string; pos: string; overallPick: number | null; war: number; draftedByTeamId: number };
-  type PickResolution = { resolution: "exact" | "candidates" | "undrafted" | "unresolved"; players: PickPlayer[]; war: number; credited: boolean; finalHolderId: number | null; reason?: string };
-  const stats = { exact: 0, candidates: 0, undrafted: 0, unresolved: 0, retraded: 0, holderMismatch: 0, noOwner: 0, noDraftData: 0 };
+  // Owners of round-1 picks by draft year: everyone who drafted in round 1 plus every original owner named in a round-1 trade. The
+  // owners whose pick ended with one holder are the candidates for that holder's round-1 selections.
+  const r1Pool = new Map<number, Set<number>>();
+  const addOwner = (y: number, t: number) => { const set = r1Pool.get(y) ?? new Set<number>(); set.add(t); r1Pool.set(y, set); };
+  for (const p of drafted) if (Number(p.draft_round) === 1 && !p.draft_supplemental && p.draft_team_id != null) addOwner(Number(p.draft_year), Number(p.draft_team_id));
+  for (const key of pickMoves.keys()) { const [y, r, o] = key.split("|").map(Number); if (r === 1) addOwner(y, o); }
+  const groupOwners = (year: number, holder: number): number[] => [...(r1Pool.get(year) ?? [])].filter((x) => finalHolder(year, 1, x) === holder);
+
+  type PickPlayer = { playerId: number; name: string; pos: string; overallPick: number | null; war: number; draftedByTeamId: number; probability?: number };
+  type PickResolution = { resolution: "exact" | "likely" | "candidates" | "undrafted" | "unresolved"; players: PickPlayer[]; war: number; credited: boolean; finalHolderId: number | null; reason?: string };
+  const stats = { exact: 0, likely: 0, candidates: 0, undrafted: 0, unresolved: 0, retraded: 0, holderMismatch: 0, noOwner: 0, noDraftData: 0 };
   // Wraps resolveRaw: a pick's WAR is credited ONLY to the team that finally used it (per the trade chain). A team that received a
   // pick and flipped it on gets nothing here -- the later trade carries the value -- so one pick is never counted in two trades.
   function resolvePick(year: number, round: number, owner: number | null, receivingTeam: number): PickResolution {
@@ -218,7 +230,7 @@ async function main() {
     if (r.players.length === 1 && holder !== null && r.players[0].draftedByTeamId !== holder) stats.holderMismatch++;
     return { ...r, credited: true, finalHolderId: holder };
   }
-  function resolveRaw(year: number, round: number, owner: number | null): { resolution: "exact" | "candidates" | "undrafted" | "unresolved"; players: PickPlayer[]; war: number; reason?: string } {
+  function resolveRaw(year: number, round: number, owner: number | null): { resolution: "exact" | "likely" | "candidates" | "undrafted" | "unresolved"; players: PickPlayer[]; war: number; reason?: string } {
     const toPickPlayer = (p: PlayerRow): PickPlayer => {
       const team = Number(p.draft_team_id);
       const w = warFor(Number(p.id), team, Number(p.draft_year)).war;
@@ -236,6 +248,20 @@ async function main() {
     const candidates = byHolder.get(`${year}|${round}|${holder}`) ?? [];
     if (candidates.length === 1) { stats.exact++; const pp = toPickPlayer(candidates[0]); return { resolution: "exact", players: [pp], war: pp.war }; }
     if (candidates.length > 1) {
+      // Round 1: who among this holder's picks was THIS owner's? Weigh every owner->slot assignment by how close each owner's
+      // later-round slot is to the slot (see lib/draft-pick-inference.ts).
+      if (round === 1) {
+        const owners = groupOwners(year, holder);
+        const idx = owners.indexOf(owner);
+        if (idx >= 0 && owners.length === candidates.length) {
+          const probs = assignmentProbabilities(owners.map((o) => modalSlot(year, o)), candidates.map((p) => Number(p.draft_pick)));
+          if (probs) {
+            stats.likely++;
+            const pps = candidates.map((p, j) => ({ ...toPickPlayer(p), probability: probs[idx][j] })).sort((a, b) => (b.probability ?? 0) - (a.probability ?? 0));
+            return { resolution: "likely", players: pps, war: pps.reduce((a, b) => a + b.war * (b.probability ?? 0), 0) };
+          }
+        }
+      }
       stats.candidates++;
       const pps = candidates.map(toPickPlayer);
       return { resolution: "candidates", players: pps, war: pps.reduce((a, b) => a + b.war, 0) / pps.length };
@@ -306,13 +332,13 @@ async function main() {
       },
     });
   }
-  console.log(`Picks: ${abbrResolved} owners resolved from an abbreviation; ${stats.exact} exact, ${stats.candidates} among round-1 candidates, ${stats.undrafted} not yet drafted, ${stats.unresolved} unresolved (${stats.noOwner} no owner, ${stats.noDraftData} draft data missing); ${stats.retraded} re-traded before the draft (not credited); ${stats.holderMismatch} exact picks whose drafting team differs from the trade chain's final holder`);
+  console.log(`Picks: ${abbrResolved} owners resolved from an abbreviation; ${stats.exact} exact, ${stats.likely} round-1 'likely' (probability-weighted), ${stats.candidates} among plain candidates, ${stats.undrafted} not yet drafted, ${stats.unresolved} unresolved (${stats.noOwner} no owner, ${stats.noDraftData} draft data missing); ${stats.retraded} re-traded before the draft (not credited); ${stats.holderMismatch} exact picks whose drafting team differs from the trade chain's final holder`);
 
   out.sort((x, y) => (y.margin as number) - (x.margin as number));
   console.log("\nTop 25 by margin:");
   for (const r of out.slice(0, 25)) {
     const d = r.details as { a: { teamLabel: string; war: number; receives: Asset[] }; b: { teamLabel: string; war: number; receives: Asset[] } };
-    const desc = (s: typeof d.a) => s.receives.map((x) => x.kind === "player" ? `${x.name} (${x.pos}) ${x.war.toFixed(1)}` : x.kind === "pick" ? `${x.year} R${x.round}${!x.credited ? " [re-traded, not credited]" : x.resolution === "exact" ? ` -> ${x.players[0].name} ${x.war.toFixed(1)}` : ` [${x.resolution}] ${x.war.toFixed(1)}`}` : `cash`).join("; ");
+    const desc = (s: typeof d.a) => s.receives.map((x) => x.kind === "player" ? `${x.name} (${x.pos}) ${x.war.toFixed(1)}` : x.kind === "pick" ? `${x.year} R${x.round}${!x.credited ? " [re-traded, not credited]" : x.resolution === "exact" ? ` -> ${x.players[0].name} ${x.war.toFixed(1)}` : x.resolution === "likely" ? ` ~> ${x.players.map((p) => `${p.name} ${Math.round((p.probability ?? 0) * 100)}%`).join(" / ")} = ${x.war.toFixed(1)}` : ` [${x.resolution}] ${x.war.toFixed(1)}`}` : `cash`).join("; ");
     console.log(`${r.trade_date} margin ${(r.margin as number).toFixed(1)} | ${d.a.teamLabel} got [${desc(d.a)}] = ${d.a.war.toFixed(1)} | ${d.b.teamLabel} got [${desc(d.b)}] = ${d.b.war.toFixed(1)}`);
   }
 

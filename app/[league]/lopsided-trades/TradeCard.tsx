@@ -53,6 +53,19 @@ function AssetRow({ asset, franchises, receiver }: { asset: TradeAsset; franchis
         re-traded before the draft — {holder} used it{one ? <> and took <b>{one.name}</b> ({one.pos})</> : null}. Its value counts in that later trade.
       </>
     );
+  } else if (asset.resolution === "likely") {
+    // Round 1 is a lottery: probabilities from lib/draft-pick-inference.ts (calibrated on known picks).
+    const ranked = [...asset.players].sort((x, y) => (y.probability ?? 0) - (x.probability ?? 0));
+    const top = ranked[0];
+    const others = ranked.slice(1).filter((p) => (p.probability ?? 0) >= 0.05);
+    const pct = (p: { probability?: number }) => `${Math.round((p.probability ?? 0) * 100)}%`;
+    sub = (
+      <>
+        round 1 is a lottery — by where teams normally pick, most likely <b>{top.name}</b> ({top.pos}) · {pct(top)}
+        {others.length > 0 ? <> · also {others.map((p) => `${p.name} ${pct(p)}`).join(", ")}</> : null}
+      </>
+    );
+    war = <span className={`${warClass(asset.war)} lt-approx`} title="Expected WAR, weighted by those probabilities">~{fmtWar(asset.war)}</span>;
   } else if (asset.resolution === "candidates") {
     sub = (
       <>
@@ -135,7 +148,7 @@ export default function TradeCard({ trade, rank, franchises }: { trade: Lopsided
   const winPos = Math.max(0, win.war), losePos = Math.max(0, lose.war);
   const share = winPos + losePos > 0 ? (winPos / (winPos + losePos)) * 100 : 50;
   const allAssets = [...trade.a.receives, ...trade.b.receives];
-  const estimated = allAssets.some((x) => x.kind === "pick" && x.resolution === "candidates" && x.credited);
+  const estimated = allAssets.some((x) => x.kind === "pick" && x.credited && (x.resolution === "candidates" || (x.resolution === "likely" && Math.max(...x.players.map((p) => p.probability ?? 0)) < 0.9)));
   const understated = allAssets.some((x) => x.kind === "pick" && x.resolution === "unresolved");
   return (
     <article className="lt-card">
