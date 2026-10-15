@@ -1537,3 +1537,5 @@ Every real refresh since 2026-10-09 went red in GitHub Actions because four side
 - If a per-MLB-season rate is ever wanted instead (WAR / seasons actually played in the majors), it needs a new field in `scripts/compute-draft-pick-value.ts` -- the per-player table doesn't carry MLB years today.
 
 **Follow-up (2026-10-14, Rees):** the **Smoothed** column is also removed from `/admin/draft-pick-value`'s 'By round' table (display only), along with the footnote sentence about it. The smoothed curve (`draft_pick_value_curve.smoothed_war_per_year`, isotonic-smoothed round averages) is still computed and stored and is still what the trade-value composite is meant to read -- it just isn't shown on this page any more.
+
+**Layout follow-up (2026-10-14, Rees: 'too spread out'):** the 'By round' table on `/admin/draft-pick-value` is now sized to its content (`width: auto`, was 100%), headers wrap onto multiple lines (max ~7.5rem each, bottom-aligned) except 'Best pick', and every cell is `nowrap` with tighter padding so Best pick stays on one line. Styling only, in `DraftPickValueExplorer.tsx`; owner-only page, so not eyeballed in a browser.

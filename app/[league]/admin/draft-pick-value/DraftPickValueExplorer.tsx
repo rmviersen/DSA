@@ -213,11 +213,12 @@ export default function DraftPickValueExplorer({ rounds, players }: Props) {
       <div style={cardStyle}>
         <h2 style={sectionTitleStyle}>By round — full detail</h2>
         <div style={{ overflowX: "auto" }}>
-          <table style={{ width: "100%", borderCollapse: "collapse", fontSize: "0.875rem" }}>
+          <table style={{ width: "auto", borderCollapse: "collapse", fontSize: "0.875rem" }}>
             <thead>
               <tr style={{ background: "var(--color-table-header)", textAlign: "left" }}>
                 {["Round", "n", "% Reached MLB (n)", "Avg WAR/yr (all picks)", "Avg WAR/yr (reached MLB)", "Hit rate", "Best pick"].map((h) => (
-                  <th key={h} style={{ padding: "0.5rem 0.75rem", fontWeight: 700 }}>{h}</th>
+                  // Headers wrap onto several lines (capped width) so the columns stay narrow; Best pick stays on one line.
+                  <th key={h} style={{ padding: "0.5rem 0.6rem", fontWeight: 700, verticalAlign: "bottom", lineHeight: 1.25, ...(h === "Best pick" ? { whiteSpace: "nowrap" } : { whiteSpace: "normal", maxWidth: "7.5rem" }) }}>{h}</th>
                 ))}
               </tr>
             </thead>
@@ -231,19 +232,19 @@ export default function DraftPickValueExplorer({ rounds, players }: Props) {
                     background: drilldownRound === r.round ? "var(--color-table-hover)" : "transparent",
                   }}
                 >
-                  <td style={{ padding: "0.5rem 0.75rem", fontWeight: 700 }}>{r.round}</td>
-                  <td style={{ padding: "0.5rem 0.75rem", fontVariantNumeric: "tabular-nums" }}>{r.sampleSize}</td>
-                  <td style={{ padding: "0.5rem 0.75rem", fontVariantNumeric: "tabular-nums", fontWeight: 700 }}>
+                  <td style={{ padding: "0.5rem 0.6rem", fontWeight: 700, whiteSpace: "nowrap" }}>{r.round}</td>
+                  <td style={{ padding: "0.5rem 0.6rem", fontVariantNumeric: "tabular-nums", whiteSpace: "nowrap" }}>{r.sampleSize}</td>
+                  <td style={{ padding: "0.5rem 0.6rem", fontVariantNumeric: "tabular-nums", fontWeight: 700, whiteSpace: "nowrap" }}>
                     {r.pctReachedMlb.toFixed(1)}% <span style={{ color: "var(--color-text-muted)", fontWeight: 400 }}>(n={r.reachRateSampleSize})</span>
                   </td>
-                  <td style={{ padding: "0.5rem 0.75rem", fontVariantNumeric: "tabular-nums" }}>{r.avgWarPerYear.toFixed(3)}</td>
-                  <td style={{ padding: "0.5rem 0.75rem", fontVariantNumeric: "tabular-nums" }}>
+                  <td style={{ padding: "0.5rem 0.6rem", fontVariantNumeric: "tabular-nums", whiteSpace: "nowrap" }}>{r.avgWarPerYear.toFixed(3)}</td>
+                  <td style={{ padding: "0.5rem 0.6rem", fontVariantNumeric: "tabular-nums", whiteSpace: "nowrap" }}>
                     {avgWarReachedByRound.has(r.round)
                       ? <>{avgWarReachedByRound.get(r.round)!.avg.toFixed(3)} <span style={{ color: "var(--color-text-muted)" }}>(n={avgWarReachedByRound.get(r.round)!.n})</span></>
                       : "—"}
                   </td>
-                  <td style={{ padding: "0.5rem 0.75rem", fontVariantNumeric: "tabular-nums" }}>{(hitRateByRound.get(r.round) ?? 0).toFixed(1)}%</td>
-                  <td style={{ padding: "0.5rem 0.75rem" }}>
+                  <td style={{ padding: "0.5rem 0.6rem", fontVariantNumeric: "tabular-nums", whiteSpace: "nowrap" }}>{(hitRateByRound.get(r.round) ?? 0).toFixed(1)}%</td>
+                  <td style={{ padding: "0.5rem 0.6rem", whiteSpace: "nowrap" }}>
                     {r.bestPlayerName} <span style={{ color: "var(--color-text-muted)" }}>({r.bestPlayerCareerWar?.toFixed(1)} career WAR)</span>
                   </td>
                 </tr>
