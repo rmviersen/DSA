@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
-import { Bar, BarChart, Cell, CartesianGrid, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
+import { Bar, BarChart, Cell, CartesianGrid, ComposedChart, Line, ReferenceLine, ResponsiveContainer, Scatter, Tooltip, XAxis, YAxis, ZAxis } from "recharts";
 import type { Matrix, PairStat, TradeRelationshipData, TradeRow, TradeTeam } from "../../../lib/trade-relationships-math";
 import {
   arcPath, buildMatrix, chordLayout, pairStats, relationBetween, ribbonPath, rowTotals, teamStats, tradesPerYear,
@@ -76,6 +76,23 @@ export default function TradeRelationshipsExplorer({ data }: { data: TradeRelati
   const [selectedTeam, setSelectedTeam] = useState<number | null>(null);
   const [hoverPair, setHoverPair] = useState<[number, number] | null>(null);
   const [selectedPair, setSelectedPair] = useState<[number, number] | null>(null);
+  // Head-to-head timeline (2026-10-15, Rees: "plot all of the trades between Denver and Huron over the years"). Starts on
+  // Denver vs Huron (the league's most frequent pair), any two teams can be chosen, and picking a pair elsewhere loads it here.
+  const [h2h, setH2h] = useState<[number, number]>(() => {
+    const find = (name: string) => teams.findIndex((t) => t.name === name);
+    const d = find("Denver"), h = find("Huron");
+    if (d >= 0 && h >= 0) return [d, h];
+    const counts = new Map<string, number>();
+    for (const t of trades) { const k = `${Math.min(t.a, t.b)}-${Math.max(t.a, t.b)}`; counts.set(k, (counts.get(k) ?? 0) + 1); }
+    const top = [...counts.entries()].sort((x, y) => y[1] - x[1])[0];
+    if (top) {
+      const [a, b] = top[0].split("-").map(Number);
+      const ia = teams.findIndex((t) => t.id === a), ib = teams.findIndex((t) => t.id === b);
+      if (ia >= 0 && ib >= 0) return [ia, ib];
+    }
+    return [0, Math.min(1, teams.length - 1)];
+  });
+  useEffect(() => { if (selectedPair) setH2h(selectedPair); }, [selectedPair]);
 
   // Play: grow the window's right edge one season at a time (restarts from the left edge if it was already at the end).
   useEffect(() => {
@@ -99,6 +116,28 @@ export default function TradeRelationshipsExplorer({ data }: { data: TradeRelati
   const perYear = useMemo(() => tradesPerYear(trades, minYear, maxYear), [trades, minYear, maxYear]);
   const windowTrades = useMemo(() => trades.filter((t) => t.year >= yearFrom && t.year <= yearTo), [trades, yearFrom, yearTo]);
   const maxCell = useMemo(() => Math.max(1, ...matrix.flat()), [matrix]);
+
+  // Every trade between the two chosen teams, all seasons (not just the window): net = pieces team A sent minus pieces team B sent.
+  const h2hData = useMemo(() => {
+    const [i, j] = h2h;
+    const A = teams[i].id, B = teams[j].id;
+    const list = trades.filter((t) => (t.a === A && t.b === B) || (t.a === B && t.b === A))
+      .sort((x, y) => (x.date < y.date ? -1 : x.date > y.date ? 1 : x.id - y.id));
+    let cum = 0, aPl = 0, aPk = 0, bPl = 0, bPk = 0;
+    const pts = list.map((t) => {
+      const aIsA = t.a === A;
+      const a = aIsA ? { p: t.aPlayers, k: t.aPicks } : { p: t.bPlayers, k: t.bPicks };
+      const b = aIsA ? { p: t.bPlayers, k: t.bPicks } : { p: t.aPlayers, k: t.aPicks };
+      cum += 1; aPl += a.p; aPk += a.k; bPl += b.p; bPk += b.k;
+      return { id: t.id, date: t.date, ts: Date.parse(t.date + "T00:00:00Z"), net: a.p + a.k - (b.p + b.k), total: a.p + a.k + b.p + b.k, cum, aP: a.p, aK: a.k, bP: b.p, bK: b.k };
+    });
+    const xMin = Date.UTC(minYear, 0, 1), xMax = Date.UTC(maxYear + 1, 0, 1);
+    const cumLine = [{ ts: xMin, cum: 0 }, ...pts.map((p) => ({ ts: p.ts, cum: p.cum })), { ts: xMax, cum }];
+    const yMax = Math.max(2, ...pts.map((p) => Math.abs(p.net)));
+    const ticks: number[] = [];
+    for (let y = minYear; y <= maxYear + 1; y += 4) ticks.push(Date.UTC(y, 0, 1));
+    return { pts, cumLine, xMin, xMax, yMax, ticks, totals: { aPl, aPk, bPl, bPk }, count: cum };
+  }, [h2h, teams, trades, minYear, maxYear]);
 
   const focusTeam = hoverTeam ?? selectedTeam;
   const abbr = (i: number) => teams[i].abbr;
@@ -420,6 +459,102 @@ export default function TradeRelationshipsExplorer({ data }: { data: TradeRelati
             </>
           )}
         </div>
+      </div>
+
+      {/* Head-to-head timeline */}
+      <div style={cardStyle}>
+        <div style={{ display: "flex", flexWrap: "wrap", gap: "0.75rem", alignItems: "center", marginBottom: "0.5rem" }}>
+          <h2 style={{ ...sectionTitleStyle, margin: 0 }}>Head to head</h2>
+          {([0, 1] as const).map((slot) => (
+            <select
+              key={slot}
+              value={h2h[slot]}
+              onChange={(e) => {
+                const v = Number(e.target.value);
+                const other = h2h[slot === 0 ? 1 : 0];
+                if (v === other) setH2h([h2h[1], h2h[0]]); else setH2h(slot === 0 ? [v, other] : [other, v]);
+              }}
+              style={{ padding: "0.3rem 0.5rem", fontSize: "0.875rem", border: "1px solid var(--color-border-strong)", borderRadius: 6, background: "var(--color-surface)", color: "var(--color-text)" }}
+            >
+              {teams.map((t, idx) => <option key={t.id} value={idx}>{t.name} {t.nickname}</option>)}
+            </select>
+          ))}
+          <button onClick={() => setH2h([h2h[1], h2h[0]])} style={{ padding: "0.3rem 0.7rem", borderRadius: 999, border: "1px solid var(--color-border)", background: "transparent", cursor: "pointer", color: "var(--color-text)" }}>⇄ swap</button>
+        </div>
+        <div style={{ fontSize: "0.875rem", marginBottom: "0.5rem" }}>
+          <b>{plural(h2hData.count, "trade")}</b> between{" "}
+          <span style={{ color: colorFor(teams[h2h[0]]), fontWeight: 700 }}>{teams[h2h[0]].name}</span> and{" "}
+          <span style={{ color: colorFor(teams[h2h[1]]), fontWeight: 700 }}>{teams[h2h[1]].name}</span>
+          {h2hData.count > 0 && (
+            <span style={mutedStyle}>
+              {" "}· {teams[h2h[0]].abbr} sent {plural(h2hData.totals.aPl, "player")} + {plural(h2hData.totals.aPk, "pick")}, {teams[h2h[1]].abbr} sent {plural(h2hData.totals.bPl, "player")} + {plural(h2hData.totals.bPk, "pick")}
+            </span>
+          )}
+        </div>
+        {h2hData.count === 0 ? (
+          <div style={mutedStyle}>These two teams have never traded with each other.</div>
+        ) : (
+          <>
+            <div style={{ height: 340 }}>
+              <ResponsiveContainer width="100%" height="100%">
+                <ComposedChart margin={{ top: 10, right: 16, bottom: 6, left: 0 }}>
+                  <CartesianGrid strokeDasharray="3 3" stroke="var(--color-border)" />
+                  <XAxis type="number" dataKey="ts" domain={[h2hData.xMin, h2hData.xMax]} ticks={h2hData.ticks} tickFormatter={(v: number) => String(new Date(v).getUTCFullYear())} tick={{ fontSize: 11 }} />
+                  <YAxis yAxisId="net" type="number" domain={[-h2hData.yMax, h2hData.yMax]} allowDecimals={false} tick={{ fontSize: 11 }} width={34} />
+                  <YAxis yAxisId="cum" orientation="right" type="number" domain={[0, "dataMax"]} allowDecimals={false} tick={{ fontSize: 11 }} width={34} />
+                  <ZAxis type="number" dataKey="total" range={[70, 480]} />
+                  <ReferenceLine yAxisId="net" y={0} stroke="var(--color-text-muted)" />
+                  <Tooltip
+                    cursor={{ strokeDasharray: "3 3" }}
+                    content={({ active, payload }) => {
+                      const p = payload?.map((x) => x.payload as { id?: number; date?: string; aP: number; aK: number; bP: number; bK: number; cum: number }).find((x) => x && x.id !== undefined);
+                      if (!active || !p || !p.date) return null;
+                      const bits = (pl: number, pk: number) => [pl ? plural(pl, "player") : "", pk ? plural(pk, "pick") : ""].filter(Boolean).join(" + ") || "cash / nothing listed";
+                      return (
+                        <div style={{ background: "var(--color-surface)", border: "1px solid var(--color-border-strong)", borderRadius: 6, padding: "0.5rem 0.7rem", fontSize: 12 }}>
+                          <div style={{ fontWeight: 700 }}>{fmtDate(p.date)} · trade #{p.cum}</div>
+                          <div>{teams[h2h[0]].abbr} sent {bits(p.aP, p.aK)}</div>
+                          <div>{teams[h2h[1]].abbr} sent {bits(p.bP, p.bK)}</div>
+                        </div>
+                      );
+                    }}
+                  />
+                  <Line yAxisId="cum" data={h2hData.cumLine} dataKey="cum" type="stepAfter" stroke="var(--color-text-muted)" strokeWidth={1.5} strokeDasharray="4 3" dot={false} activeDot={false} isAnimationActive={false} />
+                  <Scatter yAxisId="net" data={h2hData.pts} dataKey="net" isAnimationActive={false}>
+                    {h2hData.pts.map((p) => (
+                      <Cell key={p.id} fill={p.net > 0 ? colorFor(teams[h2h[0]]) : p.net < 0 ? colorFor(teams[h2h[1]]) : "var(--color-text-muted)"} fillOpacity={0.8} stroke="var(--color-surface)" />
+                    ))}
+                  </Scatter>
+                </ComposedChart>
+              </ResponsiveContainer>
+            </div>
+            <div style={{ fontSize: "0.75rem", ...mutedStyle, marginTop: "0.25rem" }}>
+              Each dot is one trade, placed on its date. Above the line = <b>{teams[h2h[0]].name}</b> sent more pieces (players + picks); below = <b>{teams[h2h[1]].name}</b> sent more. Dot size = total pieces in the deal. The dashed step line (right axis) is the running number of trades.
+            </div>
+            <div style={{ maxHeight: 280, overflowY: "auto", marginTop: "0.6rem" }}>
+              <table style={{ width: "auto", borderCollapse: "collapse", fontSize: "0.8125rem" }}>
+                <thead>
+                  <tr style={{ background: "var(--color-table-header)", position: "sticky", top: 0 }}>
+                    <th style={{ ...thStyle, cursor: "default" }}>#</th>
+                    <th style={{ ...thStyle, cursor: "default" }}>Date</th>
+                    <th style={{ ...thStyle, cursor: "default" }}>{teams[h2h[0]].abbr} sent</th>
+                    <th style={{ ...thStyle, cursor: "default" }}>{teams[h2h[1]].abbr} sent</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {[...h2hData.pts].reverse().map((p) => (
+                    <tr key={p.id} style={{ borderTop: "1px solid var(--color-border)" }}>
+                      <td style={{ ...tdStyle, textAlign: "left" }}>{p.cum}</td>
+                      <td style={{ ...tdStyle, textAlign: "left" }}>{fmtDate(p.date)}</td>
+                      <td style={{ ...tdStyle, textAlign: "left" }}>{assetText(p.aP, p.aK)}</td>
+                      <td style={{ ...tdStyle, textAlign: "left" }}>{assetText(p.bP, p.bK)}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </>
+        )}
       </div>
 
       {/* Matrix heatmap */}
