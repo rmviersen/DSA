@@ -45,6 +45,7 @@ const NAV_ITEMS: NavItem[] = [
     { href: "/admin/draft-pick-value", label: "Draft Pick Value" },
     { href: "/admin/work-ethic-mlb", label: "Work Ethic & MLB" },
     { href: "/trade-relationships", label: "Trade Relationships" },
+    { href: "/lopsided-trades", label: "Lopsided Trades" },
   ] },
   { href: "/players", label: "Top Players" },
   // Points at the guest-facing /prospects (cards, no side-by-side System
