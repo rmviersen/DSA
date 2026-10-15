@@ -15,6 +15,41 @@ Reference docs, in the order you'd actually want to read them if you need the "w
 - [`lib/database.types.ts`](lib/database.types.ts) — **the actual current schema**, auto-generated from the live database. Regenerate anytime with the Supabase MCP `generate_typescript_types` tool, or ask whoever's running the backend session to.
 - [`prospect-bio-style-guide.md`](prospect-bio-style-guide.md) — style/tone/data-source rules for the scouting-style blurbs on `/prospects`, worked out against the real top 10 with Rees. Read before writing or regenerating any batch of these.
 
+## 1a. Before you build anything: check what already exists (added 2026-10-14)
+
+**Why this section exists:** on 2026-10-14, building the 'most lopsided trades' page, a session went to StatsPlus to find team logos, probed which sizes exist, and started downloading 32 PNGs -- while `teamLogoUrl()` in `lib/display-helpers.ts` already built the right URL and the Top Prospects page had used it for weeks. It was caught only because Rees remembered. The helper was documented only in passing, deep inside a paragraph of this file. Nothing here told a new session to look first.
+
+**The routine (do it every time, before writing new code, assets or scrapers):**
+1. **Search the code for the thing, not just this doc.** `grep -rn -i "<keyword>" lib app scripts` (e.g. `logo`, `war`, `draft`, `freshness`). Look at how an existing page that already shows the same thing does it.
+2. **Check the inventory below**, then grep this file (`HANDOFF.md`) for the keyword -- the long dated entries further down hold the *why* and the gotchas.
+3. **If something exists, reuse it and say so** in the reply and the HANDOFF entry. If it exists but is wrong for the new need, extend it in place rather than writing a second copy.
+4. **Before finishing, record the work in this file in the same commit:** a dated entry at the bottom, and -- if you added something another page could reuse -- a new row in the inventory below. An undocumented helper is how step 1 gets skipped next time.
+
+**Reusable pieces (verified to exist 2026-10-14; file -> what it is for):**
+
+| Need | Use this | Notes |
+|---|---|---|
+| Team logo image | `teamLogoUrl(name, nickname)` in `lib/display-helpers.ts` | Hotlinks StatsPlus's `team_logos/{city}_{nickname}_110.png` (size 110 -- see the comment above `LOGO_SIZE` before changing). Import from `display-helpers`, **never** `lib/queries.ts` in a client component (gotcha 16). Do not download or re-host logos. |
+| Link to a player's StatsPlus page | `statsPlusPlayerUrl()` in `lib/display-helpers.ts` | Same file as the helpers below. |
+| Level labels / ladder | `effectiveLevel()`, `levelLabel()`, `CANONICAL_LEVELS` in `lib/display-helpers.ts` | The one canonical 8-tier scale (A vs A+ split, international = 8). Never re-derive from raw `level`. |
+| Injury text, IP notation, grade rounding | `injuryStatus()`, `fmtInningsPitched()`, `roundGrade()` in `lib/display-helpers.ts` | IP is stored as `outs`; show `40.1`-style. |
+| Sortable/filterable player table | `app/_components/PlayerTable.tsx` | Props: `renderLimit` (cap applies AFTER filters), `showTeamFilter`, name search (**on by default** since 2026-10-13), `showValueVsDemand`, `showExport`, etc. |
+| Rated players for a set of ids | `fetchComputedPlayers()`, `fetchByIdsChunked()`, `latestRefreshRunId()` in `lib/queries.ts` | Chunk id lists; PostgREST has row/timeout limits. |
+| Which league / default org | `resolveLeagueId(slug)`, `resolveDefaultOrgId(leagueId)` in `lib/league.ts` | No hardcoded org 15. |
+| How fresh is roster data | `getRosterFreshness()` in `lib/roster-freshness.ts`; `npm run sync-roster-flags` | Newer of last refresh / last sync. |
+| Fetch a StatsPlus WEBSITE page | `client.sitePage(url)` (`fetchSitePage`) in `lib/statsplus-client.ts` | Needs the session cookies; spaced 8 s; clear 403 message. StatsPlus rate-limits hard (~15 min cooldown after a burst) -- never probe pages in a loop. |
+| Market-rate fair value | `marketRateAav()`, `MARKET_RATE_MAX_AAV`, `marketTypeForRole()` in `lib/market-rate-math.ts` | $50M cap, hitter/SP/RP curves. |
+| Years of control / trade value | `yearsOfControl()` and friends in `lib/trade-value.ts` | |
+| Regression / smoothing | `fitLine()`, `isotonicRegressionNonIncreasing()` in `lib/regression.ts` | |
+| WAR-per-year tiers / percentile | `warPerYearTier()`, `percentileRank()` in `lib/draft-pick-value-query.ts` | Draft Pick Value page's grading language. |
+| Trade history by team pair | `getTradeRelationshipData()` in `lib/trade-relationships-query.ts`; chord/matrix math in `lib/trade-relationships-math.ts` | Franchise-id nodes; completed trades only. |
+| Draft pick -> player it became | `players.draft_year/draft_round/draft_pick/draft_team_id` | There is no historical draft table (`draft_picks` holds only the current class). See the lopsided-trades entry at the bottom. |
+
+**Lessons log (newest first; one line each -- add yours):**
+- 2026-10-14: duplicated an existing logo mechanism (above). Cause: searched the outside world (StatsPlus) before the codebase. Fix: this section.
+- 2026-10-13: told Rees a refresh bug was 'moves made after the refresh' without checking the snapshots; the real cause (refresh ran before StatsPlus published) was one query away. **Verify against the data before explaining.**
+- 2026-10-14: tried a spoofed browser User-Agent against StatsPlus's bot check. Never disguise the client to get around a block; use the legitimate pass (Rees's own session cookie) or ask.
+
 ## 2. Division of ownership
 
 **Cursor was removed from this project 2026-08-28.** Rather than handing `app/**` to a second tool (Cowork), Claude Code now owns the *entire* codebase — backend and front end both. One engineering owner with full repo context, rather than splitting UI work across tools that each have to re-derive the data model from scratch. Cowork's role on this project is deliberately kept outside the codebase entirely — league/GM-facing operations (trades, roster moves, communications), not building or touching `app/**`. If that division changes again later, update this section rather than leaving it stale.
@@ -1552,3 +1587,13 @@ Every real refresh since 2026-10-09 went red in GitHub Actions because four side
 - **Data rules worth knowing:** nodes are FRANCHISE ids (`team_a_id`/`team_b_id`), stable through relocations (id 2 = Boston -> Carolina -> Chicago), labelled with the CURRENT name + abbreviation; only `status = 'complete'` trades (the 11 'pending' rows are proposals / duplicates of later completes); asset counts are players and draft picks per side (cash and player names are not shown). Divisions come from the newest `team_standings_snapshots` row, so the grouping needs that table populated (a league without it falls back to one group). Per-year bars use the trade's calendar year.
 - **Verified:** math checked against the real data first (matrix symmetric, sums = 2 x 1,162 trades, arc angles = 2pi, ribbon values = 1,162, 337 of 496 pairs have traded, Denver is the hub: 328 trades, all 31 partners, top partner Huron 38); then the page was exercised in a local preview (light + dark theme, phone width, hover/click/Play/matrix click-through). The preview used a throwaway local cookie secret in `.env.local`, never the real owner secret or password; `.env`/`.env.local` were deleted afterwards. Dark-mode bug found + fixed during that check (heatmap/bars used the site navy, invisible on dark -> `ACCENT` mid-blue).
 - Ideas not built (ask if wanted): player names in the pair trade list, a force-directed network view, asset-value balance per pair (who 'won' the trades) using the trade-value engine, guest visibility.
+
+## Lopsided trades page -- research notes, build IN PROGRESS (2026-10-14, Rees)
+
+Rees: 'the most lopsided trades in TBL history, by WAR', incl. tracing traded DRAFT PICKS to the value they became; a page with the top 20 trades, value gotten/given in detail (player names, positions, trade date, teams with logos), visually pleasing. Findings so far (nothing built yet -- this is so the next session does not redo the research):
+
+- **Logos:** reuse `teamLogoUrl()` (section 1a). A first attempt downloaded logo PNGs into `public/team-logos/` -- removed, do not do this.
+- **WAR with the receiving team is available:** `player_batting_stats_snapshots.war` / `player_pitching_stats_snapshots.war` carry `team_id` and `stint` per season, so the WAR a player produced FOR the team that acquired him = sum of his level-1, split-1 rows with `team_id` = that team from the trade year on. Use the latest `refresh_run_id` per season (2001-2028 each have one run; 2029-2032 have several cumulative runs; same `latestRunForYear` idea as `scripts/compute-draft-pick-value.ts`). Stats exist for every season 2001-2032.
+- **Picks:** `trade_event_items` holds `pick_year`, `pick_round`, `pick_team_id` (ORIGINAL owner). The draft itself is only on `players` (`draft_year`, `draft_round`, `draft_pick` = slot in the round, `draft_overall_pick`, `draft_team_id` = team that MADE the pick, i.e. the final holder). All 28 rounds exist for every year 2001-2032 (32 teams x 28 = 896 in recent years). Checked on the 2030 class: draft order is the SAME in every round -- each team has one 'common slot' it picks at in ~22-28 of its 28 rounds -- so an original owner's slot = the mode of `draft_pick` over the picks it kept; the few odd rounds are probably the round-1 lottery. Resolve a traded pick as the player with (year, round, that slot); round 1 needs extra care (lottery) and should be flagged when ambiguous. Picks for years not yet drafted (2033+) have no player yet.
+- **Trade data:** `trade_events` (completed only, 1,162) + `trade_event_items` (player or pick or cash, `side` a/b = the team that SENT it). Pitchers can be told apart from hitters via `players.pos = 1` and `role` 11 SP / 12 RP / 13 closer.
+- **Open design points:** lopsidedness = absolute WAR margin between what each side received; horizon = through the present (older trades have more time to accrue -- say so on the page); compute offline into a results table (RLS on) rather than on page load.
