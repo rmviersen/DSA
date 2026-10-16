@@ -350,6 +350,14 @@ async function main() {
       // PATH and works fine from an interactive terminal. Confirmed
       // 2026-08-20: this exact bug let a real refresh (run 10) succeed on
       // raw data while silently leaving no computed snapshot behind.
+      // Age-aware Potential auto-refit (2026-10-16, Rees: the factors should keep updating as data accumulates). Runs BEFORE compute-ratings so a
+      // newly activated curve is applied to this run straight away. It rate-limits itself (>= 30 game days of new evidence), is gated by a
+      // backtest, bounded in how far any R can move, and NEVER fails the refresh -- any problem leaves the active curve untouched.
+      try {
+        execFileSync("npx", ["tsx", "scripts/auto-refit-potential-realization.ts"], { stdio: "inherit", shell: true });
+      } catch (err) {
+        console.warn(`Age-aware Potential auto-refit step failed (the active curve is unchanged): ${err}`);
+      }
       execFileSync("npx", ["tsx", "scripts/compute-ratings.ts"], { stdio: "inherit", shell: true });
       const { count, error: countErr } = await supabase.from("player_computed").select("player_id", { count: "exact", head: true }).eq("refresh_run_id", refreshRunId);
       computeOk = !countErr && (count ?? 0) > 0;

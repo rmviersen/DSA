@@ -116,3 +116,5 @@ arrival". With the tables absent the pipeline's output is byte-identical to befo
 editor; (2) `npx tsx scripts/fit-potential-realization.ts <cacheDir> --activate`; (3) `npx tsx scripts/compute-ratings.ts` (latest run; the refresh
 chain applies it from then on). Switch off any time: set the active set's `is_active = false`. Historical runs are NOT recomputed by default (the
 prospect "Change from" picker would otherwise compare an unadjusted baseline with adjusted ratings); `compute-ratings.ts --all` backfills them.
+
+**Update 2026-10-16:** the curve is live and now refits itself (backtest gate, +/-0.05 movement limit, version history). The curve above was the hand-seeded v1 (set #1); the first automatic refit (set #2) moved hitters 24+ down a little (R at 24: .22 -> .17, 25: .08 -> .03, 26+: ~0) and pitchers by <= .04. The gate used by the refit is a less noisy form of the criteria above (pooled cross-fit), not looser thresholds. Details: `HANDOFF.md` ("Age-aware Potential: AUTO-REFIT and history re-score").

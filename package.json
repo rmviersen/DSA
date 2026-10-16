@@ -20,6 +20,7 @@
     "analyze-age-development": "tsx scripts/analyze-age-development.ts",
     "backtest-potential-realization": "tsx scripts/backtest-potential-realization.ts",
     "fit-potential-realization": "tsx scripts/fit-potential-realization.ts",
+    "auto-refit-potential-realization": "tsx scripts/auto-refit-potential-realization.ts",
     "snapshot-players": "tsx scripts/snapshot-players.ts",
     "compute-team-ratings": "tsx scripts/compute-team-ratings.ts",
     "import-draft-pool": "tsx scripts/import-draft-pool.ts",

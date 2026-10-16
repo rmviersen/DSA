@@ -27,6 +27,9 @@ on:
 jobs:
   refresh:
     runs-on: ubuntu-latest
+    outputs:
+      # "true" when the age-aware Potential auto-refit activated a new curve this run (see the rescore-history job below)
+      curve_changed: ${{ steps.refresh.outputs.curve_changed }}
     # 30 min covers a normal refresh comfortably (ratings export alone can take
     # a few minutes per StatsPlus's own async job, plus the stats/compute
     # steps) without letting a genuinely hung run burn hours of Actions time.
@@ -74,6 +77,7 @@ jobs:
       # continue-on-error/if: failure()) had this step ever failed partway
       # through its own internal chain.
       - name: Refresh from StatsPlus
+        id: refresh
         if: steps.check.outputs.new_data == 'true' || github.event_name == 'workflow_dispatch'
         env:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
@@ -99,3 +103,25 @@ jobs:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
         run: npm run verify-ratings
+
+  # Age-aware Potential (2026-10-16): when the automatic refit (scripts/auto-refit-potential-realization.ts, run inside refresh.ts) activates a
+  # NEW curve, every past run is re-scored with it so the prospect "Change from" picker and any history comparison stay apples to apples. Slow
+  # (49+ runs, hours) but rare: a curve only changes when 30+ game days of new evidence pass the backtest gate AND some R moves by >= 0.005.
+  # Its own job so the main refresh keeps its 30-minute cap against hung runs. A failure leaves history on the previous curve (logged).
+  rescore-history:
+    needs: refresh
+    if: always() && needs.refresh.outputs.curve_changed == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 300
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - name: Re-score every past run with the active curve
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+        run: npx tsx scripts/compute-ratings.ts --all

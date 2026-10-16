@@ -489,12 +489,23 @@ export default async function GlossaryPage({ params }: { params: Promise<{ leagu
         <h2 style={sectionTitleStyle}>Overall, Potential &amp; Hitter/Pitcher (PH)</h2>
         <code style={formulaStyle}>
           Overall = max(Batting×batting + Fielding×fielding_weight + Baserunning×baserunning, Pitching){"\n"}
-          Potential = max(Batting Potential×batting + Fielding×fielding_weight + Baserunning×baserunning, Pitching Potential){"\n"}
+          PotentialRaw = max(Batting Potential×batting + Fielding×fielding_weight + Baserunning×baserunning, Pitching Potential){"\n"}
+          Potential = Overall + R(age, PH) × max(0, PotentialRaw − Overall){"\n"}
           PH = &quot;H&quot; if (Batting×batting + Fielding×fielding_weight + Baserunning×baserunning) &gt; Pitching, else &quot;P&quot;
         </code>
         <p style={noteStyle}>
           <code>fielding_weight</code> = <code>fielding</code> × a per-Role calibrated multiplier (currently 1.0 for
           every role — the role-calibration table is retired but wired in as a harmless no-op).
+        </p>
+        <p style={bodyTextStyle}>
+          <strong>Age-aware Potential.</strong> A scouted Potential assumes the player keeps developing, but the data
+          shows hitters stop improving around 24–25 and pitchers around 26–27. <strong>R</strong> is the share of a
+          player&apos;s listed gap (PotentialRaw − Overall) that players of his age and type have actually closed.
+          It is 1.00 through age 19 (full development ahead) and falls with age: for a 25-year-old hitter almost none of
+          the gap is expected to materialize, while a 25-year-old pitcher keeps about half. Overall is never touched.
+          R is fitted from our own ratings history, refit automatically as more history accumulates (only after it
+          passes a held-out backtest, and moving at most 0.05 per refit), and every adjusted player keeps his raw
+          Potential alongside the adjusted one.
         </p>
 
         <h3 style={subTitleStyle}>Calibration (display scale)</h3>

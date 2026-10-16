@@ -3844,26 +3844,38 @@ export type Database = {
         Row: {
           created_at: string
           dsa_league_id: number
+          fit_through_game_date: string | null
+          gate_report: Json | null
           id: number
           is_active: boolean
           label: string
+          n_pairs: number | null
           notes: string | null
+          source: string
         }
         Insert: {
           created_at?: string
           dsa_league_id: number
+          fit_through_game_date?: string | null
+          gate_report?: Json | null
           id?: never
           is_active?: boolean
           label: string
+          n_pairs?: number | null
           notes?: string | null
+          source?: string
         }
         Update: {
           created_at?: string
           dsa_league_id?: number
+          fit_through_game_date?: string | null
+          gate_report?: Json | null
           id?: never
           is_active?: boolean
           label?: string
+          n_pairs?: number | null
           notes?: string | null
+          source?: string
         }
         Relationships: [
           {
@@ -5227,6 +5239,10 @@ export type Database = {
       [_ in never]: never
     }
     Functions: {
+      activate_potential_realization_set: {
+        Args: { p_set_id: number }
+        Returns: undefined
+      }
       apply_rating_weight_update: {
         Args: {
           p_label: string
