@@ -3,7 +3,8 @@ import { makeSupabaseClient } from "../lib/supabase-client.js";
 import { computeRatings, type RatingsInput, type WeightSet, type HandednessSplits } from "../lib/rating-engine.js";
 import { effectiveLevel } from "../lib/display-helpers.js";
 import { getLeagueId, leagueSlugFromArgv } from "../lib/league.js";
-import { writeFileSync } from "node:fs";
+import { readFileSync, writeFileSync } from "node:fs";
+import type { RealizationCurve } from "../lib/potential-realization.js";
 import { checkRatingDistribution, acceptShiftOverride, type RatingDistribution, type PreviousDistribution } from "../lib/rating-sanity.js";
 
 const PAGE_SIZE = 1000;
@@ -63,6 +64,38 @@ function paceYearsPerLevel(marginAboveBar: number): number {
 // because the actual ask driving this (Rees, 2026-09-02) is "make sure the
 // CORE VALUATIONS reflect the new weighting model across history," not
 // "reconstruct exactly what the site would have shown on that old date."
+// Age-aware Potential curve (2026-10-15, Rees: players stop progressing at certain ages, so Potential overrates 24+ players).
+// Loads the ACTIVE potential_realization set for this league (R by age and type, see lib/potential-realization.ts). Returns null -- i.e. NO
+// adjustment, exactly the old behavior -- when there is no active set or the tables don't exist yet, so this can ship before the curve does.
+// Testing aids: --realization-file=<curve.json> uses a local curve instead (for --dry-run comparisons); --no-realization forces it off.
+async function loadRealizationCurve(supabase: ReturnType<typeof makeSupabaseClient>, leagueId: number): Promise<RealizationCurve | null> {
+  if (process.argv.includes("--no-realization")) { console.log("Age-aware Potential: forced OFF (--no-realization)."); return null; }
+  const fileArg = process.argv.find((a) => a.startsWith("--realization-file="));
+  if (fileArg) {
+    const file = fileArg.slice("--realization-file=".length);
+    console.log(`Age-aware Potential: curve read from ${file} (testing override).`);
+    return JSON.parse(readFileSync(file, "utf8")) as RealizationCurve;
+  }
+  const { data: set, error } = await supabase.from("potential_realization_sets").select("id,label").eq("dsa_league_id", leagueId).eq("is_active", true).maybeSingle();
+  if (error) { console.warn(`Age-aware Potential: not available (${error.message}) -- Potential is NOT age-adjusted this run.`); return null; }
+  if (!set) { console.log("Age-aware Potential: no active curve set -- Potential is NOT age-adjusted."); return null; }
+  const { id, label } = set as { id: number; label: string };
+  const rows = await fetchAll<{ player_type: string; age: number; share: number }>((from, to) =>
+    supabase.from("potential_realization_rows").select("player_type,age,share").eq("set_id", id).order("age").range(from, to) as never
+  );
+  if (rows.length === 0) { console.warn(`Age-aware Potential: set #${id} has no rows -- NOT applied.`); return null; }
+  const minAge = Math.min(...rows.map((r) => r.age)), maxAge = Math.max(...rows.map((r) => r.age));
+  const build = (type: "H" | "P"): number[] => {
+    const byAge = new Map(rows.filter((r) => r.player_type === type).map((r) => [r.age, Number(r.share)]));
+    const out: number[] = [];
+    for (let a = minAge; a <= maxAge; a++) out.push(byAge.get(a) ?? out[out.length - 1] ?? 1);
+    return out;
+  };
+  const curve: RealizationCurve = { minAge, share: { H: build("H"), P: build("P") } };
+  console.log(`Age-aware Potential: ACTIVE curve set #${id} "${label}" (ages ${minAge}-${maxAge}).`);
+  return curve;
+}
+
 async function loadSharedContext(supabase: ReturnType<typeof makeSupabaseClient>, leagueId: number) {
   console.log("Loading active weight set...");
   // "Active" is now scoped per league (multi-league plan §2) -- each league
@@ -131,20 +164,22 @@ async function loadSharedContext(supabase: ReturnType<typeof makeSupabaseClient>
   // ~0.1pt (caught 2026-08-24 while verifying the Ks blend fix -- a
   // hand-computed split via direct SQL didn't match player_computed's
   // actual batting values until this was added).
-  const players = await fetchAll<{ id: number; organization_id: number | null; mlb_service_days: number | null; last_team_id: number | null; level: number | null; is_active: boolean | null; league_id: number | null; age: number | null }>((from, to) =>
-    supabase.from("players").select("id, organization_id, mlb_service_days, last_team_id, level, is_active, league_id, age").eq("dsa_league_id", leagueId).order("id").range(from, to) as never
+  const players = await fetchAll<{ id: number; organization_id: number | null; mlb_service_days: number | null; last_team_id: number | null; level: number | null; is_active: boolean | null; league_id: number | null; age: number | null; date_of_birth: string | null }>((from, to) =>
+    supabase.from("players").select("id, organization_id, mlb_service_days, last_team_id, level, is_active, league_id, age, date_of_birth").eq("dsa_league_id", leagueId).order("id").range(from, to) as never
   );
   const playerById = new Map(players.map((p) => [p.id, p]));
   console.log(`  ${players.length} players`);
 
-  return { weights, fieldingWeights, players, playerById, careerAbByPlayer, careerIpByPlayer };
+  const realization = await loadRealizationCurve(supabase, leagueId);
+
+  return { weights, fieldingWeights, players, playerById, careerAbByPlayer, careerIpByPlayer, realization };
 }
 
 type SharedContext = Awaited<ReturnType<typeof loadSharedContext>>;
 
 // --- Everything below is scoped to ONE refresh_run_id -----------------
 async function computeRatingsForRun(supabase: ReturnType<typeof makeSupabaseClient>, refreshRunId: number, shared: SharedContext, leagueId: number) {
-  const { weights, fieldingWeights, players, playerById, careerAbByPlayer, careerIpByPlayer } = shared;
+  const { weights, fieldingWeights, players, playerById, careerAbByPlayer, careerIpByPlayer, realization } = shared;
 
   console.log(`Computing against refresh_run_id ${refreshRunId}`);
 
@@ -364,9 +399,17 @@ async function computeRatingsForRun(supabase: ReturnType<typeof makeSupabaseClie
     // age lives on `players`, not `player_ratings_snapshots` -- merged in
     // here for the age-gated Contact/Control floor gates (2026-08-27).
     const age = playerById.get(r.player_id)?.age ?? null;
-    const c = computeRatings({ ...r, age }, weights, splits, fieldingWeights);
+    // Exact age on this run's game date (decimal years) for the age-aware Potential factor; null when either date is missing.
+    const dob = playerById.get(r.player_id)?.date_of_birth ?? null;
+    const ageYears = dob && gameDate ? (Date.parse(gameDate) - Date.parse(dob)) / (365.25 * 86400000) : null;
+    const c = computeRatings({ ...r, age, age_years: ageYears }, weights, splits, fieldingWeights, realization);
     return { player_id: r.player_id, ...c };
   });
+  if (realization) {
+    const adjusted = computed.filter((c) => c.realization_share < 0.999);
+    const removed = adjusted.reduce((sum, c) => sum + (c.potential_unadjusted - c.potential), 0);
+    console.log(`Age-aware Potential: ${adjusted.length}/${computed.length} players adjusted (raw-scale Potential lowered by ${(adjusted.length ? removed / adjusted.length : 0).toFixed(2)} on average among them).`);
+  }
 
   // --- Role-aware ETA, reworked 2026-08-24 (Rees's spec) -------------
   // Replaces the old flat "Overall vs. a fixed 65 bar" step function with a
@@ -1065,6 +1108,8 @@ async function computeRatingsForRun(supabase: ReturnType<typeof makeSupabaseClie
     potential: calibratedByPlayer.get(c.player_id)!.potential,
     prospect_potential: calibratedByPlayer.get(c.player_id)!.prospectPotential,
     overall_raw: c.overall, potential_raw: c.potential, prospect_potential_raw: c.prospect_potential,
+    // Audit columns for the age-aware Potential: written ONLY when a curve is active, so with no curve every row is exactly what it was.
+    ...(realization ? { potential_unadjusted_raw: c.potential_unadjusted, realization_share: c.realization_share } : {}),
     ph: c.ph, role: c.role, sp_rp: c.sp_rp, tbl_pos: c.tbl_pos, platoon: c.platoon,
     rank: rankByPlayer.get(c.player_id) ?? null,
     potential_rank: potentialRankByPlayer.get(c.player_id) ?? null,

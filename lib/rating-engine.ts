@@ -1,3 +1,4 @@
+import { adjustPotential, realizationShare, type RealizationCurve } from "./potential-realization";
 /**
  * The harmonized rating engine — one shared formula set used for both rostered
  * players and draft prospects, per the 2026-08-17 harmonization decisions:
@@ -30,6 +31,8 @@
 export interface RatingsInput {
   pos: string | null;
   age: number | null;
+  // Exact age in years (date of birth vs the run's game date), for the age-aware Potential factor below. Optional: when absent, age + 0.5.
+  age_years?: number | null;
   cntct: number | null; gap: number | null; pow: number | null; eye: number | null; ks: number | null;
   pot_cntct: number | null; pot_gap: number | null; pot_pow: number | null; pot_eye: number | null; pot_ks: number | null;
   speed: number | null;
@@ -176,6 +179,8 @@ export interface ComputedRatings {
   pitching: number; pitching_p: number; qp: number; qpp: number;
   c_rating: number; inf_rating: number; of_rating: number;
   overall: number; potential: number; prospect_potential: number;
+  // Age-aware Potential (2026-10-15): the formula's Potential BEFORE the realization factor, and the factor applied (1 = none).
+  potential_unadjusted: number; realization_share: number;
   ph: "H" | "P";
   role: string; sp_rp: string; tbl_pos: string; platoon: string;
   // Projected Potential L/R splits (2026-08-28, Rees's spec) -- StatsPlus
@@ -378,7 +383,10 @@ export function computeRatings(
   // computed by scripts/compute-fielding-weights.ts). Optional so existing
   // callers/tests that don't pass one keep today's flat w.fielding
   // behavior exactly (every role effectively gets multiplier 1).
-  fieldingWeights?: Record<string, number>
+  fieldingWeights?: Record<string, number>,
+  // Age-aware Potential curve (potential_realization_* tables; lib/potential-realization.ts). Optional and OFF when absent: callers that
+  // don't pass one -- and any run with no active curve -- get exactly the Potential they always did.
+  realization?: RealizationCurve | null
 ): ComputedRatings {
   // Computed early (before Batting) so the catcher batting multiplier below
   // can gate on it -- deliberately mirrors the Role priority-1 "C" branch
@@ -766,8 +774,16 @@ export function computeRatings(
   // implicit 1 (nothing multiplied it) here, now explicit and parallel to
   // Fielding/Baserunning's, per scripts/compute-overall-blend-weights.ts.
   const overall = Math.max(batting * w.batting + fielding * fieldingWeight + baserunning * w.baserunning, pitching);
-  const potential = Math.max(battingP * w.batting + fielding * fieldingWeight + baserunning * w.baserunning, pitchingP);
+  const potentialUnadjusted = Math.max(battingP * w.batting + fielding * fieldingWeight + baserunning * w.baserunning, pitchingP);
   const ph: "H" | "P" = batting * w.batting + fielding * fieldingWeight + baserunning * w.baserunning > pitching ? "H" : "P";
+
+  // Age-aware Potential (2026-10-15, Rees: players stop progressing at certain ages, so Potential overrates 24+ players). Potential is a
+  // CEILING; the share of the gap between current ability and that ceiling that is ever reached depends on how much development time is
+  // left, by age and type (hitters stop ~25, pitchers ~26-27). realizationShare() is R in [0, 1]; the result never drops below Overall.
+  // Everything downstream -- prospect_potential, ETA, ranks, comps, Draft Value -- reads this adjusted value. Evidence + backtest:
+  // age-development-analysis.md, scripts/backtest-potential-realization.ts.
+  const realizationApplied = realization ? realizationShare(realization, ph, r.age_years ?? (r.age != null ? r.age + 0.5 : null)) : 1;
+  const potential = adjustPotential(overall, potentialUnadjusted, realizationApplied);
 
   // Durability discount (reworked 2026-10-07, option B): proportional to the talent at stake and different for
   // hitters / starters / relievers and for Fragile vs Wrecked -- see durabilityDiscount() and WeightSet above.
@@ -819,6 +835,7 @@ export function computeRatings(
     pitching, pitching_p: pitchingP, qp, qpp,
     c_rating: cRating, inf_rating: infRating, of_rating: ofRating,
     overall, potential, prospect_potential: prospectPotential,
+    potential_unadjusted: potentialUnadjusted, realization_share: realizationApplied,
     projectedSplits: {
       cntct: projCntct, pow: projPow, eye: projEye, gap: projGap, ks: projKs,
       stf: projStf, mov: projMov, ctrl: projCtrl, hra: projHra, pbabip: projPbabip,
