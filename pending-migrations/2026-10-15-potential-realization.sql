@@ -1,5 +1,5 @@
--- PENDING: not yet applied (the Supabase connector refused DDL on 2026-10-15). Run this once in the Supabase dashboard SQL editor
--- (project onclzyjhfkgonemcpcmo), then run:  npx tsx scripts/fit-potential-realization.ts <cacheDir> --activate
+-- APPLIED 2026-10-16 via the Supabase connector (record of what was run; the connector had refused DDL on 2026-10-15).
+-- (project onclzyjhfkgonemcpcmo). Curve set #1 for TBL was seeded by SQL and is active.
 --
 -- 2026-10-15 (Rees): age-aware Potential. R(age, type) = the share of a player's listed Potential gap expected to be realized, given the
 -- development time he has left (see lib/potential-realization.ts and age-development-analysis.md). The engine applies

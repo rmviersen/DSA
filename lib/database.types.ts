@@ -10,7 +10,7 @@ export type Database = {
   // Allows to automatically instantiate createClient with right options
   // instead of createClient<Database, { PostgrestVersion: 'XX' }>(URL, KEY)
   __InternalSupabase: {
-    PostgrestVersion: "14.5"
+    PostgrestVersion: "14.15"
   }
   public: {
     Tables: {
@@ -2361,6 +2361,7 @@ export type Database = {
           potential: number | null
           potential_rank: number | null
           potential_raw: number | null
+          potential_unadjusted_raw: number | null
           prospect_org_ph_rank: number | null
           prospect_org_rank: number | null
           prospect_potential: number | null
@@ -2370,6 +2371,7 @@ export type Database = {
           qp: number | null
           qpp: number | null
           rank: number | null
+          realization_share: number | null
           refresh_run_id: number
           role: string | null
           role_org_rank: number | null
@@ -2407,6 +2409,7 @@ export type Database = {
           potential?: number | null
           potential_rank?: number | null
           potential_raw?: number | null
+          potential_unadjusted_raw?: number | null
           prospect_org_ph_rank?: number | null
           prospect_org_rank?: number | null
           prospect_potential?: number | null
@@ -2416,6 +2419,7 @@ export type Database = {
           qp?: number | null
           qpp?: number | null
           rank?: number | null
+          realization_share?: number | null
           refresh_run_id: number
           role?: string | null
           role_org_rank?: number | null
@@ -2453,6 +2457,7 @@ export type Database = {
           potential?: number | null
           potential_rank?: number | null
           potential_raw?: number | null
+          potential_unadjusted_raw?: number | null
           prospect_org_ph_rank?: number | null
           prospect_org_rank?: number | null
           prospect_potential?: number | null
@@ -2462,6 +2467,7 @@ export type Database = {
           qp?: number | null
           qpp?: number | null
           rank?: number | null
+          realization_share?: number | null
           refresh_run_id?: number
           role?: string | null
           role_org_rank?: number | null
@@ -2777,6 +2783,32 @@ export type Database = {
             isOneToOne: false
             referencedRelation: "players"
             referencedColumns: ["dsa_league_id", "id"]
+          },
+        ]
+      }
+      player_mlb_debut: {
+        Row: {
+          dsa_league_id: number
+          first_mlb_year: number
+          player_id: number
+        }
+        Insert: {
+          dsa_league_id: number
+          first_mlb_year: number
+          player_id: number
+        }
+        Update: {
+          dsa_league_id?: number
+          first_mlb_year?: number
+          player_id?: number
+        }
+        Relationships: [
+          {
+            foreignKeyName: "player_mlb_debut_dsa_league_id_fkey"
+            columns: ["dsa_league_id"]
+            isOneToOne: false
+            referencedRelation: "leagues"
+            referencedColumns: ["id"]
           },
         ]
       }
@@ -3779,6 +3811,70 @@ export type Database = {
           },
         ]
       }
+      potential_realization_rows: {
+        Row: {
+          age: number
+          player_type: string
+          set_id: number
+          share: number
+        }
+        Insert: {
+          age: number
+          player_type: string
+          set_id: number
+          share: number
+        }
+        Update: {
+          age?: number
+          player_type?: string
+          set_id?: number
+          share?: number
+        }
+        Relationships: [
+          {
+            foreignKeyName: "potential_realization_rows_set_id_fkey"
+            columns: ["set_id"]
+            isOneToOne: false
+            referencedRelation: "potential_realization_sets"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      potential_realization_sets: {
+        Row: {
+          created_at: string
+          dsa_league_id: number
+          id: number
+          is_active: boolean
+          label: string
+          notes: string | null
+        }
+        Insert: {
+          created_at?: string
+          dsa_league_id: number
+          id?: never
+          is_active?: boolean
+          label: string
+          notes?: string | null
+        }
+        Update: {
+          created_at?: string
+          dsa_league_id?: number
+          id?: never
+          is_active?: boolean
+          label?: string
+          notes?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "potential_realization_sets_dsa_league_id_fkey"
+            columns: ["dsa_league_id"]
+            isOneToOne: false
+            referencedRelation: "leagues"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       prospect_bios: {
         Row: {
           bio_text: string
@@ -3850,6 +3946,15 @@ export type Database = {
           created_at: string
           developed_age_threshold: number
           dsa_league_id: number
+          durability_fragile_loss_h: number | null
+          durability_fragile_loss_rp: number | null
+          durability_fragile_loss_sp: number | null
+          durability_replacement_h: number | null
+          durability_replacement_rp: number | null
+          durability_replacement_sp: number | null
+          durability_wrecked_loss_h: number | null
+          durability_wrecked_loss_rp: number | null
+          durability_wrecked_loss_sp: number | null
           eye: number
           fielding: number
           gap: number
@@ -3909,6 +4014,15 @@ export type Database = {
           created_at?: string
           developed_age_threshold?: number
           dsa_league_id: number
+          durability_fragile_loss_h?: number | null
+          durability_fragile_loss_rp?: number | null
+          durability_fragile_loss_sp?: number | null
+          durability_replacement_h?: number | null
+          durability_replacement_rp?: number | null
+          durability_replacement_sp?: number | null
+          durability_wrecked_loss_h?: number | null
+          durability_wrecked_loss_rp?: number | null
+          durability_wrecked_loss_sp?: number | null
           eye: number
           fielding: number
           gap: number
@@ -3968,6 +4082,15 @@ export type Database = {
           created_at?: string
           developed_age_threshold?: number
           dsa_league_id?: number
+          durability_fragile_loss_h?: number | null
+          durability_fragile_loss_rp?: number | null
+          durability_fragile_loss_sp?: number | null
+          durability_replacement_h?: number | null
+          durability_replacement_rp?: number | null
+          durability_replacement_sp?: number | null
+          durability_wrecked_loss_h?: number | null
+          durability_wrecked_loss_rp?: number | null
+          durability_wrecked_loss_sp?: number | null
           eye?: number
           fielding?: number
           gap?: number
@@ -4089,6 +4212,41 @@ export type Database = {
         Relationships: [
           {
             foreignKeyName: "refresh_runs_league_id_fkey"
+            columns: ["dsa_league_id"]
+            isOneToOne: false
+            referencedRelation: "leagues"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      roster_syncs: {
+        Row: {
+          dsa_league_id: number
+          game_date: string | null
+          id: number
+          players_changed: number
+          players_in_feed: number
+          synced_at: string
+        }
+        Insert: {
+          dsa_league_id: number
+          game_date?: string | null
+          id?: never
+          players_changed: number
+          players_in_feed: number
+          synced_at?: string
+        }
+        Update: {
+          dsa_league_id?: number
+          game_date?: string | null
+          id?: never
+          players_changed?: number
+          players_in_feed?: number
+          synced_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "roster_syncs_dsa_league_id_fkey"
             columns: ["dsa_league_id"]
             isOneToOne: false
             referencedRelation: "leagues"
@@ -4607,6 +4765,57 @@ export type Database = {
           },
         ]
       }
+      team_standings_snapshots: {
+        Row: {
+          captured_at: string
+          division_name: string
+          division_rank: number
+          dsa_league_id: number
+          id: number
+          losses: number
+          refresh_run_id: number
+          team_id: number
+          wins: number
+        }
+        Insert: {
+          captured_at?: string
+          division_name: string
+          division_rank: number
+          dsa_league_id: number
+          id?: never
+          losses: number
+          refresh_run_id: number
+          team_id: number
+          wins: number
+        }
+        Update: {
+          captured_at?: string
+          division_name?: string
+          division_rank?: number
+          dsa_league_id?: number
+          id?: never
+          losses?: number
+          refresh_run_id?: number
+          team_id?: number
+          wins?: number
+        }
+        Relationships: [
+          {
+            foreignKeyName: "team_standings_snapshots_dsa_league_id_fkey"
+            columns: ["dsa_league_id"]
+            isOneToOne: false
+            referencedRelation: "leagues"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "team_standings_snapshots_refresh_run_id_fkey"
+            columns: ["refresh_run_id"]
+            isOneToOne: false
+            referencedRelation: "refresh_runs"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       teams: {
         Row: {
           dsa_league_id: number
@@ -4854,6 +5063,66 @@ export type Database = {
           },
         ]
       }
+      trade_war_results: {
+        Row: {
+          computed_at: string
+          details: Json
+          dsa_league_id: number
+          has_pick: boolean
+          margin: number
+          team_a_id: number
+          team_b_id: number
+          trade_date: string
+          trade_event_id: number
+          war_a: number
+          war_b: number
+          winner_team_id: number | null
+        }
+        Insert: {
+          computed_at?: string
+          details: Json
+          dsa_league_id: number
+          has_pick?: boolean
+          margin: number
+          team_a_id: number
+          team_b_id: number
+          trade_date: string
+          trade_event_id: number
+          war_a: number
+          war_b: number
+          winner_team_id?: number | null
+        }
+        Update: {
+          computed_at?: string
+          details?: Json
+          dsa_league_id?: number
+          has_pick?: boolean
+          margin?: number
+          team_a_id?: number
+          team_b_id?: number
+          trade_date?: string
+          trade_event_id?: number
+          war_a?: number
+          war_b?: number
+          winner_team_id?: number | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "trade_war_results_dsa_league_id_fkey"
+            columns: ["dsa_league_id"]
+            isOneToOne: false
+            referencedRelation: "leagues"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "trade_war_results_trade_event_id_fkey"
+            columns: ["trade_event_id"]
+            isOneToOne: false
+            referencedRelation: "trade_events"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       weight_tuning_coefficients: {
         Row: {
           current_weight: number | null
@@ -4966,6 +5235,25 @@ export type Database = {
           p_updates: Json
         }
         Returns: number
+      }
+      dedup_failed_run_against_previous: {
+        Args: {
+          p_execute?: boolean
+          p_player_hi?: number
+          p_player_lo?: number
+          p_prev: number
+          p_run: number
+          p_table: string
+        }
+        Returns: number
+      }
+      update_player_mlb_debut: {
+        Args: { p_league_id: number; p_year: number }
+        Returns: number
+      }
+      work_ethic_mlb_cohort: {
+        Args: { p_baseline_run: number; p_league_id: number; p_max_age: number }
+        Returns: Json
       }
     }
     Enums: {
