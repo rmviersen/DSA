@@ -823,6 +823,7 @@ async function computeRatingsForRun(supabase: ReturnType<typeof makeSupabaseClie
     levelSums.set(key, cell);
   }
   type CalibrationPoint = { raw: number; target: number };
+  const MIN_ANCHOR_GAP = 1.0; // raw points between neighbouring calibration anchors; see calibrationPoints()
   function levelAnchors(ph: "H" | "P"): { level: number; avg: number; n: number }[] {
     const out: { level: number; avg: number; n: number }[] = [];
     for (let level = 2; level <= 8; level++) {
@@ -838,7 +839,15 @@ async function computeRatingsForRun(supabase: ReturnType<typeof makeSupabaseClie
   // levels' averages cross).
   function calibrationPoints(ph: "H" | "P", stats: { mean: number; sd: number }): CalibrationPoint[] {
     const anchors = levelAnchors(ph).map((a) => ({ raw: a.avg, target: TARGET_BY_LEVEL[a.level] }));
-    return [{ raw: stats.mean, target: 50 }, ...anchors].sort((a, b) => b.raw - a.raw);
+    const pts = [{ raw: stats.mean, target: 50 }, ...anchors].sort((a, b) => b.raw - a.raw);
+    // Minimum spacing between neighbouring anchors (2026-10-16). Level averages in a HISTORICAL re-score are built from players' CURRENT levels, so in
+    // some old runs two adjacent levels' averages land almost on top of each other (pitchers in runs 29-33 / 49-67: gaps of 0.02-0.79 raw points over
+    // a 5-point target step). The below-lowest-anchor extrapolation then has a near-vertical slope and calibrated Overall exploded (-613 for a
+    // 22-raw pitcher). Every healthy run on record has all gaps >= 1.0, so this leaves them bit-for-bit unchanged; it only bites in degenerate cases.
+    for (let i = 1; i < pts.length; i++) {
+      if (pts[i - 1].raw - pts[i].raw < MIN_ANCHOR_GAP) pts[i] = { ...pts[i], raw: pts[i - 1].raw - MIN_ANCHOR_GAP };
+    }
+    return pts;
   }
   const hitterPoints = calibrationPoints("H", hitterStats);
   const pitcherPoints = calibrationPoints("P", pitcherStats);
@@ -873,6 +882,17 @@ async function computeRatingsForRun(supabase: ReturnType<typeof makeSupabaseClie
     potential: calibrate(c.potential, c.ph),
     prospectPotential: calibrate(c.prospect_potential, c.ph),
   }]));
+  // Last line of defence (2026-10-16): the calibration above can extrapolate wildly if its anchors are degenerate. Real calibrated Overall sits
+  // roughly in [-25, 100]; anything far outside means the mapping broke, so refuse to write rather than store garbage (same override as the gate).
+  {
+    const vals = [...calibratedByPlayer.values()].map((v) => v.overall);
+    const lo = Math.min(...vals), hi = Math.max(...vals);
+    if (lo < -60 || hi > 130) {
+      const msg = `Calibration produced implausible Overall values for refresh_run_id ${refreshRunId} (min ${lo.toFixed(1)}, max ${hi.toFixed(1)}; expected roughly -25..100) -- the level anchors are probably degenerate.`;
+      if (acceptShiftOverride()) console.warn(`${msg}\n  (continuing: RATINGS_ACCEPT_SHIFT / --accept-shift is set)`);
+      else throw new Error(`${msg}\n  Nothing was written; the previous player_computed stays live.`);
+    }
+  }
 
   await supabase.from("refresh_runs").update({
     hitter_overall_mean: hitterStats.mean, hitter_overall_sd: hitterStats.sd,
