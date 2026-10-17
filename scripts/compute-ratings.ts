@@ -839,7 +839,9 @@ async function computeRatingsForRun(supabase: ReturnType<typeof makeSupabaseClie
   // levels' averages cross).
   function calibrationPoints(ph: "H" | "P", stats: { mean: number; sd: number }): CalibrationPoint[] {
     const anchors = levelAnchors(ph).map((a) => ({ raw: a.avg, target: TARGET_BY_LEVEL[a.level] }));
-    const pts = [{ raw: stats.mean, target: 50 }, ...anchors].sort((a, b) => b.raw - a.raw);
+    // Ordered by LEVEL (target 50, 45, ... 15), never by raw value: if two levels' averages cross in a thin historical run, sorting by raw would
+    // leave the targets running backwards and the lowest-scoring players would calibrate HIGHER than better ones (runs 29-30, 2026-10-16).
+    const pts = [{ raw: stats.mean, target: 50 }, ...[...anchors].sort((a, b) => b.target - a.target)];
     // Minimum spacing between neighbouring anchors (2026-10-16). Level averages in a HISTORICAL re-score are built from players' CURRENT levels, so in
     // some old runs two adjacent levels' averages land almost on top of each other (pitchers in runs 29-33 / 49-67: gaps of 0.02-0.79 raw points over
     // a 5-point target step). The below-lowest-anchor extrapolation then has a near-vertical slope and calibrated Overall exploded (-613 for a
