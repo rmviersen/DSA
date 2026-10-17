@@ -32,7 +32,8 @@ export interface RealizationCurve {
 export interface ClosureRow { type: PlayerType; age: number; n: number; closure: number | null; smoothed: number }
 
 /** Fit the closure rates and the realization curve from one-year (Overall, Potential) -> next-year Overall observations. */
-export function fitRealizationCurve(pairs: RealizationPair[]): { curve: RealizationCurve; closure: ClosureRow[]; closureAt: (type: PlayerType, age: number) => number } {
+export function fitRealizationCurve(pairs: RealizationPair[], opts: { gapMin?: number } = {}): { curve: RealizationCurve; closure: ClosureRow[]; closureAt: (type: PlayerType, age: number) => number } {
+  const gapMin = opts.gapMin ?? REALIZATION_GAP_MIN;
   const closure: ClosureRow[] = [];
   const closureFns: Record<PlayerType, (age: number) => number> = { H: () => 0, P: () => 0 };
   const share: Record<PlayerType, number[]> = { H: [], P: [] };
@@ -40,7 +41,7 @@ export function fitRealizationCurve(pairs: RealizationPair[]): { curve: Realizat
     // raw closure by integer age
     const raw = new Map<number, { c: number; n: number }>();
     for (let age = REALIZATION_MIN_AGE; age <= REALIZATION_MAX_AGE; age++) {
-      const g = pairs.filter((p) => p.type === type && Math.floor(p.age) === age && p.p0 - p.o0 >= REALIZATION_GAP_MIN);
+      const g = pairs.filter((p) => p.type === type && Math.floor(p.age) === age && p.p0 - p.o0 >= gapMin);
       if (g.length < REALIZATION_MIN_N) continue;
       const gap = g.reduce((s, p) => s + (p.p0 - p.o0), 0);
       const gained = g.reduce((s, p) => s + (p.o1 - p.o0), 0);
