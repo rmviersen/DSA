@@ -95,13 +95,16 @@ interface Fold { curve: RealizationCurve; test: RefitObservation[] }
  *          C3 (mid development) adjusted RMSE <= raw RMSE.
  *   rmseOnly: every group only has to satisfy "adjusted RMSE <= raw RMSE" (never worse than the raw Potential).
  */
-export function evaluateFolds(label: string, folds: Fold[], rmseOnly: boolean, unit: number = 1): GateCheck[] {
+export type Unit = number | Record<PlayerType, number>;
+const unitOf = (u: Unit, t: PlayerType): number => (typeof u === "number" ? u : u[t]);
+
+export function evaluateFolds(label: string, folds: Fold[], rmseOnly: boolean, unit: Unit = 1): GateCheck[] {
   const checks: GateCheck[] = [];
   for (const [group, type, lo, hi, crit] of GATE_GROUPS) {
     const g: { o: RefitObservation; adj: number }[] = [];
     for (const { curve, test } of folds) {
       for (const o of test) {
-        if (o.type === type && o.age >= lo && o.age < hi && o.p0 - o.o0 >= 3 * unit) g.push({ o, adj: adjustPotential(o.o0, o.p0, realizationShare(curve, type, o.age)) });
+        if (o.type === type && o.age >= lo && o.age < hi && o.p0 - o.o0 >= 3 * unitOf(unit, type)) g.push({ o, adj: adjustPotential(o.o0, o.p0, realizationShare(curve, type, o.age)) });
       }
     }
     if (g.length < GATE_MIN_N) continue;
@@ -110,7 +113,7 @@ export function evaluateFolds(label: string, folds: Fold[], rmseOnly: boolean, u
     const eAdj = rmse(g.map((x) => x.adj - x.o.o1)), eRaw = rmse(g.map((x) => x.o.p0 - x.o.o1));
     const n = g.length;
     if (crit === "C2" && !rmseOnly) {
-      checks.push({ name: `${label} ${group} C2 |bias adj| <= 0.8`, pass: Math.abs(biasAdj) <= 0.8 * unit, detail: `n=${n} bias adj ${f2(biasAdj)}` });
+      checks.push({ name: `${label} ${group} C2 |bias adj| <= 0.8`, pass: Math.abs(biasAdj) <= 0.8 * unitOf(unit, type), detail: `n=${n} bias adj ${f2(biasAdj)}` });
       checks.push({ name: `${label} ${group} C2 raw bias >= 2x adj`, pass: Math.abs(biasRaw) >= 2 * Math.abs(biasAdj), detail: `n=${n} raw ${f2(biasRaw)} vs adj ${f2(biasAdj)}` });
       checks.push({ name: `${label} ${group} C2 RMSE adj < raw`, pass: eAdj < eRaw, detail: `n=${n} adj ${f2(eAdj)} vs raw ${f2(eRaw)}` });
     } else {
@@ -120,6 +123,9 @@ export function evaluateFolds(label: string, folds: Fold[], rmseOnly: boolean, u
   return checks;
 }
 
+/** The "players with a real gap" cutoff (3 calibrated points) in the observations' own units, per hitters/pitchers. */
+const gapMinFor = (u: Unit): Record<PlayerType, number> => ({ H: 3 * unitOf(u, "H"), P: 3 * unitOf(u, "P") });
+
 /**
  * Cross-fitted backtest of the fitting METHOD on the given observations (revised 2026-10-16 after the first dry run: judging each half-sample
  * fold separately failed 7 of 33 checks, all in thin groups where the sign of the bias flips by chance; the criteria thresholds were NOT loosened,
@@ -128,18 +134,18 @@ export function evaluateFolds(label: string, folds: Fold[], rmseOnly: boolean, u
  *   S2  fit on the earlier snapshot pairs, test on the later ones -- adjusted must be no worse than raw (RMSE) in every group. (Its training half
  *       is a single older development cycle at first, so the bias criteria are not asked of it yet.)
  */
-export function backtestGate(obs: RefitObservation[], unit: number = 1): GateResult {
+export function backtestGate(obs: RefitObservation[], unit: Unit = 1): GateResult {
   const checks: GateCheck[] = [];
   const even = obs.filter((o) => o.pid % 2 === 0), odd = obs.filter((o) => o.pid % 2 === 1);
   checks.push(...evaluateFolds("S1 pooled", [
-    { curve: fitRealizationCurve(even, { gapMin: 3 * unit }).curve, test: odd },
-    { curve: fitRealizationCurve(odd, { gapMin: 3 * unit }).curve, test: even },
+    { curve: fitRealizationCurve(even, { gapMin: gapMinFor(unit) }).curve, test: odd },
+    { curve: fitRealizationCurve(odd, { gapMin: gapMinFor(unit) }).curve, test: even },
   ], false, unit));
   const starts = [...new Set(obs.map((o) => o.t0))].sort((a, b) => a - b);
   if (starts.length >= 2) {
     const cut = starts[Math.floor(starts.length / 2)];
     const early = obs.filter((o) => o.t0 < cut), late = obs.filter((o) => o.t0 >= cut);
-    checks.push(...evaluateFolds("S2 early->late", [{ curve: fitRealizationCurve(early, { gapMin: 3 * unit }).curve, test: late }], true, unit));
+    checks.push(...evaluateFolds("S2 early->late", [{ curve: fitRealizationCurve(early, { gapMin: gapMinFor(unit) }).curve, test: late }], true, unit));
   }
   const failed = checks.filter((c) => !c.pass).length;
   return { pass: checks.length >= REFIT_MIN_CHECKS && failed === 0, evaluated: checks.length, failed, checks };
@@ -179,27 +185,3 @@ export function maxCurveDiff(a: RealizationCurve, b: RealizationCurve): number {
   return m;
 }
 
-/**
- * Piecewise-linear interpolator through (x, y) points of a MONOTONE map (equal x merged by averaging y; extended past both ends with the end
- * segment's slope). Used to recover "what would calibrate(raw Potential) have been" from a run's own stored (adjusted raw -> calibrated)
- * pairs, because the audit column potential_unadjusted_raw is on the RAW scale while Overall/Potential are on the calibrated display scale --
- * fitting with the two mixed produced a nonsense curve in the first dry run on re-scored history (2026-10-16).
- */
-export function makeMonotoneInterpolator(xs: number[], ys: number[]): (x: number) => number {
-  const idx = xs.map((_, i) => i).sort((a, b) => xs[a] - xs[b]);
-  const X: number[] = [], Y: number[] = [], N: number[] = [];
-  for (const i of idx) {
-    if (X.length && Math.abs(xs[i] - X[X.length - 1]) < 1e-9) { Y[Y.length - 1] += ys[i]; N[N.length - 1]++; }
-    else { X.push(xs[i]); Y.push(ys[i]); N.push(1); }
-  }
-  for (let i = 0; i < Y.length; i++) Y[i] /= N[i];
-  if (X.length < 2) return (x) => (Y.length ? Y[0] + (x - X[0]) : x);
-  return (x) => {
-    let lo = 0, hi = X.length - 1;
-    if (x <= X[0]) hi = 1, lo = 0;
-    else if (x >= X[hi]) lo = hi - 1;
-    else { while (hi - lo > 1) { const mid = (lo + hi) >> 1; if (X[mid] <= x) lo = mid; else hi = mid; } }
-    const t = (x - X[lo]) / (X[hi] - X[lo]);
-    return Y[lo] + t * (Y[hi] - Y[lo]);
-  };
-}

@@ -4,7 +4,7 @@ import { makeSupabaseClient } from "../lib/supabase-client.js";
 import { getLeagueId, leagueSlugFromArgv } from "../lib/league.js";
 import { fitRealizationCurve, type PlayerType, type RealizationCurve } from "../lib/potential-realization.js";
 import {
-  selectRunPairs, buildObservations, backtestGate, clampCurve, maxCurveDiff, shareAtAge, makeMonotoneInterpolator,
+  selectRunPairs, buildObservations, backtestGate, clampCurve, maxCurveDiff, shareAtAge,
   REFIT_MIN_OBSERVATIONS, REFIT_MIN_NEW_DAYS, REFIT_MAX_STEP, REFIT_MATERIAL_CHANGE,
   type RefitObservation, type SnapshotRow,
 } from "../lib/potential-realization-refit.js";
@@ -16,9 +16,13 @@ import {
 //   npx tsx scripts/auto-refit-potential-realization.ts [--dry-run] [--force] [--league=TBL]
 //   --dry-run  fit + gate + print, write nothing.   --force  ignore the "at least 30 game days of new evidence" rate limit.
 //
-// WHAT IT FITS ON: every ~45 days of game time, a pair of ratings snapshots about one year apart (player_computed, per refresh run). The Potential
-// used is the UNADJUSTED Potential on the calibrated scale (see snapshot() below for how it is recovered). Fitting on the adjusted Potential
-// would feed the curve its own output, and mixing the raw-scale audit column with calibrated Overall gives nonsense -- both bit during development.
+// WHAT IT FITS ON (Rees, 2026-10-16: "use the raw-score scale for the refit"): every ~45 days of game time, a pair of ratings snapshots about one year
+// apart (player_computed, per refresh run), in the RAW scoring scale -- overall_raw and potential_unadjusted_raw. Raw scores involve no calibration
+// anchors (rebuilt from players' CURRENT levels on a historical re-score, which collided and distorted history) and no cross-run weight drift, and
+// they are the units the engine applies R in anyway. Fitting on the adjusted Potential would feed the curve its own output, so the audit column
+// potential_unadjusted_raw is required: a run without it is skipped. The gate's thresholds are written in calibrated points, so they are converted:
+// one calibrated point = (league raw SD / 10) raw points, per hitters/pitchers, from the newest run's stored hitter/pitcher_overall_sd.
+// Activation: on by default; POTENTIAL_REFIT_ACTIVATE=0 is the kill switch (candidates are then stored inactive as PROPOSED).
 
 const PAGE = 1000;
 async function fetchAll<T>(q: (f: number, t: number) => PromiseLike<{ data: T[] | null; error: unknown }>): Promise<T[]> {
@@ -51,10 +55,6 @@ async function loadCurve(supabase: ReturnType<typeof makeSupabaseClient>, setId:
 
 async function main() {
   const dryRun = process.argv.includes("--dry-run"), force = process.argv.includes("--force");
-  // EXPERIMENT (--raw-scale): fit on the raw scoring scale (overall_raw / potential_unadjusted_raw), immune to weight drift and calibration anchors.
-  // 1 calibrated point is about 1/3 raw point, so the gap filter and bias threshold are scaled by `unit`. Only honoured with --dry-run.
-  const rawScale = process.argv.includes("--raw-scale") && dryRun;
-  const unit = rawScale ? 1 / 3 : 1;
   const supabase = makeSupabaseClient();
   const leagueId = await getLeagueId(supabase, leagueSlugFromArgv());
   console.log(`Auto-refit of the age-aware Potential curve${dryRun ? " (DRY RUN -- nothing will be written)" : ""}...`);
@@ -90,37 +90,26 @@ async function main() {
   const dob = new Map(players.map((p) => [p.id, p.date_of_birth ? Date.parse(p.date_of_birth) : null]));
   const typeOf = new Map<number, PlayerType>(players.map((p) => [p.id, p.pos === 1 ? "P" : "H"]));
 
+  // Raw-scale units: one calibrated point = (raw SD / 10) raw points (calibrate() is 10 * (raw - mean) / sd above the mean).
+  const { data: sdRow, error: sdErr } = await supabase.from("refresh_runs").select("id,hitter_overall_sd,pitcher_overall_sd").eq("dsa_league_id", leagueId)
+    .not("hitter_overall_sd", "is", null).not("pitcher_overall_sd", "is", null).order("id", { ascending: false }).limit(1).maybeSingle();
+  if (sdErr || !sdRow) throw new Error(`no run with a stored raw Overall SD to convert the gate thresholds (${sdErr?.message ?? "none found"})`);
+  const sd = sdRow as { id: number; hitter_overall_sd: number; pitcher_overall_sd: number };
+  const unit = { H: Number(sd.hitter_overall_sd) / 10, P: Number(sd.pitcher_overall_sd) / 10 };
+  console.log(`Raw scale: 1 calibrated point = ${unit.H.toFixed(3)} raw (hitters) / ${unit.P.toFixed(3)} raw (pitchers), from run ${sd.id}.`);
+
   const cache = new Map<number, Map<number, SnapshotRow>>();
-  // One run's snapshot with the UNADJUSTED Potential on the CALIBRATED scale (the scale Overall is on). Runs scored with a curve store the raw
-  // formula Potential in potential_unadjusted_raw (RAW scale) and the adjusted, calibrated one in potential. The engine adjusts on the raw scale
-  // (o + R x (p - o)) and then calibrates (a monotone, per-hitter/pitcher piecewise-linear map), so the run's own (adjusted raw -> calibrated)
-  // pairs trace that map and calibrate(raw Potential) is recovered by interpolating through them. Runs without the audit column (scored before
-  // any curve existed) already store the unadjusted calibrated Potential and are used as is.
   const snapshot = async (runId: number): Promise<Map<number, SnapshotRow>> => {
     const hit = cache.get(runId);
     if (hit) return hit;
-    type Row = { player_id: number; ph: string | null; overall: number | null; potential: number | null; overall_raw: number | null; potential_unadjusted_raw: number | null; realization_share: number | null };
+    type Row = { player_id: number; overall_raw: number | null; potential_unadjusted_raw: number | null };
     const rows = await fetchAll<Row>((f, t) =>
-      supabase.from("player_computed").select("player_id,ph,overall,potential,overall_raw,potential_unadjusted_raw,realization_share").eq("refresh_run_id", runId).order("player_id").range(f, t) as never);
-    const mapFor: Record<string, (x: number) => number> = {};
-    for (const ph of ["H", "P"]) {
-      const xs: number[] = [], ys: number[] = [];
-      for (const r of rows) {
-        if (r.ph !== ph || r.overall_raw == null || r.potential_unadjusted_raw == null || r.potential == null) continue;
-        const o = Number(r.overall_raw), p = Number(r.potential_unadjusted_raw), share = r.realization_share == null ? 1 : Number(r.realization_share);
-        xs.push(p - o > 0 ? o + share * (p - o) : p); // exactly what the engine fed to calibrate()
-        ys.push(Number(r.potential));
-      }
-      if (xs.length > 50) mapFor[ph] = makeMonotoneInterpolator(xs, ys);
-    }
-    const m = new Map<number, SnapshotRow>();
-    for (const r of rows) {
-      let pot: number | null;
-      if (rawScale) { m.set(r.player_id, { overall: r.overall_raw == null ? null : Number(r.overall_raw), potential: r.potential_unadjusted_raw != null ? Number(r.potential_unadjusted_raw) : null }); continue; }
-      if (r.potential_unadjusted_raw == null) pot = r.potential == null ? null : Number(r.potential);
-      else { const f = mapFor[r.ph ?? ""]; pot = f ? f(Number(r.potential_unadjusted_raw)) : null; }
-      m.set(r.player_id, { overall: r.overall == null ? null : Number(r.overall), potential: pot });
-    }
+      supabase.from("player_computed").select("player_id,overall_raw,potential_unadjusted_raw").eq("refresh_run_id", runId).order("player_id").range(f, t) as never);
+    // potential_unadjusted_raw null (a run scored before any curve existed) => no raw Potential on record => that player-run is skipped.
+    const m = new Map<number, SnapshotRow>(rows.map((r) => [r.player_id, {
+      overall: r.overall_raw == null ? null : Number(r.overall_raw),
+      potential: r.potential_unadjusted_raw == null ? null : Number(r.potential_unadjusted_raw),
+    }]));
     cache.set(runId, m);
     return m;
   };
@@ -159,7 +148,7 @@ async function main() {
   }
 
   // --- fit, limit the move, judge ---
-  const fit = fitRealizationCurve(obs, { gapMin: 3 * unit });
+  const fit = fitRealizationCurve(obs, { gapMin: { H: 3 * unit.H, P: 3 * unit.P } });
   const applied = clampCurve(prev, fit.curve, REFIT_MAX_STEP);
   const gate = backtestGate(obs, unit);
   console.log(`\nBacktest gate: ${gate.pass ? "PASSED" : "FAILED"} (${gate.evaluated - gate.failed}/${gate.evaluated} checks passed)`);
@@ -187,11 +176,9 @@ async function main() {
     console.log(`Gate passed, but the curve barely moves (${change.toFixed(3)} < ${REFIT_MATERIAL_CHANGE}) -- keeping set #${active.id}${dryRun ? " (dry run)" : "; evidence date advanced"}.`);
     return;
   }
-  // PROPOSE-ONLY unless POTENTIAL_REFIT_ACTIVATE=1 (2026-10-16): the evidence basis is under review (see HANDOFF "Age-aware Potential: AUTO-REFIT" --
-  // re-scored history calibrates minor-league players with today's level anchors, so a fit on it can differ a lot from a fit on raw scores). Until
-  // Rees signs off, a passing candidate is stored as an INACTIVE set (rows + gate report) for review, and the active curve is left alone.
-  if (process.env.POTENTIAL_REFIT_ACTIVATE !== "1") {
-    const pid = await record(`Auto-refit ${today} PROPOSED (activation switched off)`, `${setNote} Passed the gate but NOT activated: POTENTIAL_REFIT_ACTIVATE is not 1.`, report, applied, false);
+  // Kill switch: POTENTIAL_REFIT_ACTIVATE=0 stores a passing candidate as an INACTIVE "PROPOSED" set and leaves the active curve alone.
+  if (process.env.POTENTIAL_REFIT_ACTIVATE === "0") {
+    const pid = await record(`Auto-refit ${today} PROPOSED (activation switched off)`, `${setNote} Passed the gate but NOT activated: POTENTIAL_REFIT_ACTIVATE=0.`, report, applied, false);
     console.log(dryRun ? "DRY RUN: would store this candidate as a PROPOSED (inactive) set." : `PROPOSED set #${pid} stored inactive (activation is switched off); active curve #${active.id} unchanged.`);
     return;
   }
