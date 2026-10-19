@@ -92,7 +92,8 @@ export async function getFreshnessCheck(leagueId: number): Promise<FreshnessChec
   let statsPlusCurrentGameDate: string | null = null;
   if (baseUrl) {
     try {
-      const sp = makeStatsPlusClient({ baseUrl });
+      // Token required since 2026-10-19 (/exports/ now returns 401 without credentials); must also be set in the Vercel env.
+      const sp = makeStatsPlusClient({ baseUrl, apiToken: process.env.STATSPLUS_API_TOKEN });
       statsPlusCurrentGameDate = await sp.currentGameDate();
     } catch {
       statsPlusCurrentGameDate = null; // StatsPlus unreachable -- don't fail the whole page over it

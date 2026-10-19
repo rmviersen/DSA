@@ -42,7 +42,7 @@ async function main() {
 
   const supabase = makeSupabaseClient();
   const leagueId = await getLeagueId(supabase);
-  const sp = makeStatsPlusClient({ baseUrl: process.env.STATSPLUS_BASE_URL! });
+  const sp = makeStatsPlusClient({ baseUrl: process.env.STATSPLUS_BASE_URL!, apiToken: process.env.STATSPLUS_API_TOKEN, sessionId: process.env.STATSPLUS_SESSION_ID, csrfToken: process.env.STATSPLUS_CSRF_TOKEN });
 
   console.log("Fetching current draft results (public draftv2 endpoint, no auth needed)...");
   const draftRows = await sp.draft();

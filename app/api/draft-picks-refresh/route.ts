@@ -31,7 +31,9 @@ export async function GET(req: NextRequest) {
     const leagueSlug = req.nextUrl.searchParams.get("league") ?? DEFAULT_LEAGUE_SLUG;
     const leagueId = await getLeagueId(supabase, leagueSlug);
     const draftYear = await getCurrentSeasonYear(supabase, leagueId);
-    const sp = makeStatsPlusClient({ baseUrl: process.env.STATSPLUS_BASE_URL! });
+    // StatsPlus began requiring credentials on this feed on 2026-10-19 (401 otherwise) -- the API token must also exist in the Vercel project's
+    // environment variables, not just GitHub Actions secrets.
+    const sp = makeStatsPlusClient({ baseUrl: process.env.STATSPLUS_BASE_URL!, apiToken: process.env.STATSPLUS_API_TOKEN });
 
     const draftRows = await sp.draft();
     const mapped = draftRows.map((r) => map.mapDraftPick(r, draftYear));
