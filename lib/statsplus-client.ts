@@ -122,11 +122,16 @@ function parseCsv(text: string): RawRow[] {
   return parse(trimmed, { columns: true, skip_empty_lines: true, relax_column_count: true });
 }
 
-/** Plain public endpoints — no auth, returns CSV directly. */
+/**
+ * The "public" endpoints (teams, players, contracts, stats, draft, ...). They needed no auth until 2026-10-19, when StatsPlus began answering 401
+ * ("This API requires an API token or a logged-in session") -- /exports/, /teams/ and /draftv2/ confirmed, which took the scheduled refresh down
+ * (check-new-sim failed on its first call). Credentials are therefore sent whenever configured: the API token (or the cookie fallback).
+ * Sending them to an endpoint that is still public is harmless.
+ */
 async function fetchPublicCsv(cfg: StatsPlusConfig, endpoint: string, params: Record<string, string | number> = {}): Promise<RawRow[]> {
   const qs = new URLSearchParams(Object.entries(params).map(([k, v]) => [k, String(v)])).toString();
-  const url = `${cfg.baseUrl}/${endpoint}/${qs ? `?${qs}` : ""}`;
-  const text = await fetchText(url);
+  const url = withToken(cfg, `${cfg.baseUrl}/${endpoint}/${qs ? `?${qs}` : ""}`);
+  const text = await fetchText(url, cookieHeader(cfg));
   return parseCsv(text);
 }
 
@@ -185,7 +190,8 @@ async function fetchRatingsCsv(cfg: StatsPlusConfig, opts: { pollIntervalMs?: nu
  */
 async function fetchCurrentGameDate(cfg: StatsPlusConfig): Promise<string | null> {
   await throttle();
-  const res = await fetch(`${cfg.baseUrl}/exports/`);
+  // Credentials since 2026-10-19: /exports/ started answering 401 without them (see fetchPublicCsv).
+  const res = await fetch(withToken(cfg, `${cfg.baseUrl}/exports/`), { headers: cookieHeader(cfg) });
   if (!res.ok) throw new Error(`StatsPlus /exports/ request failed: ${res.status} ${res.statusText}`);
   const body = (await res.json()) as { current_date?: string };
   return body.current_date ?? null;
