@@ -59,7 +59,7 @@ type SortKey =
   | "contactStuff" | "powerMovement" | "eyeControl" | "speedStamina"
   | "overall" | "potential" | "ab" | "ip" | "war" | "prospect_potential" | "prospect_rank"
   | "demand" | "fairValue" | "valueGap" | "sign" | "prone" | "drafted"
-  | "workEthic" | "draftValue" | "hypProspectRank";
+  | "workEthic" | "draftValue" | "hypProspectRank" | "pickRound" | "pickOverall";
 
 // r.ph is "H" for a hitter, "P" for a pitcher (null is not expected in
 // practice but falls back to the hitter side, matching every other
@@ -303,6 +303,9 @@ export function PlayerTable({ rows, showTeam, showProspectCols, showStatLevel, s
         // Available (no team) sorts first on "desc" -- reads as "best
         // available first," the natural way to scan a draft board.
         case "drafted": av = a.draftedByTeam === null ? 0 : 1; bv = b.draftedByTeam === null ? 0 : 1; break;
+        // Round / overall pick: undrafted players have none and sort last on "asc" (earliest pick first).
+        case "pickRound": av = a.livePickRound ?? 1e9; bv = b.livePickRound ?? 1e9; break;
+        case "pickOverall": av = a.livePickOverall ?? 1e9; bv = b.livePickOverall ?? 1e9; break;
         // H > N > L, matching this table's existing "higher sorts first on
         // desc" convention (same idea as prone above).
         case "workEthic": av = a.wrkethic === "H" ? 2 : a.wrkethic === "N" ? 1 : a.wrkethic === "L" ? 0 : -1; bv = b.wrkethic === "H" ? 2 : b.wrkethic === "N" ? 1 : b.wrkethic === "L" ? 0 : -1; break;
@@ -353,7 +356,7 @@ export function PlayerTable({ rows, showTeam, showProspectCols, showStatLevel, s
   // match" message just wouldn't span the real table width in those
   // cases). Bumped 13->14 on 2026-09-09 for the new always-shown
   // Durability column.
-  const colCount = 14 + (showTeam ? 1 : 0) + (showStatLevel ? 1 : 0) + (showValueVsDemand ? 3 : 0) + (showProspectCols ? 2 : 0) + (showSign ? 1 : 0) + (showDraftStatus ? 1 : 0) + (showEligiblePositions ? 1 : 0) + (showTradeBlockInfo ? 3 : 0) + (showDraftMetrics ? 3 : 0) - (hideStatColumns ? 3 : 0);
+  const colCount = 14 + (showTeam ? 1 : 0) + (showStatLevel ? 1 : 0) + (showValueVsDemand ? 3 : 0) + (showProspectCols ? 2 : 0) + (showSign ? 1 : 0) + (showDraftStatus ? 3 : 0) + (showEligiblePositions ? 1 : 0) + (showTradeBlockInfo ? 3 : 0) + (showDraftMetrics ? 3 : 0) - (hideStatColumns ? 3 : 0);
 
   return (
     // player-table-page marker (2026-09-04, Rees's ask) -- widens .site-main
@@ -648,6 +651,8 @@ export function PlayerTable({ rows, showTeam, showProspectCols, showStatLevel, s
             <tr>
               {th("Name", "name")}
               {showDraftStatus && th("Drafted By", "drafted")}
+              {showDraftStatus && th("Rd", "pickRound")}
+              {showDraftStatus && th("Pick", "pickOverall")}
               {th("Pos", "pos")}
               {th("Role", "role")}
               {showEligiblePositions && (
@@ -745,9 +750,13 @@ export function PlayerTable({ rows, showTeam, showProspectCols, showStatLevel, s
                   <a href={statsPlusPlayerUrl(r.player_id)} target="_blank" rel="noopener noreferrer" title="View on StatsPlus" style={{ marginLeft: 4, fontSize: 11, opacity: 0.7 }}>↗</a>
                 </td>
                 {showDraftStatus && (
-                  <td style={r.draftedByTeam ? { color: "var(--color-text-muted, #888)" } : { color: "rgb(34,197,94)", fontWeight: 700 }}>
-                    {r.draftedByTeam ?? "Available"}
-                  </td>
+                  <>
+                    <td title={r.draftedByTeam ?? undefined} style={r.draftedByTeam ? { color: "var(--color-text-muted, #888)" } : { color: "rgb(34,197,94)", fontWeight: 700 }}>
+                      {r.draftedByTeam ? (r.draftedByAbbr ?? r.draftedByTeam) : "Available"}
+                    </td>
+                    <td>{r.livePickRound ?? "—"}</td>
+                    <td title={r.livePickOverall != null ? `Overall pick ${r.livePickOverall}; pick ${r.livePickInRound ?? "?"} of round ${r.livePickRound ?? "?"}` : undefined}>{r.livePickOverall ?? "—"}</td>
+                  </>
                 )}
                 <td>{r.pos ?? "—"}</td>
                 <td>{r.role ?? "—"}</td>

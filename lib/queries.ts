@@ -361,6 +361,12 @@ export interface PlayerRow extends RatingsSlice {
   // public draftv2 feed directly) -- the only source that's actually correct
   // while a draft is live. Set in getTopDraftees, not fetchComputedPlayers.
   draftedByTeam: string | null;
+  // The live pick behind draftedByTeam (2026-10-20, Rees: show the short team name and the round/pick): StatsPlus team code (e.g. "OKC", the same
+  // team_batting_stats_snapshots.abbr source as team_abbr), round, and overall pick. All null for an undrafted player and everywhere but /draft.
+  draftedByAbbr: string | null;
+  livePickRound: number | null;
+  livePickInRound: number | null;
+  livePickOverall: number | null;
   // Real field positions this player clears eligibility for (2026-09-14,
   // Trade Finder's ask) -- the Lineup optimizer's own eligibility gates
   // (potential position grade, plus arm/range for SS/3B), computed and
@@ -657,6 +663,7 @@ export async function fetchComputedPlayers(opts: { leagueId: number; orgId?: num
         compSimilarity: c.comp_similarity,
         isInjured: inj.isInjured, injuryBadge: inj.badge, injuryLabel: inj.label,
         draftedByTeam: null as string | null,
+        draftedByAbbr: null as string | null, livePickRound: null as number | null, livePickInRound: null as number | null, livePickOverall: null as number | null,
         eligiblePositions: [] as string[],
         tradeBlockNote: null as string | null, contractAav: null as number | null, controlYears: null as number | null,
         draftValue: null as number | null, hypotheticalProspectRank: null as number | null,
@@ -1663,8 +1670,10 @@ export async function getTopDraftees(leagueId: number): Promise<{ draftYear: num
     // draft_year 0 = the draft IN PROGRESS: StatsPlus leaves players.draft_year at 0 until the whole draft is finalized, and the sync stores picks
     // with the player's own value (lib/draft-picks-sync.ts). Matching only the class year found none of the live picks, so every player showed
     // "Available" and the Available-only toggle hid nothing (2026-10-20). Finished drafts carry their real year, so 0 is only ever the live class.
-    .from("draft_picks").select("player_id,team_name").eq("dsa_league_id", leagueId).in("draft_year", [latest.draft_year, 0]);
-  const draftedByPlayerId = new Map<number, string>((pickRows as { player_id: number; team_name: string }[] | null ?? []).map((r) => [r.player_id, r.team_name]));
+    .from("draft_picks").select("player_id,team_name,team_id,round,pick_in_round,overall_pick").eq("dsa_league_id", leagueId).in("draft_year", [latest.draft_year, 0]);
+  type LivePick = { player_id: number; team_name: string; team_id: number | null; round: number | null; pick_in_round: number | null; overall_pick: number | null };
+  const livePickByPlayerId = new Map<number, LivePick>((pickRows as LivePick[] | null ?? []).map((r) => [r.player_id, r]));
+  const draftedByPlayerId = new Map<number, string>([...livePickByPlayerId.values()].map((r) => [r.player_id, r.team_name]));
 
   // Draft Value (2026-09-14, Rees's ask) -- a SEPARATE metric from
   // prospect_potential, built the same shape but tuned differently for
@@ -1755,11 +1764,23 @@ export async function getTopDraftees(leagueId: number): Promise<{ draftYear: num
     return count + 1;
   }
 
+  // Team codes for the "Drafted By" column -- the established source (real codes live on team_batting_stats_snapshots.abbr; newest year first so a
+  // relocated/rebranded team's CURRENT code wins, see fetchComputedPlayers).
+  const pickAbbrRows = await fetchAll<{ team_id: number; abbr: string }>((from, to) =>
+    supabase.from("team_batting_stats_snapshots").select("team_id,abbr").eq("refresh_run_id", refreshRunId).order("year", { ascending: false }).range(from, to) as never
+  );
+  const pickAbbrByTeamId = new Map<number, string>();
+  pickAbbrRows.forEach((r) => { if (!pickAbbrByTeamId.has(r.team_id)) pickAbbrByTeamId.set(r.team_id, r.abbr); });
+
   return {
     draftYear: latest.draft_year,
     rows: rows.map((r) => ({
       ...r,
       draftedByTeam: draftedByPlayerId.get(r.player_id) ?? null,
+      draftedByAbbr: (() => { const p = livePickByPlayerId.get(r.player_id); return p ? ((p.team_id != null ? pickAbbrByTeamId.get(p.team_id) : undefined) ?? p.team_name) : null; })(),
+      livePickRound: livePickByPlayerId.get(r.player_id)?.round ?? null,
+      livePickInRound: livePickByPlayerId.get(r.player_id)?.pick_in_round ?? null,
+      livePickOverall: livePickByPlayerId.get(r.player_id)?.overall_pick ?? null,
       draftValue: computeDraftValue(r),
       hypotheticalProspectRank: hypotheticalProspectRank(r.prospect_potential),
     })),
