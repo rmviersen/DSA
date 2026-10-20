@@ -4,6 +4,7 @@ import { makeStatsPlusClient } from "../lib/statsplus-client.js";
 import { makeSupabaseClient } from "../lib/supabase-client.js";
 import { getLeagueId } from "../lib/league.js";
 import * as map from "../lib/mappers.js";
+import { syncDraftPicks } from "../lib/draft-picks-sync.js";
 
 const BATCH_SIZE = 500;
 const MAX_ATTEMPTS = 3;
@@ -224,24 +225,9 @@ async function main() {
     }
 
     console.log("Pulling draft results...");
-    {
-      const draftRows = await sp.draft();
-      // draft_year resolved from players.draft_year (2026-08-30 fix) --
-      // NOT derived from the pick's own "Time (UTC)" field, which is a
-      // real-world capture timestamp, not the in-game draft year (see
-      // mapDraftPick's comment). players was just upserted above in this
-      // same run, so this reads back the fresh values, not stale ones.
-      const draftPlayerIds = draftRows.map((r) => Number(r["ID"])).filter((id) => Number.isFinite(id));
-      const draftYearByPlayerId = new Map<number, number | null>();
-      for (let i = 0; i < draftPlayerIds.length; i += BATCH_SIZE) {
-        const chunk = draftPlayerIds.slice(i, i + BATCH_SIZE);
-        const { data, error } = await supabase.from("players").select("id,draft_year").eq("dsa_league_id", leagueId).in("id", chunk);
-        if (error) throw new Error(`players lookup for draft_picks failed: ${error.message}`);
-        (data as { id: number; draft_year: number | null }[]).forEach((p) => draftYearByPlayerId.set(p.id, p.draft_year));
-      }
-      const mapped = draftRows.map((r) => map.mapDraftPick(r, draftYearByPlayerId.get(Number(r["ID"])) ?? null));
-      await upsertBatched(supabase, "draft_picks", mapped, "dsa_league_id,player_id", leagueId);
-    }
+    // Shared with the draft board's auto-refresh route (lib/draft-picks-sync.ts): draft_year is resolved from players.draft_year (2026-08-30 fix,
+    // NOT from the pick's own real-world timestamp), and players was just upserted above, so this reads back the fresh values.
+    await withRetry("draft_picks sync", () => syncDraftPicks(supabase, sp, leagueId));
 
     for (const year of years) {
       for (const lid of LEAGUE_IDS) {

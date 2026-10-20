@@ -1660,7 +1660,10 @@ export async function getTopDraftees(leagueId: number): Promise<{ draftYear: num
   // hundred, not thousands), so fetching all of them for this draft_year and
   // matching in JS is simpler and just as cheap.
   const { data: pickRows } = await supabase
-    .from("draft_picks").select("player_id,team_name").eq("dsa_league_id", leagueId).eq("draft_year", latest.draft_year);
+    // draft_year 0 = the draft IN PROGRESS: StatsPlus leaves players.draft_year at 0 until the whole draft is finalized, and the sync stores picks
+    // with the player's own value (lib/draft-picks-sync.ts). Matching only the class year found none of the live picks, so every player showed
+    // "Available" and the Available-only toggle hid nothing (2026-10-20). Finished drafts carry their real year, so 0 is only ever the live class.
+    .from("draft_picks").select("player_id,team_name").eq("dsa_league_id", leagueId).in("draft_year", [latest.draft_year, 0]);
   const draftedByPlayerId = new Map<number, string>((pickRows as { player_id: number; team_name: string }[] | null ?? []).map((r) => [r.player_id, r.team_name]));
 
   // Draft Value (2026-09-14, Rees's ask) -- a SEPARATE metric from

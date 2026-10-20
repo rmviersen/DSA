@@ -63,7 +63,8 @@ async function fetchText(url: string, headers: Record<string, string> = {}): Pro
       continue;
     }
     if (!res.ok) {
-      throw new Error(`StatsPlus request failed: ${res.status} ${res.statusText} — ${url}`);
+      // Never echo the API token (it travels as ?token=...) into logs or the draft page's "Check failed" text.
+      throw new Error(`StatsPlus request failed: ${res.status} ${res.statusText} — ${url.replace(/([?&]token=)[^&]*/i, "$1***")}`);
     }
     return res.text();
   }
