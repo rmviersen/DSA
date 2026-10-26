@@ -165,8 +165,8 @@ async function loadSharedContext(supabase: ReturnType<typeof makeSupabaseClient>
   // ~0.1pt (caught 2026-08-24 while verifying the Ks blend fix -- a
   // hand-computed split via direct SQL didn't match player_computed's
   // actual batting values until this was added).
-  const players = await fetchAll<{ id: number; organization_id: number | null; mlb_service_days: number | null; last_team_id: number | null; level: number | null; is_active: boolean | null; league_id: number | null; age: number | null; date_of_birth: string | null }>((from, to) =>
-    supabase.from("players").select("id, organization_id, mlb_service_days, last_team_id, level, is_active, league_id, age, date_of_birth").eq("dsa_league_id", leagueId).order("id").range(from, to) as never
+  const players = await fetchAll<{ id: number; organization_id: number | null; mlb_service_days: number | null; last_team_id: number | null; level: number | null; is_active: boolean | null; league_id: number | null; age: number | null; date_of_birth: string | null; pos: number | null }>((from, to) =>
+    supabase.from("players").select("id, organization_id, mlb_service_days, last_team_id, level, is_active, league_id, age, date_of_birth, pos").eq("dsa_league_id", leagueId).order("id").range(from, to) as never
   );
   const playerById = new Map(players.map((p) => [p.id, p]));
   console.log(`  ${players.length} players`);
@@ -414,7 +414,9 @@ async function computeRatingsForRun(supabase: ReturnType<typeof makeSupabaseClie
   const firstPass = ratings.map((r) => computeOne(r));
   const phLabel = classifyHitterPitcher(firstPass.map((c, i) => {
     const r = ratings[i], pl = playerById.get(r.player_id);
-    return { id: r.player_id, listedPitcher: r.pos === "SP" || r.pos === "RP" || r.pos === "CL", level: effectiveLevel(pl?.level, pl?.league_id, leagueId), batting: c.batting, pitching: c.pitching };
+    // The snapshot's own listed position; the earliest runs recorded none (run 3: every pos null), so fall back to the player's current listed position (1 = pitcher).
+    const listedPitcher = r.pos != null ? (r.pos === "SP" || r.pos === "RP" || r.pos === "CL") : pl?.pos === 1;
+    return { id: r.player_id, listedPitcher, level: effectiveLevel(pl?.level, pl?.league_id, leagueId), batting: c.batting, pitching: c.pitching };
   }));
   const computed = ratings.map((r) => computeOne(r, phLabel.get(r.player_id)));
   {
