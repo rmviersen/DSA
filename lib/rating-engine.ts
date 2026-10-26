@@ -386,7 +386,11 @@ export function computeRatings(
   fieldingWeights?: Record<string, number>,
   // Age-aware Potential curve (potential_realization_* tables; lib/potential-realization.ts). Optional and OFF when absent: callers that
   // don't pass one -- and any run with no active curve -- get exactly the Potential they always did.
-  realization?: RealizationCurve | null
+  realization?: RealizationCurve | null,
+  // Hitter/pitcher label decided OUTSIDE the engine against peers (lib/hitter-pitcher-classification.ts; 2026-10-26). Optional and OFF when
+  // absent: callers that don't pass one keep the legacy rule (hitting composite > pitching composite => "H", Overall/Potential = max of the two).
+  // When given, the label drives which composite becomes Overall/Potential, the role (SP/RP vs a position role) and everything downstream.
+  phOverride?: "H" | "P"
 ): ComputedRatings {
   // Computed early (before Batting) so the catcher batting multiplier below
   // can gate on it -- deliberately mirrors the Role priority-1 "C" branch
@@ -670,6 +674,8 @@ export function computeRatings(
   // to decide the Pitching formula's starter bonus). This is a display label,
   // not a formula input.
   const sp_rp: string =
+    phOverride === "P" ? (isRoleRP ? "RP" : "SP") :
+    phOverride === "H" ? "" :
     battingP > pitchingP ? "" :
     isRoleRP ? "RP" : "SP";
 
@@ -721,7 +727,7 @@ export function computeRatings(
   // belongs, not force-fit into an infield role his potential doesn't
   // actually support at any specific spot there.
   let role: string;
-  if (r.pos === "SP" || r.pos === "RP" || r.pos === "CL") {
+  if (phOverride ? phOverride === "P" : (r.pos === "SP" || r.pos === "RP" || r.pos === "CL")) {
     role = sp_rp;
   } else if (isCatcherRole) {
     role = "C";
@@ -773,9 +779,11 @@ export function computeRatings(
   // Batting's own top-level blend weight (2026-09-02) -- previously
   // implicit 1 (nothing multiplied it) here, now explicit and parallel to
   // Fielding/Baserunning's, per scripts/compute-overall-blend-weights.ts.
-  const overall = Math.max(batting * w.batting + fielding * fieldingWeight + baserunning * w.baserunning, pitching);
-  const potentialUnadjusted = Math.max(battingP * w.batting + fielding * fieldingWeight + baserunning * w.baserunning, pitchingP);
-  const ph: "H" | "P" = batting * w.batting + fielding * fieldingWeight + baserunning * w.baserunning > pitching ? "H" : "P";
+  const hitterComposite = batting * w.batting + fielding * fieldingWeight + baserunning * w.baserunning;
+  const hitterCompositeP = battingP * w.batting + fielding * fieldingWeight + baserunning * w.baserunning;
+  const overall = phOverride === "P" ? pitching : phOverride === "H" ? hitterComposite : Math.max(hitterComposite, pitching);
+  const potentialUnadjusted = phOverride === "P" ? pitchingP : phOverride === "H" ? hitterCompositeP : Math.max(hitterCompositeP, pitchingP);
+  const ph: "H" | "P" = phOverride ?? (hitterComposite > pitching ? "H" : "P");
 
   // Age-aware Potential (2026-10-15, Rees: players stop progressing at certain ages, so Potential overrates 24+ players). Potential is a
   // CEILING; the share of the gap between current ability and that ceiling that is ever reached depends on how much development time is

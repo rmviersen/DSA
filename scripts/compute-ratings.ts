@@ -2,6 +2,7 @@ import "dotenv/config";
 import { makeSupabaseClient } from "../lib/supabase-client.js";
 import { computeRatings, type RatingsInput, type WeightSet, type HandednessSplits } from "../lib/rating-engine.js";
 import { effectiveLevel } from "../lib/display-helpers.js";
+import { classifyHitterPitcher } from "../lib/hitter-pitcher-classification.js";
 import { getLeagueId, leagueSlugFromArgv } from "../lib/league.js";
 import { readFileSync, writeFileSync } from "node:fs";
 import type { RealizationCurve } from "../lib/potential-realization.js";
@@ -395,16 +396,32 @@ async function computeRatingsForRun(supabase: ReturnType<typeof makeSupabaseClie
 
   console.log("Computing core ratings...");
   const capturedAt = new Date().toISOString();
-  const computed = ratings.map((r) => {
+  const computeOne = (r: (typeof ratings)[number], phOverride?: "H" | "P") => {
     // age lives on `players`, not `player_ratings_snapshots` -- merged in
     // here for the age-gated Contact/Control floor gates (2026-08-27).
     const age = playerById.get(r.player_id)?.age ?? null;
     // Exact age on this run's game date (decimal years) for the age-aware Potential factor; null when either date is missing.
     const dob = playerById.get(r.player_id)?.date_of_birth ?? null;
     const ageYears = dob && gameDate ? (Date.parse(gameDate) - Date.parse(dob)) / (365.25 * 86400000) : null;
-    const c = computeRatings({ ...r, age, age_years: ageYears }, weights, splits, fieldingWeights, realization);
+    const c = computeRatings({ ...r, age, age_years: ageYears }, weights, splits, fieldingWeights, realization, phOverride);
     return { player_id: r.player_id, ...c };
-  });
+  };
+  // Two passes (2026-10-26): pass 1 computes every player's hitting and pitching composites exactly as before; the hitter/pitcher LABEL is then
+  // decided against peers at the same level (lib/hitter-pitcher-classification.ts -- listed position is the default, overridden only when the
+  // other side is clearly stronger relative to peers, so true two-way players and converts are handled both ways); pass 2 recomputes everyone
+  // with that label, which selects Overall/Potential, the role and everything downstream. Replaces the old rule that made ~2,900 low-level
+  // pitchers "hitters" because the hitting composite carries a fielding/baserunning floor.
+  const firstPass = ratings.map((r) => computeOne(r));
+  const phLabel = classifyHitterPitcher(firstPass.map((c, i) => {
+    const r = ratings[i], pl = playerById.get(r.player_id);
+    return { id: r.player_id, listedPitcher: r.pos === "SP" || r.pos === "RP" || r.pos === "CL", level: effectiveLevel(pl?.level, pl?.league_id, leagueId), batting: c.batting, pitching: c.pitching };
+  }));
+  const computed = ratings.map((r) => computeOne(r, phLabel.get(r.player_id)));
+  {
+    let hToP = 0, pToH = 0;
+    firstPass.forEach((c, i) => { const now = phLabel.get(c.player_id); if (now && now !== c.ph) { if (now === "P") hToP++; else pToH++; } });
+    console.log(`Hitter/pitcher classification (peer-relative): ${hToP} players relabelled hitter->pitcher, ${pToH} pitcher->hitter vs the old composite rule.`);
+  }
   if (realization) {
     const adjusted = computed.filter((c) => c.realization_share < 0.999);
     const removed = adjusted.reduce((sum, c) => sum + (c.potential_unadjusted - c.potential), 0);

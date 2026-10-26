@@ -488,11 +488,21 @@ export default async function GlossaryPage({ params }: { params: Promise<{ leagu
       <section style={{ marginBottom: "2.5rem" }}>
         <h2 style={sectionTitleStyle}>Overall, Potential &amp; Hitter/Pitcher (PH)</h2>
         <code style={formulaStyle}>
-          Overall = max(Batting×batting + Fielding×fielding_weight + Baserunning×baserunning, Pitching){"\n"}
-          PotentialRaw = max(Batting Potential×batting + Fielding×fielding_weight + Baserunning×baserunning, Pitching Potential){"\n"}
+          HitterComposite = Batting×batting + Fielding×fielding_weight + Baserunning×baserunning{"\n"}
+          Overall = HitterComposite if PH = &quot;H&quot;, else Pitching{"\n"}
+          PotentialRaw = same with Batting Potential / Pitching Potential{"\n"}
           Potential = Overall + R(age, PH) × max(0, PotentialRaw − Overall){"\n"}
-          PH = &quot;H&quot; if (Batting×batting + Fielding×fielding_weight + Baserunning×baserunning) &gt; Pitching, else &quot;P&quot;
+          PH = peer-relative label (below), not &quot;whichever composite is bigger&quot;
         </code>
+        <p style={bodyTextStyle}>
+          <strong>Hitter or pitcher (PH).</strong> A hitting composite and a pitching composite aren&apos;t on the same
+          scale — the hitting one carries a fielding/baserunning floor — so comparing them directly mislabelled thousands
+          of low-level pitchers as hitters. Instead each player&apos;s hitting is measured against listed hitters at his
+          level and his pitching against listed pitchers at his level. His listed position is the default; he only gets
+          the other label if he is more than one standard deviation better on that side relative to peers. That keeps
+          true two-way players and position converts honest in both directions: a listed pitcher who is clearly the better
+          hitter is a hitter (with a hitter role), and a position player who is clearly the better pitcher is a pitcher.
+        </p>
         <p style={noteStyle}>
           <code>fielding_weight</code> = <code>fielding</code> × a per-Role calibrated multiplier (currently 1.0 for
           every role — the role-calibration table is retired but wired in as a harmless no-op).
