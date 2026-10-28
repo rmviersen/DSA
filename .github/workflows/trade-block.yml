@@ -1,0 +1,48 @@
+name: Trade block snapshot
+
+# Hourly trade block re-scrape (2026-10-27, Rees: "is our trade block updated? I see players listed but not on the screen").
+# The trade block changes whenever a GM lists or pulls a player, not when a sim advances, but scrape-trade-block.ts used to run
+# only as a side task of the sim refresh -- so /trade-finder could lag the live StatsPlus list by days (69 listed vs 53 shown).
+# This runs the very same script on its own clock. It is one cheap page fetch (a single StatsPlus website page, not per player),
+# kept to once an hour because StatsPlus rate-limits its website pages hard. Minute :20 so it never lands on the refresh
+# workflow's :00/:30 ticks.
+#
+# The script tags each snapshot with the newest refresh run and upserts on (refresh_run_id, player_id), so re-running between
+# sims just refreshes that run's rows; readers (fetchTradeBlockRows) take only the newest captured_at, so players pulled from
+# the block since the last scrape drop off the page automatically.
+#
+# Needs the StatsPlus WEBSITE session cookies (the same two secrets as the refresh workflow). When they expire this goes red
+# with an explicit "cookies were refused" message -- same fix as for the refresh's scrape side tasks (see HANDOFF.md).
+on:
+  schedule:
+    - cron: "20 * * * *"
+  workflow_dispatch:
+
+# Never two scrapes at once (a manual run during a scheduled one would just double the page load on StatsPlus).
+concurrency:
+  group: trade-block
+  cancel-in-progress: false
+
+jobs:
+  scrape:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          # 22 for the same reason as refresh.yml: supabase-js needs a native global WebSocket.
+          node-version: 22
+          cache: npm
+
+      - run: npm ci
+
+      - name: Scrape the trade block
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+          STATSPLUS_BASE_URL: https://atl-02.statsplus.net/thebigleague/api
+          STATSPLUS_SESSION_ID: ${{ secrets.STATSPLUS_SESSION_ID }}
+          STATSPLUS_CSRF_TOKEN: ${{ secrets.STATSPLUS_CSRF_TOKEN }}
+        run: npx tsx scripts/scrape-trade-block.ts
