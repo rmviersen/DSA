@@ -1,8 +1,9 @@
-import { getPositionSlots, getTradeBlockMatches, getBroaderTargets, getTradeBlockMeta } from "@/lib/trade-finder-query";
+import { getPositionSlots, getTradeBlockMatches, getBroaderTargets, getTradeBlockMeta, getTradeBlockCapturedAt } from "@/lib/trade-finder-query";
 import { fetchComputedPlayers } from "@/lib/queries";
 import { resolveLeagueId, resolveDefaultOrgId } from "@/lib/league";
 import NeedCards from "./NeedCards";
 import { PlayerTable } from "../../_components/PlayerTable";
+import { WorkflowButton } from "../../_components/WorkflowButton";
 
 export const dynamic = "force-dynamic";
 
@@ -39,10 +40,11 @@ export default async function TradeFinderPage({
   const orgId = search.org ? Number(search.org) : await resolveDefaultOrgId(leagueId);
 
   const needs = await getPositionSlots(leagueId, orgId);
-  const [blockMatches, broaderMatches, blockMetaById] = await Promise.all([
+  const [blockMatches, broaderMatches, blockMetaById, blockCapturedAt] = await Promise.all([
     getTradeBlockMatches(leagueId, orgId, needs),
     getBroaderTargets(leagueId, orgId, needs),
     getTradeBlockMeta(leagueId),
+    getTradeBlockCapturedAt(leagueId),
   ]);
 
   // Full trade-block table (2026-09-14, Rees's ask, plus same-day follow-ups
@@ -81,6 +83,8 @@ export default async function TradeFinderPage({
           context, but every position with a real upgrade shows up here now, not just the weak ones.
         </p>
       </header>
+      {/* 2026-10-30: GitHub's cron only re-scrapes the block every few hours, so this starts the scrape on demand (~30 s) and reloads the page. */}
+      <WorkflowButton workflow="trade-block" label="Refresh trade block" lastUpdatedIso={blockCapturedAt} lastUpdatedLabel="Trade block last scraped" maxWaitSec={240} />
       <NeedCards needs={needs} blockMatches={blockMatches} broaderMatches={broaderMatches} />
 
       <h2 style={{ marginTop: 24 }}>Full Trade Block ({fullBlockRows.length})</h2>

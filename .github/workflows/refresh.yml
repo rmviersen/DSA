@@ -23,6 +23,13 @@ on:
         description: "Why this run was triggered (informational only)"
         required: false
         default: "manual trigger"
+      # The admin page's "Check for new sim & refresh" button sets this (2026-10-30): the run then behaves like a scheduled tick (only pulls when
+      # StatsPlus's game date is ahead of ours). Left false by default, so "Run workflow" from the Actions tab still forces a full refresh.
+      only_if_new:
+        description: "Only refresh if a new sim is waiting (skip the forced run)"
+        required: false
+        type: boolean
+        default: false
 
 jobs:
   refresh:
@@ -78,7 +85,7 @@ jobs:
       # through its own internal chain.
       - name: Refresh from StatsPlus
         id: refresh
-        if: steps.check.outputs.new_data == 'true' || github.event_name == 'workflow_dispatch'
+        if: steps.check.outputs.new_data == 'true' || (github.event_name == 'workflow_dispatch' && !inputs.only_if_new)
         env:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}

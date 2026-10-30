@@ -688,6 +688,15 @@ export interface TradeBlockPlayerMeta {
   yearsOfControl: number | null;
 }
 
+// When the trade block was last scraped (the newest captured_at, which every row of one scrape shares) -- shown next to the page's Refresh
+// button (2026-10-30) so "is this current?" can be answered at a glance.
+export async function getTradeBlockCapturedAt(leagueId: number): Promise<string | null> {
+  const { data, error } = await supabase
+    .from("trade_block_snapshots").select("captured_at").eq("dsa_league_id", leagueId).order("captured_at", { ascending: false }).limit(1).maybeSingle();
+  if (error) throw error;
+  return (data as { captured_at: string } | null)?.captured_at ?? null;
+}
+
 // One call gives the page everything it needs to build the full table
 // beyond what fetchComputedPlayers already covers: which player ids are on
 // the block (map keys, for fetchComputedPlayers itself), each one's real

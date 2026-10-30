@@ -1,6 +1,9 @@
 name: Trade block snapshot
 
-# Hourly trade block re-scrape (2026-10-27, Rees: "is our trade block updated? I see players listed but not on the screen").
+# Trade block re-scrape on a cron (2026-10-27, Rees: "is our trade block updated? I see players listed but not on the screen").
+# CORRECTION (2026-10-30): the cron below is best-effort only -- GitHub was measured running it every 4-6 hours, not hourly, and the refresh
+# workflow's "every 30 minutes" the same way. The site's "Refresh trade block" button (/trade-finder, via /api/dispatch-workflow) starts this
+# same workflow on demand, which is what actually keeps the page current.
 # The trade block changes whenever a GM lists or pulls a player, not when a sim advances, but scrape-trade-block.ts used to run
 # only as a side task of the sim refresh -- so /trade-finder could lag the live StatsPlus list by days (69 listed vs 53 shown).
 # This runs the very same script on its own clock. It is one cheap page fetch (a single StatsPlus website page, not per player),

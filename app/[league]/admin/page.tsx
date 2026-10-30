@@ -1,5 +1,6 @@
 import { getRecentRefreshRuns, getFreshnessCheck, getRecentPlatformEvents } from "../../../lib/admin-queries";
 import { resolveLeagueId } from "../../../lib/league";
+import { WorkflowButton } from "../../_components/WorkflowButton";
 
 export const dynamic = "force-dynamic";
 
@@ -102,6 +103,11 @@ export default async function AdminPage({ params }: { params: Promise<{ league: 
             </div>
           </div>
         </div>
+
+        {/* 2026-10-30: GitHub's scheduler runs the 30-minute refresh only every few hours in practice. This starts the real refresh workflow
+            now, but only does the full pull if StatsPlus's game date is ahead of ours (otherwise it stops after the ~30 s check). A forced
+            run is still available from the repo's Actions tab ("Run workflow" with "only if new" unticked). */}
+        <WorkflowButton workflow="refresh" label="Check for new sim & refresh" lastUpdatedIso={latestRun?.started_at ?? null} lastUpdatedLabel="Last refresh started" maxWaitSec={1500} />
 
         <h3 style={{ ...sectionTitleStyle, fontSize: "1rem", marginTop: "1.5rem" }}>Recent refresh runs</h3>
         <div className="table-wrap">
